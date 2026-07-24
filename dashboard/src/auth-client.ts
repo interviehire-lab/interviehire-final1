@@ -15,7 +15,14 @@ const LS_TOKEN = 'IntervieHire_auth_token';
 // configured value into the browser bundle. A `typeof process` guard here gets
 // dead-code-eliminated in the client build (process is undefined in the browser),
 // which silently dropped the configured URL and fell back to localhost in prod.
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+function resolveApiBase(): string {
+  let base = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api').trim().replace(/\/+$/, '');
+  if (base && /^https?:\/\//i.test(base) && !base.endsWith('/api')) {
+    base += '/api';
+  }
+  return base;
+}
+export const API_BASE = resolveApiBase();
 
 function setAuthed(v: unknown) { try { v ? localStorage.setItem(LS_TOKEN, '1') : localStorage.removeItem(LS_TOKEN); } catch {} }
 export const isAuthed = () => { try { return localStorage.getItem(LS_TOKEN) === '1'; } catch { return false; } };
