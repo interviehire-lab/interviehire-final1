@@ -17,20 +17,20 @@ class Settings(BaseSettings):
     APP_NAME: str = "Hiring Dashboard"
  
     # CORS — the recruiter dashboard origin
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URL: str = "https://interviehire.com"
 
     # The candidate interview room BASE URL (the engine web app). The link is
     # built as `{INTERVIEW_ROOM_URL}/interview?sessionId=…`, so this is the origin
     # only. The emailed calendar invite's "Enter Interview Room" link points here,
     # so it opens the SAME AI interview room that "Run test interview" uses.
     # Local: :3001.  Production: https://interviehire.com  (→ .../interview)
-    INTERVIEW_ROOM_URL: str = "http://localhost:3001"
+    INTERVIEW_ROOM_URL: str = "https://interview.interviehire.com"
 
     # Per-candidate unique interview invite links (`/i/{token}`).
     # INVITE_LINK_BASE is the origin that serves `GET /i/{token}` — this backend,
     # or whatever host/rewrite is put in front of it (e.g. app.interviehire.com/i/*
     # rewritten to the backend). The emailed link is `{INVITE_LINK_BASE}/i/{token}`.
-    INVITE_LINK_BASE: str = "http://localhost:8000"
+    INVITE_LINK_BASE: str = "https://interviehire-backend-production-ca93.up.railway.app"
     # Dedicated transactional sender for interview invites — isolated from the
     # recruiting/cold-email From so it never touches that reputation pool.
     INVITE_FROM_EMAIL: str = "interviews@interviehire.com"
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REFRESH_TOKEN: str | None = None
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/public/oauth2callback"
+    GOOGLE_REDIRECT_URI: str = "https://interviehire-backend-production-ca93.up.railway.app/api/public/oauth2callback"
     ORGANIZER_CALENDAR_ID: str = "primary"
     GOOGLE_DRIVE_FOLDER_NAME: str = "Recordings"
     WEBHOOK_SECRET: str = "super-secret-webhook-key"

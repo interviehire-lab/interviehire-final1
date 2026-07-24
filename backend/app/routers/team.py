@@ -76,7 +76,7 @@ def invite_member(
     try:
         org = db.query(Organisation).filter(Organisation.id == org_id).first()
         org_name = org.org_name if org else None
-        frontend = (settings.FRONTEND_URL or "").split(",")[0].strip().rstrip("/") or "http://localhost:3000"
+        frontend = (settings.FRONTEND_URL or "").split(",")[0].strip().rstrip("/") or "https://interviehire.com"
         accept_link = (
             f"{frontend}/signup?email={quote(new_user.email)}"
             f"&name={quote(new_user.name or '')}&invited=1"
