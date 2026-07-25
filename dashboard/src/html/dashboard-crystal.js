@@ -867,6 +867,10 @@ export const html = `
                   <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
                   Overview
                 </button>
+                <button class="jd-tab" data-jd-tab="apply">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                  Apply Link
+                </button>
                 <button class="jd-tab" data-jd-tab="resume">
                   <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
                   Resume Analysis
@@ -998,12 +1002,14 @@ export const html = `
 
                 </div>
 
-                <!-- Apply link / share panel (filled by renderApplyShare) -->
-                <div class="card-glass" id="jd-apply-share" style="margin-top:16px;"></div>
-
-                <!-- Per-job application questions editor (filled by renderJobApplicationQuestions) -->
-                <div class="card-glass" id="jd-apply-questions" style="margin-top:16px;"></div>
               </div><!-- /overview -->
+
+              <!-- Apply Link pane — public apply link, QR, embed & deadline (renderApplyShare)
+                   plus the per-job custom application questions (renderJobApplicationQuestions) -->
+              <div class="jd-pane" id="jd-pane-apply">
+                <div class="card-glass" id="jd-apply-share"></div>
+                <div class="card-glass" id="jd-apply-questions" style="margin-top:16px;"></div>
+              </div>
 
               <!-- Stage panes -->
               <div class="jd-pane" id="jd-pane-resume">

@@ -11,6 +11,7 @@
  *   tab id      slug (route folder)
  *   ────────    ──────────────────────
  *   overview    (base — no slug; /dashboard/jobs/<id>)
+ *   apply       apply-link
  *   resume      resume-analysis
  *   screening   recruiter-screening
  *   functional  functional-interview
@@ -22,6 +23,7 @@
 
 // slug → internal tab id
 export const STAGE_SLUG_TO_TAB = {
+  'apply-link': 'apply',
   'resume-analysis': 'resume',
   'recruiter-screening': 'screening',
   'functional-interview': 'functional',
