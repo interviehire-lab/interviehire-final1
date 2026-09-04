@@ -40,10 +40,12 @@ const nextConfig = {
   // explicitly in only the two server routes that parse PDFs.
   outputFileTracingIncludes: {
     '/api/parse-file': [
+      './node_modules/pdf-parse/**/*',
       './node_modules/@napi-rs/canvas/**/*',
       './node_modules/@napi-rs/canvas-linux-x64-gnu/**/*',
     ],
     '/api/fetch-doc': [
+      './node_modules/pdf-parse/**/*',
       './node_modules/@napi-rs/canvas/**/*',
       './node_modules/@napi-rs/canvas-linux-x64-gnu/**/*',
     ],
