@@ -34,18 +34,25 @@ const nextConfig = {
   // Next.js otherwise rejects cross-origin development asset requests when the
   // page and dev server use different loopback hostnames.
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
-  serverExternalPackages: ['@napi-rs/canvas', 'pdf-parse'],
+  // pdfjs-dist must stay external too: its legacy worker build has top-level code
+  // written for a browser/worker global scope, and webpack's RSC bundler chokes on
+  // it if forced to trace/transform it directly ("Object.defineProperty called on
+  // non-object" from __webpack_require__.r). Keeping it external means Node loads
+  // the file as-is at runtime instead of webpack rewriting it.
+  serverExternalPackages: ['@napi-rs/canvas', 'pdf-parse', 'pdfjs-dist'],
   // pdf-parse loads canvas from inside an externalized dependency, which Vercel's
   // automatic file trace does not see. Include the Node wrapper and Linux binary
   // explicitly in only the two server routes that parse PDFs.
   outputFileTracingIncludes: {
     '/api/parse-file': [
       './node_modules/pdf-parse/**/*',
+      './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
       './node_modules/@napi-rs/canvas/**/*',
       './node_modules/@napi-rs/canvas-linux-x64-gnu/**/*',
     ],
     '/api/fetch-doc': [
       './node_modules/pdf-parse/**/*',
+      './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
       './node_modules/@napi-rs/canvas/**/*',
       './node_modules/@napi-rs/canvas-linux-x64-gnu/**/*',
     ],
