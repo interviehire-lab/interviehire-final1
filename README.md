@@ -34,7 +34,50 @@ The dashboard, engine, and backend integrate through a **shared Supabase databas
 
 Scoring uses the **Aviral evaluation engine** (`interview-engine/apps/api/src/aviral-eval/`): for each answer it builds a rubric-grounded prompt, asks DeepSeek to grade it, validates the result, and aggregates a canonical `CandidateReport` (overall score, recommendation, per-dimension skill scores, per-question breakdown, red flags). Without a `DEEPSEEK_API_KEY` it falls back to a deterministic evaluator, so an interview still runs and scores with **zero API keys**.
 
-## Quick start
+## Start the complete stack
+
+The root scripts use the same ports in both modes:
+
+| Service | URL |
+|---|---|
+| Recruiter dashboard | `http://localhost:3000` |
+| Candidate interview room | `http://localhost:3001` |
+| Interview API | `http://localhost:4000/health` |
+| FastAPI backend | `http://localhost:8000` |
+
+For native development, application services run on the host with hot reload;
+Postgres and Redis run in Docker. The first start installs missing dependencies,
+applies Prisma migrations, and writes process logs under `.runtime/logs/`.
+
+```bash
+./scripts/start-local.sh
+./scripts/stop-local.sh
+```
+
+To build and run every service in Docker, including the dashboard and FastAPI:
+
+```bash
+./scripts/start-containers.sh
+./scripts/logs-containers.sh       # optional: follow logs
+./scripts/stop-containers.sh
+```
+
+The complete container topology is defined in the root [`compose.yml`](compose.yml).
+
+Ports can be overridden for either mode, for example:
+
+```bash
+POSTGRES_PORT=5433 DASHBOARD_PORT=3100 ./scripts/start-containers.sh
+```
+
+Native mode always uses its local Postgres by default. Set `LOCAL_DATABASE_URL`
+only when you intentionally want native services to use a different database.
+
+Stopping containers retains the Postgres and backend-upload volumes. To use API
+keys or SMTP locally, create `backend/.env` and/or `interview-engine/.env` from
+their examples; checked-in development defaults work without paid API keys.
+
+## Manual quick start
 
 Each component has its own `.env.example` — copy it to `.env` (or `.env.local` for the dashboard) and fill in the values. The three services share one Supabase database.
 

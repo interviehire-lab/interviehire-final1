@@ -21,6 +21,8 @@ import pytest
 # Make the backend package importable no matter where pytest is invoked from.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.models.data_subject_request import DSARScope, DSARStatus, DSARType
+
 TEST_DB = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
     not TEST_DB, reason="set TEST_DATABASE_URL to a disposable Postgres to run these"
@@ -41,9 +43,7 @@ if TEST_DB:
         Company, Candidate, JobRole, InterviewSession, ProctoringLog, ConsentLog, Severity,
     )
     from app.models.compliance_audit_log import ComplianceAuditLog
-    from app.models.data_subject_request import (
-        DataSubjectRequest, DSARType, DSARStatus, DSARScope,
-    )
+    from app.models.data_subject_request import DataSubjectRequest
     from app.utils import data_rights, data_export
 
     _engine = create_engine(TEST_DB)

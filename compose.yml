@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: interviehire
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d interviehire"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    ports: ["${REDIS_PORT:-6379}:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  api:
+    build:
+      context: ./interview-engine
+      dockerfile: Dockerfile
+      target: api
+    env_file:
+      - path: ./interview-engine/.env
+        required: false
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/interviehire?schema=public
+      - REDIS_URL=redis://redis:6379
+    command: ["sh", "-c", "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && npm run start -w apps/api"]
+    ports: ["${ENGINE_API_PORT:-4000}:4000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/interviehire
+      - SECRET_KEY=${BACKEND_SECRET_KEY:-local-development-secret-change-me}
+      - FRONTEND_URL=http://localhost:${DASHBOARD_PORT:-3000}
+      - INTERVIEW_ROOM_URL=http://localhost:${CANDIDATE_PORT:-3001}
+      - ENGINE_API_URL=http://api:4000
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-local-development-internal-secret}
+      - COOKIE_SAMESITE=lax
+      - COOKIE_SECURE=false
+    ports: ["${BACKEND_PORT:-8000}:8000"]
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+  web:
+    build:
+      context: ./interview-engine
+      dockerfile: Dockerfile
+      target: web
+      args:
+        NEXT_PUBLIC_API_URL: ${ENGINE_PUBLIC_URL:-http://localhost:4000}
+        NEXT_PUBLIC_WS_URL: ${ENGINE_WS_PUBLIC_URL:-ws://localhost:4000/ws}
+    env_file:
+      - path: ./interview-engine/.env
+        required: false
+    ports: ["${CANDIDATE_PORT:-3001}:3001"]
+    depends_on:
+      api:
+        condition: service_healthy
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api
+        BACKEND_ORIGIN: http://backend:8000
+    environment:
+      - BACKEND_ORIGIN=http://backend:8000
+      - NEXT_PUBLIC_API_URL=/api
+    ports: ["${DASHBOARD_PORT:-3000}:3000"]
+    depends_on:
+      backend:
+        condition: service_healthy
+volumes:
+  postgres_data:
+  backend_uploads:

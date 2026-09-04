@@ -27,6 +27,10 @@ const BACKEND_API_PREFIXES = [
 const ROOM_ORIGIN = 'https://interview.interviehire.com';
 
 const nextConfig = {
+  // Permit the local dashboard to be opened through either loopback hostname.
+  // Next.js otherwise rejects cross-origin development asset requests when the
+  // page and dev server use different loopback hostnames.
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   serverExternalPackages: ['@napi-rs/canvas'],
   // Incremental JS -> TS migration: the dashboard's ESM modules import each other
   // with explicit `.js` extensions (e.g. `from './escape.js'`). As we rename files

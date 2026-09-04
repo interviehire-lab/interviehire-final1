@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# push-and-merge.sh — safely commit the "Apply" feature (LF-normalized),
+# legacy/push-and-merge.sh — safely commit the "Apply" feature (LF-normalized),
 # push feat/data-rights, then merge origin/main and stop cleanly at conflicts.
 #
 # HOW TO RUN (Windows):

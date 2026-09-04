@@ -109,9 +109,10 @@ def test_restricted_adapters_refuse():
         assert cands == []
 
 
-def test_public_web_disabled_by_default():
+def test_public_web_enabled_with_compliance_guards():
     ok, reason = PublicWebAdapter(AdapterContext()).validate_permissions()
-    assert ok is False and "disabled" in reason.lower()
+    assert ok is True and reason == "ok"
+    assert PublicWebAdapter.rate_limit_config["respect_robots"] is True
 
 
 def test_approved_api_requires_credentials():
