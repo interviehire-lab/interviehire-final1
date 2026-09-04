@@ -17,7 +17,11 @@ export default function SignupPage() {
     if (!isAuthed()) return;
     let cancelled = false;
     apiMe()
-      .then(() => { if (!cancelled) router.replace('/dashboard'); })
+      .then((me) => {
+        if (!cancelled) {
+          router.replace(me?.onboarding_required ? '/onboarding' : '/dashboard');
+        }
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [router]);

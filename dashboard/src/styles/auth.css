@@ -158,6 +158,10 @@
   transition: opacity 0.4s ease;
 }
 
+.auth-slot-custom {
+  overflow-y: auto;
+}
+
 /* Right slot gets a subtle left border */
 .auth-slot[data-slot="signup"] {
   border-left: 1px solid rgba(45,212,191,0.06);

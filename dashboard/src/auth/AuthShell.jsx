@@ -113,10 +113,11 @@ function ScanLine() {
 }
 
 // ── AuthShell (Main Split Panel Component) ──────────────────────────────────
-export function AuthShell({ initialMode = 'login' }) {
+export function AuthShell({ initialMode = 'login', title, subtitle, footer, children }) {
   const router = useRouter();
   const [mode, setMode] = useState(initialMode);
   const [noTrans, setNoTrans] = useState(true);
+  const hasCustomContent = Boolean(children);
 
   // Form States — Login
   const [loginEmail, setLoginEmail] = useState('');
@@ -153,13 +154,20 @@ export function AuthShell({ initialMode = 'login' }) {
 
   // Handle auto-login if session exists
   useEffect(() => {
-    if (!isAuthed()) return;
+    // Pages such as onboarding own their session guard and render custom content
+    // inside this shell. Redirecting from here as well made an org-less account
+    // bounce forever between /onboarding and /dashboard.
+    if (hasCustomContent || !isAuthed()) return;
     let cancelled = false;
     apiMe()
-      .then(() => { if (!cancelled) router.replace('/dashboard'); })
+      .then((me) => {
+        if (!cancelled) {
+          router.replace(me?.onboarding_required ? '/onboarding' : '/dashboard');
+        }
+      })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [router]);
+  }, [hasCustomContent, router]);
 
   // Toggle Mode Helper
   const handleToggleMode = (targetMode) => {
@@ -216,6 +224,49 @@ export function AuthShell({ initialMode = 'login' }) {
   const pwMatch = signupForm.confirm.length > 0
     ? signupForm.password === signupForm.confirm
     : null;
+
+  // Onboarding and any other focused auth flow reuse the visual shell while
+  // supplying their own form. Keep that content visible instead of silently
+  // replacing it with the login/signup slider.
+  if (hasCustomContent) {
+    return (
+      <main className="auth-screen">
+        <div className="auth-orb a" aria-hidden="true" />
+        <div className="auth-orb b" aria-hidden="true" />
+        <ParticleField />
+        <ScanLine />
+
+        <div className="auth-split-card mode-login no-trans">
+          <section className="auth-slot auth-slot-custom" data-slot="login">
+            <a href="/" className="auth-brand" aria-label="intervieHire home">
+              <span className="auth-logo-mark" aria-hidden="true" />
+              <span className="auth-wordmark">
+                intervie<span className="auth-wordmark-accent">Hire</span>
+              </span>
+            </a>
+            <header className="auth-head">
+              <h1 className="auth-title">{title}</h1>
+              {subtitle && <p className="auth-sub">{subtitle}</p>}
+            </header>
+            {children}
+            {footer && <div className="auth-foot">{footer}</div>}
+          </section>
+
+          <section className="auth-slot" data-slot="signup" aria-hidden="true" />
+          <section className="auth-panel-slide" aria-hidden="true">
+            <div className="auth-welcome">
+              <span className="auth-welcome-star">✦</span>
+              <h2 className="auth-welcome-title">SET UP<br />YOUR WORKSPACE</h2>
+              <div className="auth-welcome-line" />
+              <p className="auth-welcome-sub">
+                Add your organisation details to finish creating your recruiter workspace.
+              </p>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="auth-screen">
@@ -537,4 +588,3 @@ export function SubmitButton({ loading, idle, busy }) {
 }
 
 export default AuthShell;
-
