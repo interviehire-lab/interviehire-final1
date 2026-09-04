@@ -1,11 +1,10 @@
-import { createRequire } from 'node:module';
 import { NextResponse } from 'next/server';
+import { PDFParse } from 'pdf-parse';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB cap before buffering into memory
-const require = createRequire(import.meta.url);
 
 // Turn a shared Google Docs/Drive link into a directly-fetchable URL.
 // Works for "anyone with the link" docs; private docs return Google's HTML
@@ -34,15 +33,8 @@ async function extractText(buffer, contentType) {
   const ct = (contentType || '').toLowerCase();
 
   if (ct.includes('application/pdf')) {
-    const pdfModule = require('pdf-parse');
-    const PDFParseClass = pdfModule.PDFParse;
-    if (PDFParseClass) {
-      const parser = new PDFParseClass({ data: buffer });
-      try { return (await parser.getText()).text || ''; } finally { await parser.destroy(); }
-    }
-    const fn = pdfModule.default || pdfModule;
-    if (typeof fn === 'function') return (await fn(buffer)).text || '';
-    throw new Error('PDF parser unavailable');
+    const parser = new PDFParse({ data: buffer });
+    try { return (await parser.getText()).text || ''; } finally { await parser.destroy(); }
   }
 
   if (ct.includes('officedocument.wordprocessingml') || ct.includes('msword')) {

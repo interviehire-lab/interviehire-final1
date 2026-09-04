@@ -1,12 +1,10 @@
-import { createRequire } from 'node:module';
 import { NextResponse } from 'next/server';
+import { PDFParse } from 'pdf-parse';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB — cap before buffering into memory
-const require = createRequire(import.meta.url);
-
 export async function POST(request) {
   try {
     const formData = await request.formData();
@@ -31,28 +29,12 @@ export async function POST(request) {
     if (fileName.endsWith('.txt')) {
       text = buffer.toString('utf-8');
     } else if (fileName.endsWith('.pdf')) {
-      // Next's webpack transform currently breaks pdf-parse's ESM bundle during
-      // route evaluation ("Object.defineProperty called on non-object"). Load its
-      // supported Node CJS export instead; next.config keeps it server-external.
-      const pdfModule = require('pdf-parse');
-      const PDFParseClass = pdfModule.PDFParse;
-      
-      if (PDFParseClass) {
-        const parser = new PDFParseClass({ data: buffer });
-        try {
-          const result = await parser.getText();
-          text = result.text || '';
-        } finally {
-          await parser.destroy();
-        }
-      } else {
-        const pdfParseFn = pdfModule.default || pdfModule;
-        if (typeof pdfParseFn === 'function') {
-          const data = await pdfParseFn(buffer);
-          text = data.text || '';
-        } else {
-          throw new Error('Could not find a valid PDF parser in pdf-parse dependency');
-        }
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const result = await parser.getText();
+        text = result.text || '';
+      } finally {
+        await parser.destroy();
       }
     } else if (fileName.endsWith('.docx')) {
       const mammothModule = await import('mammoth');
