@@ -36,7 +36,9 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT:-4000}/health" >/dev/null || exit 1
 
-CMD ["npm", "run", "start", "-w", "apps/api"]
+# Keep npm/npx out of the runtime path. Railway's pre-deploy/runtime container
+# can otherwise fail inside npm before Node ever starts the compiled API.
+CMD ["node", "apps/api/dist/src/server.js"]
 
 FROM source AS web
 
@@ -53,7 +55,7 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT:-3001}/" >/dev/null || exit 1
 
-CMD ["npm", "run", "start", "-w", "apps/web"]
+CMD ["sh", "-c", "cd apps/web && exec node ../../node_modules/next/dist/bin/next start -p ${PORT:-3001}"]
 
 # Give Dockerfile-based platforms a deterministic final image while retaining
 # the named api/web targets used by Docker Compose.
