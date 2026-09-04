@@ -5,11 +5,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB — cap before buffering into memory
+const require = createRequire(import.meta.url);
 
 async function ensurePdfNodePolyfills() {
   if (globalThis.DOMMatrix && globalThis.ImageData && globalThis.Path2D) return;
 
-  const require = createRequire(import.meta.url);
   const canvas = require('@napi-rs/canvas');
   globalThis.DOMMatrix ||= canvas.DOMMatrix;
   globalThis.ImageData ||= canvas.ImageData;
@@ -29,6 +29,10 @@ export async function POST(request) {
       return NextResponse.json({ error: 'File too large (max 5 MB)' }, { status: 413 });
     }
 
+    if (typeof file.size === 'number' && file.size === 0) {
+      return NextResponse.json({ error: 'Uploaded file is empty' }, { status: 400 });
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileName = file.name.toLowerCase();
     let text = '';
@@ -38,12 +42,13 @@ export async function POST(request) {
     } else if (fileName.endsWith('.pdf')) {
       await ensurePdfNodePolyfills();
 
-      const pdfModule = await import('pdf-parse');
-      const PDFParseClass = pdfModule.PDFParse || (pdfModule.default && pdfModule.default.PDFParse);
+      // Next's webpack transform currently breaks pdf-parse's ESM bundle during
+      // route evaluation ("Object.defineProperty called on non-object"). Load its
+      // supported Node CJS export instead; next.config keeps it server-external.
+      const pdfModule = require('pdf-parse');
+      const PDFParseClass = pdfModule.PDFParse;
       
       if (PDFParseClass) {
-        await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
-
         const parser = new PDFParseClass({ data: buffer });
         try {
           const result = await parser.getText();
@@ -69,7 +74,12 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Unsupported file type. Use .pdf, .docx, or .txt' }, { status: 400 });
     }
 
-    return NextResponse.json({ text: text.trim() });
+    text = text.trim();
+    if (!text) {
+      return NextResponse.json({ error: 'No readable text found in the file' }, { status: 422 });
+    }
+
+    return NextResponse.json({ text });
   } catch (error) {
     console.error('File parse error:', error);
     return NextResponse.json(

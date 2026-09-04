@@ -34,7 +34,7 @@ const nextConfig = {
   // Next.js otherwise rejects cross-origin development asset requests when the
   // page and dev server use different loopback hostnames.
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
-  serverExternalPackages: ['@napi-rs/canvas'],
+  serverExternalPackages: ['@napi-rs/canvas', 'pdf-parse'],
   // Incremental JS -> TS migration: the dashboard's ESM modules import each other
   // with explicit `.js` extensions (e.g. `from './escape.js'`). As we rename files
   // to `.ts`, those specifiers must keep resolving without touching all 200+ import

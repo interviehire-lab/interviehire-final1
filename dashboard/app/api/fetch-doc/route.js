@@ -5,6 +5,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB cap before buffering into memory
+const require = createRequire(import.meta.url);
 
 // Turn a shared Google Docs/Drive link into a directly-fetchable URL.
 // Works for "anyone with the link" docs; private docs return Google's HTML
@@ -31,7 +32,6 @@ function normalizeDocUrl(raw) {
 
 async function ensurePdfNodePolyfills() {
   if (globalThis.DOMMatrix && globalThis.ImageData && globalThis.Path2D) return;
-  const require = createRequire(import.meta.url);
   const canvas = require('@napi-rs/canvas');
   globalThis.DOMMatrix ||= canvas.DOMMatrix;
   globalThis.ImageData ||= canvas.ImageData;
@@ -43,10 +43,9 @@ async function extractText(buffer, contentType) {
 
   if (ct.includes('application/pdf')) {
     await ensurePdfNodePolyfills();
-    const pdfModule = await import('pdf-parse');
-    const PDFParseClass = pdfModule.PDFParse || (pdfModule.default && pdfModule.default.PDFParse);
+    const pdfModule = require('pdf-parse');
+    const PDFParseClass = pdfModule.PDFParse;
     if (PDFParseClass) {
-      await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
       const parser = new PDFParseClass({ data: buffer });
       try { return (await parser.getText()).text || ''; } finally { await parser.destroy(); }
     }
