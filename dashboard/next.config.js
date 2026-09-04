@@ -24,7 +24,10 @@ const BACKEND_API_PREFIXES = [
 // apex `interviehire.com/interviewcandidateroom`, which this dashboard serves and
 // has no such route → 404. Forward those to the room subdomain, preserving the
 // ?sessionId query (Next carries query params through on redirects).
-const ROOM_ORIGIN = 'https://interview.interviehire.com';
+let ROOM_ORIGIN = (process.env.INTERVIEW_ROOM_ORIGIN || 'https://interview.interviehire.com').replace(/\/$/, '');
+if (!/^https?:\/\//i.test(ROOM_ORIGIN)) {
+  ROOM_ORIGIN = `https://${ROOM_ORIGIN}`;
+}
 
 const nextConfig = {
   // Permit the local dashboard to be opened through either loopback hostname.
