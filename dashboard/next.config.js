@@ -35,6 +35,19 @@ const nextConfig = {
   // page and dev server use different loopback hostnames.
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   serverExternalPackages: ['@napi-rs/canvas', 'pdf-parse'],
+  // pdf-parse loads canvas from inside an externalized dependency, which Vercel's
+  // automatic file trace does not see. Include the Node wrapper and Linux binary
+  // explicitly in only the two server routes that parse PDFs.
+  outputFileTracingIncludes: {
+    '/api/parse-file': [
+      './node_modules/@napi-rs/canvas/**/*',
+      './node_modules/@napi-rs/canvas-linux-x64-gnu/**/*',
+    ],
+    '/api/fetch-doc': [
+      './node_modules/@napi-rs/canvas/**/*',
+      './node_modules/@napi-rs/canvas-linux-x64-gnu/**/*',
+    ],
+  },
   // Incremental JS -> TS migration: the dashboard's ESM modules import each other
   // with explicit `.js` extensions (e.g. `from './escape.js'`). As we rename files
   // to `.ts`, those specifiers must keep resolving without touching all 200+ import

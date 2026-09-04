@@ -30,19 +30,10 @@ function normalizeDocUrl(raw) {
   return { fetchUrl: url.href };
 }
 
-async function ensurePdfNodePolyfills() {
-  if (globalThis.DOMMatrix && globalThis.ImageData && globalThis.Path2D) return;
-  const canvas = require('@napi-rs/canvas');
-  globalThis.DOMMatrix ||= canvas.DOMMatrix;
-  globalThis.ImageData ||= canvas.ImageData;
-  globalThis.Path2D ||= canvas.Path2D;
-}
-
 async function extractText(buffer, contentType) {
   const ct = (contentType || '').toLowerCase();
 
   if (ct.includes('application/pdf')) {
-    await ensurePdfNodePolyfills();
     const pdfModule = require('pdf-parse');
     const PDFParseClass = pdfModule.PDFParse;
     if (PDFParseClass) {
