@@ -21,8 +21,7 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
 
-RUN --mount=type=cache,id=interviehire-engine-npm-v2,target=/root/.npm,sharing=locked \
-    npm ci --no-audit --no-fund --prefer-offline
+RUN npm ci --no-audit --no-fund --prefer-offline
 
 FROM dependencies AS source
 COPY . .
