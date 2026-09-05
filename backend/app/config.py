@@ -89,6 +89,44 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str | None = None
     RESEND_API_KEY: str | None = None
 
+    # Twilio (WhatsApp confirmation + voice reminder calls), called via raw HTTPS
+    # (`requests`) — same pattern as Resend above, no `twilio` SDK dependency. Blank
+    # by default: `app/utils/twilio_client.py` no-ops (logs + returns False) whenever
+    # TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN aren't set, so the feature is inert until
+    # configured rather than a startup/runtime hazard. TWILIO_WHATSAPP_FROM is a bare
+    # E.164 number (e.g. +14155238886) — the `whatsapp:` prefix is added in code.
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_WHATSAPP_FROM: str = ""
+    TWILIO_VOICE_FROM: str = ""
+
+    # Optional: a scoped API Key (Twilio Console -> Account -> API keys & tokens,
+    # SID starts "SK...") used INSTEAD of TWILIO_AUTH_TOKEN for authentication when
+    # both are set — Twilio's recommended credential for server-side integrations,
+    # since it can be individually revoked/rotated without touching the Auth Token
+    # (which also gates full account/billing control). TWILIO_ACCOUNT_SID is still
+    # required either way — it's used in the request URL, not for authentication.
+    TWILIO_API_KEY_SID: str = ""
+    TWILIO_API_KEY_SECRET: str = ""
+
+    # WhatsApp Business API generally requires a pre-approved Content Template (not
+    # freeform text) for a business-initiated message like a confirmation or reminder
+    # — freeform only works within an open 24h customer-service session, or on the
+    # Twilio Sandbox number. Set these to the Content SID (starts "HX...") of your
+    # approved templates in the Twilio Console -> Content Editor, and
+    # `twilio_client.py` will send via `ContentSid`/`ContentVariables` instead of
+    # `Body`. Left blank, both fall back to freeform `Body` (fine for Sandbox testing,
+    # likely to be rejected by WhatsApp on an approved production sender).
+    TWILIO_WHATSAPP_CONFIRMATION_CONTENT_SID: str = ""
+    TWILIO_WHATSAPP_REMINDER_CONTENT_SID: str = ""
+
+    # Interview reminder job (email + WhatsApp + robocall, ~REMINDER_MINUTES_BEFORE
+    # the scheduled start). No global disable switch — email always attempts to send
+    # regardless of Twilio config; only the Twilio-backed channels no-op individually
+    # when unconfigured. See `app/jobs/reminders.py`.
+    REMINDER_MINUTES_BEFORE: int = 30
+    REMINDER_MAX_PER_RUN: int = 200
+
     class Config:
         env_file = ".env"
         extra = "ignore"

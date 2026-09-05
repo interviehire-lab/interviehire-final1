@@ -10,6 +10,7 @@ import { uploadRecordingToDrive } from '../services/drive-upload.service.js';
 import { handleCandidateTranscript } from '../services/interview-conversation.service.js';
 import { ensureTranscriptMeta, finalizeTranscript } from '../services/transcript.service.js';
 import { saveTranscriptFile, flagcheckTranscriptFile, transcriptFilePath, FLAGCHECK_DISCLAIMER } from '../services/flagcheckTranscription.service.js';
+import { EARLY_ENTRY_MS } from '@interviehire/shared';
 
 // Per-candidate invite enforcement shared by the post-start session routes: a
 // session bound to an inviteToken only serves the matching ?token=. Returns true
@@ -390,9 +391,9 @@ export async function interviewRoutes(app: FastifyInstance) {
     // Scheduled-slot barrier: a session with a future slot cannot be started until
     // its early-entry window opens. This is the server half of the candidate-room
     // countdown lobby — it makes the lock real (a bypassed client can't start
-    // early). EARLY_ENTRY_MS MUST match the web EARLY_ENTRY_MS. Sessions with no
-    // scheduledAt (plain link / demo) are unaffected.
-    const EARLY_ENTRY_MS = 10 * 60 * 1000;
+    // early). EARLY_ENTRY_MS is shared from @interviehire/shared so the client
+    // and server can never drift out of sync. Sessions with no scheduledAt
+    // (plain link / demo) are unaffected.
     if (session.scheduledAt && Date.now() < new Date(session.scheduledAt).getTime() - EARLY_ENTRY_MS) {
       return reply.code(403).send({ error: 'This interview has not opened yet. Please return at your scheduled time.', code: 'TOO_EARLY' });
     }

@@ -216,12 +216,12 @@ def confirm_interview_slot(token: str, request: Request, db: Session = Depends(g
 
     stage = "Interview"
     proposed_time = None
+    from app.utils.timezones import default_next_day_1pm_ist, to_ist
     if applicant.functional_status is not None:
         stage = "Functional Interview"
         if not applicant.functional_scheduled_at:
-            # Set default timer to 1 PM next day
-            now = datetime.utcnow()
-            applicant.functional_scheduled_at = (now + timedelta(days=1)).replace(hour=13, minute=0, second=0, microsecond=0)
+            # Set default timer to 1 PM next day, IST
+            applicant.functional_scheduled_at = default_next_day_1pm_ist()
         proposed_time = applicant.functional_scheduled_at
         applicant.functional_status = InterviewStatus.scheduled
         try:
@@ -232,9 +232,8 @@ def confirm_interview_slot(token: str, request: Request, db: Session = Depends(g
     elif applicant.screening_status is not None:
         stage = "Recruiter Screening"
         if not applicant.screening_scheduled_at:
-            # Set default timer to 1 PM next day
-            now = datetime.utcnow()
-            applicant.screening_scheduled_at = (now + timedelta(days=1)).replace(hour=13, minute=0, second=0, microsecond=0)
+            # Set default timer to 1 PM next day, IST
+            applicant.screening_scheduled_at = default_next_day_1pm_ist()
         proposed_time = applicant.screening_scheduled_at
         applicant.screening_status = InterviewStatus.scheduled
         
@@ -288,7 +287,7 @@ def confirm_interview_slot(token: str, request: Request, db: Session = Depends(g
     except Exception as mail_err:
         logger.error(f"Failed to send confirmation email: {mail_err}")
         
-    time_str = proposed_time.strftime("%B %d, %Y at %I:%M %p UTC")
+    time_str = to_ist(proposed_time).strftime("%B %d, %Y at %I:%M %p IST")
     
     return f"""
     <html>
@@ -363,7 +362,8 @@ def public_reschedule_interview(
         raise HTTPException(status_code=404, detail="Invalid or expired scheduling token.")
         
     try:
-        parsed_time = datetime.fromisoformat(new_time.replace('Z', '+00:00'))
+        from app.utils.timezones import parse_scheduled_datetime
+        parsed_time = parse_scheduled_datetime(new_time)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid ISO datetime format.")
         
@@ -397,6 +397,11 @@ def public_reschedule_interview(
         stage = "Recruiter Screening"
         applicant.screening_scheduled_at = parsed_time
         applicant.screening_status = InterviewStatus.scheduled
+        try:
+            from app.utils.ai_sync import sync_applicant_to_ai
+            sync_applicant_to_ai(db, applicant)
+        except Exception as sync_err:
+            logger.error(f"Failed to sync rescheduled applicant to AI database: {sync_err}")
     
     # Increment sequence counter for updates
     applicant.calendar_sequence = (applicant.calendar_sequence or 0) + 1
@@ -437,7 +442,30 @@ def public_reschedule_interview(
         )
     except Exception as mail_err:
         logger.error(f"Failed to send rescheduled confirmation email: {mail_err}")
-    
+
+    # WhatsApp confirmation — additive alongside the email confirmation above (does
+    # NOT touch or duplicate it). Own try/except so a WhatsApp failure can never
+    # affect the email send or this endpoint's response; no-ops when Twilio isn't
+    # configured or applicant.phone isn't a real number (see twilio_client.py).
+    try:
+        from app.utils.twilio_client import send_schedule_confirmation_whatsapp
+        from app.utils.timezones import to_ist
+        first_name = (applicant.name or "").strip().split(" ")[0] or "there"
+        parsed_time_ist = to_ist(parsed_time)
+        send_schedule_confirmation_whatsapp(
+            phone=applicant.phone,
+            first_name=first_name,
+            stage_name=stage,
+            job_title=job_title,
+            org_name=organizer_name,
+            date_str=parsed_time_ist.strftime("%B %d, %Y"),
+            time_str=parsed_time_ist.strftime("%I:%M %p IST"),
+            interview_link=interview_link,
+            reschedule_link=reschedule_link,
+        )
+    except Exception as wa_err:
+        logger.error(f"Failed to send WhatsApp interview confirmation: {wa_err}")
+
     return {"status": "success", "new_scheduled_time": parsed_time.isoformat()}
 
 

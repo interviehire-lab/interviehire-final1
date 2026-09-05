@@ -7,7 +7,8 @@
 //
 // This is the UX half of the barrier; the engine's POST /sessions/:id/start also
 // rejects an early start with { code: 'TOO_EARLY' } so the lock can't be bypassed
-// by editing client JS. Keep EARLY_ENTRY_MS here in sync with the server constant.
+// by editing client JS. unlockAtMs (passed in as a prop) is computed by the
+// parent from the shared EARLY_ENTRY_MS constant (@interviehire/shared).
 import { useEffect, useState } from 'react';
 
 type Brand = { name?: string; primaryColor?: string; logoUrl?: string; whiteLabel?: boolean } | null;
@@ -106,13 +107,16 @@ export function WaitingRoom({
   const accent = (brand?.whiteLabel && brand?.primaryColor) || '#67e8f9';
   const wl = !!(brand?.whiteLabel && brand?.name);
 
-  const slotLabel = new Date(scheduledAtMs).toLocaleString(undefined, {
+  // Interview scheduling is IST (Asia/Kolkata) app-wide — show it in IST regardless
+  // of the candidate's own device/browser timezone, not the candidate's local time.
+  const slotLabel = new Date(scheduledAtMs).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  });
+  }) + ' IST';
 
   const s = SLIDES[slide];
 

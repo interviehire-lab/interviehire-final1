@@ -1212,28 +1212,24 @@ function downloadResumeImportTemplate() {
   URL.revokeObjectURL(url);
 }
 
-const SCHEDULE_TIMEZONES = [
-  'Asia/Kolkata (UTC+05:30)',
-  'Asia/Dubai (UTC+04:00)',
-  'Asia/Singapore (UTC+08:00)',
-  'Asia/Tokyo (UTC+09:00)',
-  'Europe/London (UTC+00:00)',
-  'Europe/Berlin (UTC+01:00)',
-  'America/New_York (UTC-05:00)',
-  'America/Chicago (UTC-06:00)',
-  'America/Los_Angeles (UTC-08:00)',
-  'Australia/Sydney (UTC+11:00)',
-];
+// All interview scheduling is IST (Asia/Kolkata, UTC+05:30) — a fixed product
+// decision, not a per-recruiter preference. The picker below never touches the
+// recruiter's actual OS/browser timezone: its calendar+time UI just accumulates
+// wall-clock digits (day/hour/minute), and we treat those digits as IST directly
+// when converting to the UTC instant the backend stores.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60000;
 
 function pad2(n) { return String(n).padStart(2, '0'); }
-function toLocalInputValue(d) {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+// Treat a Date's local getter digits (y/mo/da/h/mi — whatever the picker's UI set
+// them to) as IST wall-clock, and return the real UTC instant as an ISO string.
+function istPartsToUtcIso(d) {
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), 0) - IST_OFFSET_MS).toISOString();
 }
-function formatSlot(dtLocal) {
-  if (!dtLocal) return '';
-  const d = new Date(dtLocal);
-  if (isNaN(d.getTime())) return dtLocal;
-  return d.toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+function formatSlot(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) + ' IST';
 }
 
 // opts: { mode: 'schedule' | 'reschedule', name, email, slotTime, count }
@@ -1258,7 +1254,11 @@ function createDateTimePicker(initial) {
   el.appendChild(pop);
 
   const fmtField = () => {
-    field.textContent = sel.toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+    // `sel`'s digits (set via local getters/setters below, purely for this widget's
+    // own calendar/time UI bookkeeping) ARE the IST wall-clock by convention — echo
+    // them back with no timeZone override (that would re-interpret the object's
+    // actual epoch through a different offset and show the wrong digits).
+    field.textContent = sel.toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) + ' IST';
   };
   const renderCal = () => {
     const y = view.getFullYear(), m = view.getMonth();
@@ -1341,12 +1341,10 @@ function openScheduleModal(opts, callback) {
       ${contextRows}
       <div class="schedule-form-group">
         <label>Time Zone</label>
-        <select id="sched-tz" class="sched-tz-select">
-          ${SCHEDULE_TIMEZONES.map((tz, i) => `<option value="${escapeHTML(tz)}" ${i === 0 ? 'selected' : ''}>${escapeHTML(tz)}</option>`).join('')}
-        </select>
+        <div class="sched-tz-fixed">Asia/Kolkata (UTC+05:30) — all interview times are IST</div>
       </div>
       <div class="schedule-form-group">
-        <label>Enter Date &amp; Time</label>
+        <label>Enter Date &amp; Time (IST)</label>
         <div class="sched-range-row">
           <div id="sched-start-mount" class="sdt-mount"></div>
           <span class="sched-range-sep">to</span>
@@ -1371,10 +1369,13 @@ function openScheduleModal(opts, callback) {
   document.getElementById('sched-confirm').addEventListener('click', () => {
     const startDate = startPicker.getValue();
     const endDate = endPicker.getValue();
-    const timezone = document.getElementById('sched-tz').value;
+    const timezone = 'Asia/Kolkata';
     if (endDate < startDate) { showPremiumToast('End time must be after the start time.', 'error'); return; }
-    const startV = toLocalInputValue(startDate);
-    const endV = toLocalInputValue(endDate);
+    // Convert the picker's IST-intended digits into a real UTC instant now, so every
+    // downstream consumer (backend API, cached fallback display) gets an unambiguous
+    // absolute time rather than a naive string someone else has to guess a timezone for.
+    const startV = istPartsToUtcIso(startDate);
+    const endV = istPartsToUtcIso(endDate);
     overlay.remove();
     if (callback) callback({ start: startV, end: endV, timezone, slot: formatSlot(startV) });
     soundEngine.playChime([523.25, 659.25], 0.15, 0.08);

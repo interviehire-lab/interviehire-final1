@@ -149,6 +149,11 @@ export const roomStyles = `
     border: 0; background: #020617;
   }
 
+  .avatar-placeholder {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: rgba(255, 255, 255, .78); padding: 24px; text-align: center;
+  }
+
   .avatar-overlay {
     pointer-events: none;
     position: absolute; inset: 0; z-index: 2;
@@ -221,9 +226,33 @@ export const roomStyles = `
     overflow: hidden; border-radius: 16px; background: #020617;
     border: 1px solid rgba(255, 255, 255, .2);
     box-shadow: 0 12px 34px rgba(0, 0, 0, .55);
+    transition: box-shadow .12s ease, border-color .12s ease;
   }
   .candidate-panel .you-pill { top: 8px; left: 8px; padding: 4px 9px; font-size: 10px; letter-spacing: .16em; }
   .candidate-panel .candidate-footer { padding: 8px 10px; }
+
+  /* Lights up while the candidate's own voice is actually detected — see the
+     AnalyserNode-based check in page.tsx. Answers "is my mic picking me up?". */
+  .candidate-panel.speaking {
+    border-color: var(--lime);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .55), 0 0 0 3px rgba(212, 255, 0, .45), 0 0 22px rgba(212, 255, 0, .35);
+  }
+
+  /* Demo/debug-only live-caption strip — proves browser STT is actually hearing
+     the candidate, in real time, instead of only finding out after the report
+     comes back with an empty transcript. */
+  .stt-debug-bar {
+    position: absolute; z-index: 5; left: 22px; right: 22px; bottom: 22px;
+    max-width: 60%;
+    display: flex; align-items: center; gap: 9px;
+    background: rgba(0, 0, 0, .6); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 14px;
+    color: #e5e7eb; font-size: 12.5px; line-height: 1.3;
+    backdrop-filter: blur(6px);
+  }
+  .stt-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; background: #64748b; }
+  .stt-dot.stt-listening { background: var(--lime); box-shadow: 0 0 8px rgba(212, 255, 0, .7); }
+  .stt-dot.stt-error, .stt-dot.stt-unsupported { background: var(--orange); }
 
   .candidate-video {
     position: absolute; inset: 0; width: 100%; height: 100%;

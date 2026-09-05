@@ -57,11 +57,16 @@ class Applicant(Base):
     screening_status = Column(Enum(InterviewStatus), nullable=True)
     screening_score = Column(Float, nullable=True)
     screening_scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    # Set once the pre-interview reminder (email/WhatsApp/call, ~REMINDER_MINUTES_BEFORE
+    # start) has fired for this stage's scheduled slot; NULL = not sent yet. Guards
+    # against re-sending the reminder on every job run. See app/jobs/reminders.py.
+    screening_reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     # Functional Interview stage
     functional_status = Column(Enum(InterviewStatus), nullable=True)
     functional_score = Column(Float, nullable=True)
     functional_scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    functional_reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
     cheat_probability = Column(Enum(CheatProbability), nullable=True)
     report_url = Column(String, nullable=True)
     

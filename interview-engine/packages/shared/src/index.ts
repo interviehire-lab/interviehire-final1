@@ -1,6 +1,12 @@
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type InterviewStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'EVALUATED' | 'CANCELLED';
 
+// How early a candidate may enter the room before their scheduled slot. Shared
+// between the candidate room (UX countdown lobby) and the engine's
+// POST /sessions/:id/start (the server-side enforcement that makes the lock
+// real). Single source of truth — do not redefine this locally.
+export const EARLY_ENTRY_MS = 10 * 60 * 1000;
+
 export interface ClientToServerTranscript {
   type: 'candidate_transcript';
   sessionId: string;

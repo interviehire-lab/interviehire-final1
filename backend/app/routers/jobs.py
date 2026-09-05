@@ -2191,10 +2191,12 @@ def schedule_interview(
     if not scheduled_at_raw:
         raise HTTPException(status_code=400, detail="scheduled_at is required")
 
-    # Parse ISO datetime string
+    # Parse ISO datetime string. A naive (no-offset) value means the picker's typed
+    # wall-clock is IST (see app/utils/timezones.py) — never blindly UTC.
     try:
         if isinstance(scheduled_at_raw, str):
-            scheduled_at = datetime.fromisoformat(scheduled_at_raw.replace("Z", "+00:00"))
+            from app.utils.timezones import parse_scheduled_datetime
+            scheduled_at = parse_scheduled_datetime(scheduled_at_raw)
         else:
             scheduled_at = scheduled_at_raw
     except Exception:
@@ -2297,6 +2299,29 @@ def schedule_interview(
         )
     except Exception as mail_err:
         logger.error(f"Failed to send interview confirmation email: {mail_err}")
+
+    # WhatsApp confirmation — additive alongside the email confirmation above (does
+    # NOT touch or duplicate it). Own try/except so a WhatsApp failure can never
+    # affect the email send or this endpoint's response; no-ops when Twilio isn't
+    # configured or applicant.phone isn't a real number (see twilio_client.py).
+    try:
+        from app.utils.twilio_client import send_schedule_confirmation_whatsapp
+        from app.utils.timezones import to_ist
+        first_name = (applicant.name or "").strip().split(" ")[0] or "there"
+        scheduled_at_ist = to_ist(scheduled_at)
+        send_schedule_confirmation_whatsapp(
+            phone=applicant.phone,
+            first_name=first_name,
+            stage_name=stage_name,
+            job_title=job_title,
+            org_name=organizer_name,
+            date_str=scheduled_at_ist.strftime("%B %d, %Y"),
+            time_str=scheduled_at_ist.strftime("%I:%M %p IST"),
+            interview_link=interview_link,
+            reschedule_link=reschedule_link,
+        )
+    except Exception as wa_err:
+        logger.error(f"Failed to send WhatsApp interview confirmation: {wa_err}")
 
     # Sync to AI backend
     try:

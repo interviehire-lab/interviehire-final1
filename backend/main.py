@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.websocket_routes import router as websocket_router
 from app.database import Base, engine
-from app.routers import jobs, team, organisation, usage, settings as settings_router, deepseek, auth, public, leaderboard, invites, privacy
+from app.routers import jobs, team, organisation, usage, settings as settings_router, deepseek, auth, public, leaderboard, invites, privacy, internal_jobs
 from app.talent_finder.routes import router as talent_finder_router
 
 # Import all models so SQLAlchemy registers them before create_all
@@ -84,6 +84,10 @@ def init_db():
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS applications_close_at TIMESTAMP WITH TIME ZONE;"))
         conn.execute(text('ALTER TABLE "InterviewSession" ADD COLUMN IF NOT EXISTS "recordingDriveFileId" VARCHAR;'))
         conn.execute(text('ALTER TABLE "InterviewSession" ADD COLUMN IF NOT EXISTS "recordingDriveUrl" VARCHAR;'))
+        # Pre-interview reminder job (email + WhatsApp + robocall, ~REMINDER_MINUTES_BEFORE
+        # start): per-stage "already sent" markers so app/jobs/reminders.py never re-fires.
+        conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS screening_reminder_sent_at TIMESTAMP WITH TIME ZONE;"))
+        conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS functional_reminder_sent_at TIMESTAMP WITH TIME ZONE;"))
         conn.commit()
 
         # Backfill: repair legacy jobs with a NULL organisation_id by inheriting the
@@ -222,6 +226,7 @@ app.include_router(talent_finder_router,    prefix="/api/talent-finder", tags=["
 app.include_router(invites.router,          prefix="/api/invites", tags=["Invites"])
 app.include_router(invites.public_link_router, tags=["Invites"])  # public GET /i/{token}
 app.include_router(privacy.router,          prefix="/api/privacy", tags=["Privacy / Data Rights"])
+app.include_router(internal_jobs.router,    prefix="/api/internal", tags=["Internal Jobs"])
 
 
 @app.get("/")

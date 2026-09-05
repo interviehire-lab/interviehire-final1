@@ -46,6 +46,14 @@ if TEST_DB:
     _engine = create_engine(TEST_DB)
     _TestingSession = sessionmaker(bind=_engine)
 
+    # Only drop the backend-owned tables between tests — never the Prisma-owned engine
+    # tables. Postgres refuses to drop InterviewSession (etc.) once the real Prisma
+    # schema is pushed: it also owns TranscriptEvent/InterviewTranscript, which
+    # FK-reference InterviewSession and aren't in SQLAlchemy's Base.metadata at all,
+    # so a plain drop_all() hits "DependentObjectsStillExist".
+    _PRISMA_OWNED = {"Company", "Candidate", "JobRole", "Question", "InterviewSession", "ProctoringLog", "ConsentLog"}
+    _backend_only_tables = [t for name, t in Base.metadata.tables.items() if name not in _PRISMA_OWNED]
+
     def _override_get_db():
         db = _TestingSession()
         try:
@@ -91,7 +99,14 @@ def client(monkeypatch):
     yield TestClient(app)
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_active_org_id, None)
-    Base.metadata.drop_all(bind=_engine)
+    # metadata.drop_all(tables=...) still sweeps ALL Postgres ENUM types across the
+    # whole metadata regardless of the tables filter (a SQLAlchemy/PG quirk), which
+    # re-triggers the same DependentObjectsStillExist error on RoleType/Difficulty/
+    # SessionStatus (owned by the excluded Prisma tables) and rolls back the entire
+    # drop. Per-table .drop() in reverse dependency order sidesteps that sweep.
+    for table in reversed(Base.metadata.sorted_tables):
+        if table in _backend_only_tables:
+            table.drop(bind=_engine, checkfirst=True)
 
 
 def test_erasure_flow_over_http(client):

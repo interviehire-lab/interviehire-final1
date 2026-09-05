@@ -9,7 +9,14 @@ import { Check, Mic, MonitorUp, ShieldCheck, Video } from 'lucide-react';
 import type { CalibrationResult } from '@/hooks/useGazeCalibration';
 import { roomStyles } from './roomStyles';
 import { WaitingRoom } from './WaitingRoom';
+import { EARLY_ENTRY_MS } from '@interviehire/shared';
 
+// Deliberately left blank in local dev (.env.local) to keep the room usable
+// without a real UE5 Pixel Streaming server running — see AVATAR_CONFIGURED below,
+// which the room uses to show a placeholder instead of an iframe pointed at
+// this bogus default (which otherwise "successfully" embeds a real, broken,
+// user-visible "localhost refused to connect" browser error page).
+const AVATAR_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_AVATAR_URL);
 const AVATAR_URL = process.env.NEXT_PUBLIC_AVATAR_URL || 'http://localhost:80';
 // Optional dynamic avatar orchestrator (per-candidate independent Lina stream).
 // When NEXT_PUBLIC_ORCHESTRATOR_URL is UNSET, the room uses the single shared
@@ -20,8 +27,8 @@ const DEFAULT_JOB_ID = process.env.NEXT_PUBLIC_DEFAULT_JOB_ID || '';
 
 // How early a candidate may enter the room before their scheduled slot. The
 // lobby unlocks and the engine's /start accepts a start once inside this window.
-// MUST stay in sync with EARLY_ENTRY_MS in the engine interview.routes.ts.
-const EARLY_ENTRY_MS = 10 * 60 * 1000;
+// EARLY_ENTRY_MS is imported from @interviehire/shared so it can never drift
+// out of sync with the engine's interview.routes.ts.
 // Bump when the consent wording materially changes so prior consents re-prompt.
 const CONSENT_VERSION = '2026-07-01';
 // Where the candidate reads the full privacy policy (linked from the consent
@@ -53,6 +60,28 @@ function hasStoredConsent(id: string): boolean {
     return false;
   }
 }
+
+// Neutral calibration used both when the candidate explicitly skips gaze
+// calibration and when proctoring is off for this job (no camera → no gaze
+// tracking, so calibration is meaningless — the guard falls back to defaults).
+const DEFAULT_CALIBRATION: CalibrationResult = {
+  thresholdX: 0.18,
+  thresholdY: 0.22,
+  neutralX: 0,
+  neutralY: 0,
+  pointData: [],
+  qualityScore: 0,
+  accepted: true,
+  rejectionReason: null,
+  rangeX: 0,
+  rangeY: 0,
+  // Zero-config: no vertical sweep → the guard falls back to the default band and seeds the
+  // live pitch baseline from the first live frame (headPitchDeg is ignored when untrusted).
+  vTopEdge: 0,
+  vBottomEdge: 0,
+  vSweep: 0,
+  headPitchDeg: 0,
+};
 
 const QUESTIONS: { text: string; tag: string; hint: string }[] = [
   {
@@ -89,10 +118,20 @@ export default function Interview() {
   const [elapsed, setElapsed] = useState(0);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
+  // Real-time "is the candidate actually speaking" signal for the self-view
+  // highlight — separate from micOn (which only means "not manually muted").
+  const [voiceActive, setVoiceActive] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const { markAiFinished } = useSpeechMetrics();
   const transcript = useTranscript(sessionId);
   const wsRef = useRef<WebSocket | null>(null);
+  // WebSocket reconnect-with-backoff. isDeliberateCloseRef is set right before any
+  // close WE initiate (unmount cleanup, endCall) so the onclose handler below can
+  // tell that apart from an unexpected drop and skip reconnecting.
+  const isDeliberateCloseRef = useRef(false);
+  const wsReconnectAttemptRef = useRef(0);
+  const wsReconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [wsReconnecting, setWsReconnecting] = useState(false);
   // Per-candidate invite token from the link (?ih_invite=). Forwarded to the
   // token-enforced engine endpoints (/start, GET session, WS register).
   const inviteTokenRef = useRef('');
@@ -207,6 +246,10 @@ export default function Interview() {
   // Defaults to the static shared avatar; the orchestrator effect below swaps in
   // this session's dedicated StreamerId URL when the feature is enabled.
   const [avatarSrc, setAvatarSrc] = useState(() => withPixelStreamingParams(AVATAR_URL));
+  // Whether we actually have somewhere real to point the iframe — the static env
+  // var, or (set below) a per-session URL handed back by the orchestrator. False
+  // means "no avatar server available in this environment," not an error state.
+  const [hasRealAvatar, setHasRealAvatar] = useState(AVATAR_CONFIGURED);
 
   // The dashboard's "Launch test interview" opens this room with ?sessionId=…
   // (the FastAPI test-session created from the job blueprint). Use it when
@@ -257,6 +300,7 @@ export default function Interview() {
         const data = await res.json();
         if (released || !data?.playerUrl) return;
         setAvatarSrc(withPixelStreamingParams(data.playerUrl));
+        setHasRealAvatar(true);
         heartbeat = setInterval(() => {
           fetch(`${ORCHESTRATOR_URL}/session/${encodeURIComponent(orchSession)}/heartbeat`, {
             method: 'POST',
@@ -320,6 +364,11 @@ export default function Interview() {
   // the interview is reachable. Demo sessions never gate.
   const unlockAtMs = scheduledAtMs != null ? scheduledAtMs - EARLY_ENTRY_MS : null;
   const lobbyLocked = sessionId !== 'demo-session' && !startError && unlockAtMs != null && nowMs < unlockAtMs;
+  // Live STT captions (below) only show in demo/debug — a real candidate's room
+  // should stay clean, but this is exactly what lets us SEE whether the browser
+  // is actually transcribing anything, instead of finding out only after the
+  // interview ends with an empty "Transcript unavailable" report.
+  const isDemoOrDebug = sessionId === 'demo-session' || showDebug;
   useEffect(() => {
     if (!lobbyLocked) return;
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -363,8 +412,14 @@ export default function Interview() {
   }, [sessionId]);
 
   // --- WebSocket + demo session bootstrap (unchanged proctoring contract) ---
+  // Reconnects with backoff (1s, doubling to a 10s cap) on an unexpected drop —
+  // e.g. a flaky network mid-interview — re-sending the same 'register' message
+  // on reopen so the server re-binds this candidate's socket. A deliberate close
+  // (unmount cleanup below, or endCall()) sets isDeliberateCloseRef first so
+  // onclose knows not to reconnect.
   useEffect(() => {
     let alive = true;
+    isDeliberateCloseRef.current = false;
     async function bootstrapDemoSession() {
       if (sessionId !== 'demo-session') return;
       try {
@@ -376,35 +431,77 @@ export default function Interview() {
         console.error('demo-session bootstrap failed', error);
       }
     }
+
+    function connectWebSocket() {
+      if (!alive) return;
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
+      ws.onopen = () => {
+        wsReconnectAttemptRef.current = 0;
+        setWsReconnecting(false);
+        ws.send(JSON.stringify({ type: 'register', role: 'candidate', sessionId, token: inviteTokenRef.current || undefined }));
+      };
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'error' && msg.code === 'INVALID_TOKEN') {
+          setStartError('This interview link is invalid or has expired.');
+          return;
+        }
+        if (msg.type === 'ai_response') {
+          setMessages((m) => [...m, { speaker: 'ai', text: msg.text }]);
+          markAiFinished();
+          if (msg.text) transcript.recordEvent({ speaker: 'interviewer', text: msg.text, source: 'manual' });
+        }
+      };
+      ws.onclose = () => {
+        if (!alive || isDeliberateCloseRef.current) return;
+        setWsReconnecting(true);
+        const attempt = wsReconnectAttemptRef.current;
+        const delay = Math.min(1000 * 2 ** attempt, 10000);
+        wsReconnectAttemptRef.current = attempt + 1;
+        wsReconnectTimeoutRef.current = setTimeout(() => {
+          if (alive && !isDeliberateCloseRef.current) connectWebSocket();
+        }, delay);
+      };
+      setSocket(ws);
+    }
+
     bootstrapDemoSession();
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'register', role: 'candidate', sessionId, token: inviteTokenRef.current || undefined }));
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === 'error' && msg.code === 'INVALID_TOKEN') {
-        setStartError('This interview link is invalid or has expired.');
-        return;
-      }
-      if (msg.type === 'ai_response') {
-        setMessages((m) => [...m, { speaker: 'ai', text: msg.text }]);
-        markAiFinished();
-        if (msg.text) transcript.recordEvent({ speaker: 'interviewer', text: msg.text, source: 'manual' });
-      }
-    };
-    setSocket(ws);
+    connectWebSocket();
     return () => {
       alive = false;
-      ws.close();
+      isDeliberateCloseRef.current = true;
+      if (wsReconnectTimeoutRef.current) {
+        clearTimeout(wsReconnectTimeoutRef.current);
+        wsReconnectTimeoutRef.current = null;
+      }
+      wsRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
+  // Recruiter-configurable per-job toggle (InterviewSettings.proctoring, synced via
+  // ai_sync.py into InterviewSession.settings and returned as-is by GET
+  // /sessions/:id). Missing/undefined (older sessions, demo) stays permissive —
+  // only an explicit `false` turns proctoring off.
+  const proctoringSettingEnabled = interviewSettings?.proctoring !== false;
+
   // --- Proctoring engine (all features) ---
-  // Gate proctoring on consent AND an explicit permission request: no camera/mic/
-  // screen capture or model loading happens until the candidate has agreed in the
-  // consent gate AND clicked "Grant required access" in the permission gate below.
-  const { videoRef, events, state, requestRequiredPermissions, startProctoringSession, endProctoringSession, getScreenAudioStream, getScreenVideoStream, screenShareError } = useProctoring(sessionId, socket, calibration, consentGiven && permissionsRequested);
+  // Gate proctoring on consent AND an explicit permission request AND the
+  // recruiter's proctoring toggle: no camera/mic/screen capture or model loading
+  // happens until the candidate has agreed in the consent gate AND clicked "Grant
+  // required access" in the permission gate below AND the job has proctoring on.
+  const { videoRef, events, state, requestRequiredPermissions, startProctoringSession, endProctoringSession, getScreenAudioStream, getScreenVideoStream, screenShareError } = useProctoring(sessionId, socket, calibration, consentGiven && permissionsRequested && proctoringSettingEnabled);
+
+  // When proctoring is off there's no camera feed to calibrate gaze against, so
+  // skip the GazeCalibration screen entirely and fall straight into the interview
+  // with the neutral default (the timer/transcript-capture effects below are all
+  // gated on `calibration` being set, proctoring or not).
+  useEffect(() => {
+    if (!proctoringSettingEnabled && permissionsAcknowledged && !calibration) {
+      setCalibration(DEFAULT_CALIBRATION);
+    }
+  }, [proctoringSettingEnabled, permissionsAcknowledged, calibration]);
 
   // --- Lock scroll to a fullscreen room while mounted ---
   useEffect(() => {
@@ -619,6 +716,15 @@ export default function Interview() {
   // End → stop all capture, transcribe the avatar audio, finalize the .txt,
   // complete the session, and evaluate into the report. Fully automatic.
   async function endCall() {
+    // Mark this as a deliberate close BEFORE closing the socket so the reconnect
+    // handler doesn't try to reopen it once the interview is over.
+    isDeliberateCloseRef.current = true;
+    if (wsReconnectTimeoutRef.current) {
+      clearTimeout(wsReconnectTimeoutRef.current);
+      wsReconnectTimeoutRef.current = null;
+    }
+    wsRef.current?.close();
+    setWsReconnecting(false);
     setEnded(true);
     setReportBusy(true);
     try {
@@ -680,6 +786,70 @@ export default function Interview() {
     stream?.getVideoTracks().forEach((t) => (t.enabled = next));
     setCamOn(next);
   }
+
+  // --- Voice-activity detection for the self-view highlight ---
+  // Taps the SAME mic track already attached to videoRef by useProctoring (no
+  // second getUserMedia prompt). Polls briefly for the stream to appear (its
+  // exact attach timing lives inside useProctoring, not observable from here),
+  // then runs a simple RMS-volume-over-threshold check on an animation-frame
+  // loop, with a short hangover so the highlight doesn't flicker between words.
+  useEffect(() => {
+    if (!consentGiven || !permissionsRequested) return;
+    let cancelled = false;
+    let audioCtx: AudioContext | null = null;
+    let raf = 0;
+    let attachRetry: ReturnType<typeof setTimeout> | null = null;
+    let hangoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function attach() {
+      if (cancelled) return;
+      const stream = videoRef.current?.srcObject as MediaStream | null;
+      const track = stream?.getAudioTracks()?.[0];
+      if (!track) { attachRetry = setTimeout(attach, 300); return; }
+
+      try {
+        audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const source = audioCtx.createMediaStreamSource(new MediaStream([track]));
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const SPEAKING_THRESHOLD = 0.04; // RMS on a 0-1 scale — tuned for normal mic gain
+        const HANGOVER_MS = 400; // keeps the highlight steady between syllables
+
+        const tick = () => {
+          if (cancelled) return;
+          analyser.getByteTimeDomainData(data);
+          let sumSquares = 0;
+          for (let i = 0; i < data.length; i++) {
+            const v = (data[i] - 128) / 128;
+            sumSquares += v * v;
+          }
+          const rms = Math.sqrt(sumSquares / data.length);
+          if (rms > SPEAKING_THRESHOLD) {
+            setVoiceActive(true);
+            if (hangoverTimer) clearTimeout(hangoverTimer);
+            hangoverTimer = setTimeout(() => setVoiceActive(false), HANGOVER_MS);
+          }
+          raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+      } catch {
+        // AudioContext unsupported/blocked — the highlight just never lights up,
+        // nothing else in the room depends on this.
+      }
+    }
+    attach();
+
+    return () => {
+      cancelled = true;
+      if (attachRetry) clearTimeout(attachRetry);
+      if (hangoverTimer) clearTimeout(hangoverTimer);
+      if (raf) cancelAnimationFrame(raf);
+      audioCtx?.close().catch(() => {});
+      setVoiceActive(false);
+    };
+  }, [consentGiven, permissionsRequested]);
 
   // --- Informed-consent gate handlers ---
   const consentComplete = isAdult && agreeData && agreeBiometric && agreePrivacy && agreeCookies;
@@ -797,9 +967,13 @@ export default function Interview() {
   }
 
   // --- Permission gate state ---
-  const cameraReady = state.cameraActive && !state.permissionDenied;
+  // Camera and screen-share are proctoring-specific (face/gaze/object detection and
+  // screen-share-based violation monitoring, respectively — see useProctoring.ts).
+  // When the recruiter has turned proctoring off for this job, neither is required
+  // to enter the interview; only the microphone (needed for answer STT) is.
+  const cameraReady = !proctoringSettingEnabled || (state.cameraActive && !state.permissionDenied);
   const micReady = micGranted;
-  const screenShareReady = !state.screenShareSupported || state.screenShareReadyBeforeInterview;
+  const screenShareReady = !proctoringSettingEnabled || !state.screenShareSupported || state.screenShareReadyBeforeInterview;
   const allPermissionsReady = cameraReady && micReady && screenShareReady;
 
   // Prompt for camera + microphone + screen share only after the candidate asks
@@ -1047,25 +1221,33 @@ export default function Interview() {
         <div className="gate">
           <div className="gate-card">
             <p className="gate-eyebrow">Pre-interview access</p>
-            <h1 className="gate-title">Grant camera, microphone &amp; screen access</h1>
+            <h1 className="gate-title">
+              {proctoringSettingEnabled ? 'Grant camera, microphone & screen access' : 'Grant microphone access'}
+            </h1>
             <p className="gate-sub">
-              Click <strong>Grant required access</strong> — your browser will then ask for each
-              permission one by one. All three must be granted before you can start the interview.
+              {proctoringSettingEnabled
+                ? <>Click <strong>Grant required access</strong> — your browser will then ask for each
+                  permission one by one. All three must be granted before you can start the interview.</>
+                : <>Click <strong>Grant required access</strong> — your browser will then ask for
+                  microphone access, needed to transcribe your answers. It must be granted before you
+                  can start the interview.</>}
             </p>
             <div className="gate-checks">
               {[
-                {
-                  label: 'Camera',
-                  ok: cameraReady,
-                  detail: cameraReady
-                    ? 'Ready'
-                    : state.permissionDenied
-                    ? 'Permission denied — allow it in your browser, then retry'
-                    : permissionsRequested
-                    ? 'Waiting for browser permission…'
-                    : 'Not requested yet',
-                  Icon: Video,
-                },
+                ...(proctoringSettingEnabled
+                  ? [{
+                      label: 'Camera',
+                      ok: cameraReady,
+                      detail: cameraReady
+                        ? 'Ready'
+                        : state.permissionDenied
+                        ? 'Permission denied — allow it in your browser, then retry'
+                        : permissionsRequested
+                        ? 'Waiting for browser permission…'
+                        : 'Not requested yet',
+                      Icon: Video,
+                    }]
+                  : []),
                 {
                   label: 'Microphone',
                   ok: micReady,
@@ -1078,18 +1260,20 @@ export default function Interview() {
                     : 'Not requested yet',
                   Icon: Mic,
                 },
-                {
-                  label: 'Screen share',
-                  ok: screenShareReady,
-                  detail: !state.screenShareSupported
-                    ? 'Unavailable in this browser'
-                    : screenShareReady
-                    ? 'Ready'
-                    : permissionsRequested
-                    ? 'Choose a screen or tab to share…'
-                    : 'Not requested yet',
-                  Icon: MonitorUp,
-                },
+                ...(proctoringSettingEnabled
+                  ? [{
+                      label: 'Screen share',
+                      ok: screenShareReady,
+                      detail: !state.screenShareSupported
+                        ? 'Unavailable in this browser'
+                        : screenShareReady
+                        ? 'Ready'
+                        : permissionsRequested
+                        ? 'Choose a screen or tab to share…'
+                        : 'Not requested yet',
+                      Icon: MonitorUp,
+                    }]
+                  : []),
               ].map(({ label, ok, detail, Icon }) => (
                 <div key={label} className="gate-check">
                   <div className="gate-check-l">
@@ -1125,39 +1309,22 @@ export default function Interview() {
                   ? 'Camera access was denied.'
                   : 'Microphone access was denied.'}{' '}
                 Click <strong>Grant required access</strong> to try again. If no prompt appears, click
-                the 🔒 icon in your browser&apos;s address bar, set Camera/Microphone to <em>Allow</em>,
-                then click Grant required access again.
+                the 🔒 icon in your browser&apos;s address bar, set{' '}
+                {state.permissionDenied && micDenied ? 'Camera/Microphone' : state.permissionDenied ? 'Camera' : 'Microphone'} to{' '}
+                <em>Allow</em>, then click Grant required access again.
               </p>
             )}
           </div>
         </div>
       )}
 
-      {/* Gaze calibration — only after the candidate clicks to proceed */}
-      {consentGiven && !calibration && permissionsAcknowledged && (
+      {/* Gaze calibration — only after the candidate clicks to proceed, and only
+          when proctoring (camera/gaze tracking) is actually on for this job. */}
+      {consentGiven && !calibration && permissionsAcknowledged && proctoringSettingEnabled && (
         <GazeCalibration
           videoRef={videoRef}
           onComplete={setCalibration}
-          onSkip={() =>
-            setCalibration({
-              thresholdX: 0.18,
-              thresholdY: 0.22,
-              neutralX: 0,
-              neutralY: 0,
-              pointData: [],
-              qualityScore: 0,
-              accepted: true,
-              rejectionReason: null,
-              rangeX: 0,
-              rangeY: 0,
-              // Zero-config: no vertical sweep → the guard falls back to the default band and seeds the
-              // live pitch baseline from the first live frame (headPitchDeg is ignored when untrusted).
-              vTopEdge: 0,
-              vBottomEdge: 0,
-              vSweep: 0,
-              headPitchDeg: 0,
-            })
-          }
+          onSkip={() => setCalibration(DEFAULT_CALIBRATION)}
         />
       )}
 
@@ -1209,7 +1376,7 @@ export default function Interview() {
               <i />
             </span>
             <span className="connection-text">
-              {socket?.readyState === WebSocket.OPEN ? 'Excellent connection' : 'Connecting…'}
+              {wsReconnecting ? 'Reconnecting…' : socket?.readyState === WebSocket.OPEN ? 'Excellent connection' : 'Connecting…'}
             </span>
             <span className="timer">{clock}</span>
           </div>
@@ -1259,13 +1426,24 @@ export default function Interview() {
 
         <main className="content">
           <section className="avatar-panel">
-            <iframe
-              className="pixel-frame"
-              src={avatarSrc}
-              title="Unreal Engine Pixel Streaming Avatar"
-              allow="microphone; camera; autoplay; fullscreen; gamepad; xr-spatial-tracking"
-              referrerPolicy="no-referrer"
-            />
+            {hasRealAvatar ? (
+              <iframe
+                className="pixel-frame"
+                src={avatarSrc}
+                title="Unreal Engine Pixel Streaming Avatar"
+                allow="microphone; camera; autoplay; fullscreen; gamepad; xr-spatial-tracking"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="pixel-frame avatar-placeholder">
+                <div style={{ fontSize: 40 }}>✦</div>
+                <div style={{ fontWeight: 700, marginTop: 10 }}>Avatar preview unavailable</div>
+                <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4, maxWidth: 320, textAlign: 'center' }}>
+                  No avatar stream is configured in this environment. The interview
+                  itself (questions, transcript, proctoring) continues normally.
+                </div>
+              </div>
+            )}
             <div className="avatar-overlay" />
             <div className="identity">
               <div className="identity-icon">✦</div>
@@ -1279,7 +1457,7 @@ export default function Interview() {
             </div>
             {/* Candidate camera as a Google-Meet-style PiP in the corner of Lina's
                 panel, so the right column is free to show the full question. */}
-            <section className="candidate-panel">
+            <section className={`candidate-panel${voiceActive && micOn ? ' speaking' : ''}`}>
               <video
                 ref={videoRef}
                 muted
@@ -1296,6 +1474,22 @@ export default function Interview() {
                 <div className="mic">{micOn ? '🎙' : '🔇'}</div>
               </div>
             </section>
+
+            {/* Demo/debug only: proves whether browser STT is actually hearing
+                anything, live — instead of only finding out after the interview
+                ends with an empty "Transcript unavailable" report. */}
+            {isDemoOrDebug && (
+              <div className="stt-debug-bar">
+                <span className={`stt-dot stt-${transcript.sttStatus}`} />
+                {transcript.sttStatus === 'unsupported'
+                  ? 'STT unsupported in this browser — use Chrome or Edge'
+                  : transcript.sttStatus === 'error'
+                  ? `STT error: ${transcript.sttError}`
+                  : transcript.liveCaption
+                  ? `"${transcript.liveCaption}"`
+                  : 'Listening for your voice…'}
+              </div>
+            )}
           </section>
 
           <aside className="right-stack">
@@ -1305,8 +1499,13 @@ export default function Interview() {
               </div>
               <h2>{question.text}</h2>
               <div className="question-meta">
-                {useLina ? 'Interviewer asked' : 'Question'} {String(qIdx + 1).padStart(2, '0')}/
-                {String(qList.length).padStart(2, '0')}
+                {useLina
+                  // Lina's questions are reconstructed live from the transcript, so
+                  // qList.length is only "how many asked so far", not a reliable
+                  // total (it always equals qIdx + 1) — showing it as a fraction
+                  // would be misleading, so show just the running count instead.
+                  ? `Interviewer asked ${String(qIdx + 1).padStart(2, '0')}`
+                  : `Question ${String(qIdx + 1).padStart(2, '0')}/${String(qList.length).padStart(2, '0')}`}
               </div>
               <p>{question.hint}</p>
               <div className="question-actions">
@@ -1517,6 +1716,11 @@ export default function Interview() {
               <DebugRow label="WebSocket" value={wsLabel(socket)} ok={socket?.readyState === WebSocket.OPEN} />
               <DebugRow label="Calibrated" value={calibration ? `yes (q=${calibration.qualityScore})` : 'no'} ok={!!calibration} />
               <DebugRow label="Recording" value={recordingStatus} />
+              <DebugRow
+                label="Candidate STT"
+                value={transcript.sttError ? `${transcript.sttStatus} (${transcript.sttError})` : transcript.sttStatus}
+                ok={transcript.sttStatus === 'listening'}
+              />
             </div>
 
             <div className="debug-section-title">Live proctoring state</div>

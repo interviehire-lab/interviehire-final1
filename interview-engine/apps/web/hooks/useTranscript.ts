@@ -54,6 +54,18 @@ export function useTranscript(sessionId: string) {
   const candidateTextRef = useRef<string>('');
   const [aiToneAssessment, setAiToneAssessment] = useState<AiToneAssessment | null>(null);
 
+  // Visibility into browser STT — this used to fail 100% silently (no console
+  // output, no UI, zero transcript captured) for any of: unsupported browser
+  // (Firefox/Safari have no SpeechRecognition), mic permission actually denied,
+  // no network reaching the browser's speech backend, or repeated 'no-speech'/
+  // 'not-allowed'/'service-not-allowed' errors. `sttStatus`/`sttError` let the
+  // room show a real indicator instead of silently producing an empty transcript.
+  const [sttStatus, setSttStatus] = useState<'unsupported' | 'idle' | 'listening' | 'error'>('idle');
+  const [sttError, setSttError] = useState<string | null>(null);
+  // Live caption text (interim + final), for the demo/debug on-screen caption —
+  // separate from queueRef, which only holds committed events for the backend.
+  const [liveCaption, setLiveCaption] = useState('');
+
   // Mark the interview start so timestamps are relative to it.
   const markStart = useCallback(() => {
     startRef.current = Date.now();
@@ -150,35 +162,54 @@ export function useTranscript(sessionId: string) {
   const startBrowserSTT = useCallback(() => {
     if (typeof window === 'undefined') return false;
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR || recognitionRef.current) return false;
+    if (!SR) {
+      console.error('[STT] SpeechRecognition unsupported in this browser — candidate speech will NOT be captured. Use Chrome or Edge.');
+      setSttStatus('unsupported');
+      setSttError('Speech recognition is not supported in this browser (need Chrome or Edge).');
+      return false;
+    }
+    if (recognitionRef.current) return false;
     try {
       const rec = new SR();
       rec.continuous = true;
       rec.interimResults = true;
       rec.lang = 'en-US';
       rec.onresult = (e: any) => {
+        setSttStatus('listening');
+        let interim = '';
         for (let i = e.resultIndex; i < e.results.length; i += 1) {
           const result = e.results[i];
           const transcript = result[0]?.transcript ?? '';
-          recordEvent({
-            speaker: 'candidate',
-            text: transcript,
-            source: 'browser_stt',
-            isFinal: Boolean(result.isFinal),
-          });
+          if (result.isFinal) {
+            recordEvent({ speaker: 'candidate', text: transcript, source: 'browser_stt', isFinal: true });
+          } else {
+            interim += transcript;
+          }
         }
+        setLiveCaption(interim || (queueRef.current[queueRef.current.length - 1]?.text ?? ''));
       };
-      rec.onerror = () => { /* transient STT errors are non-fatal */ };
+      rec.onerror = (e: any) => {
+        // A silent no-speech timeout is normal (candidate pausing) — everything
+        // else is worth knowing about, since this used to fail with zero trace.
+        if (e?.error === 'no-speech') return;
+        console.error('[STT] recognition error:', e?.error, e?.message || '');
+        setSttStatus('error');
+        setSttError(String(e?.error || 'unknown error'));
+      };
       rec.onend = () => {
         // auto-restart while we still hold the ref (network blips end recognition)
         if (recognitionRef.current === rec) {
-          try { rec.start(); } catch { /* already started / not allowed */ }
+          try { rec.start(); } catch (err) { console.error('[STT] restart failed:', err); }
         }
       };
       rec.start();
       recognitionRef.current = rec;
+      setSttStatus('idle'); // flips to 'listening' on first onresult
       return true;
-    } catch {
+    } catch (err) {
+      console.error('[STT] failed to start:', err);
+      setSttStatus('error');
+      setSttError(String((err as any)?.message || err));
       return false;
     }
   }, [recordEvent]);
@@ -328,6 +359,9 @@ export function useTranscript(sessionId: string) {
 
   return {
     aiToneAssessment,
+    sttStatus,
+    sttError,
+    liveCaption,
     markStart,
     nowMs,
     recordEvent,

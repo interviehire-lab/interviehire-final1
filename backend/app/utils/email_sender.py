@@ -264,7 +264,8 @@ def send_ical_invitation_email(
     organizer_name: str = "IntervieHire Host"
 ) -> bool:
     subject = f"Confirmed: {stage_name} Scheduled - {job_title}"
-    time_str = start_time.strftime("%B %d, %Y at %I:%M %p UTC")
+    from app.utils.timezones import to_ist
+    time_str = to_ist(start_time).strftime("%B %d, %Y at %I:%M %p IST")
     
     html_content = f"""
     <!DOCTYPE html>
@@ -483,6 +484,132 @@ def send_ical_invitation_email(
     except Exception as e:
         logger.error(f"Error sending iCalendar email to {candidate_email}: {e}")
         return False
+
+def send_interview_reminder_email(
+    candidate_name: str,
+    candidate_email: str,
+    job_title: str,
+    stage_name: str,
+    start_time: datetime,
+    interview_link: str,
+) -> bool:
+    """Reminder email sent ~REMINDER_MINUTES_BEFORE the scheduled interview start
+    (see `app/jobs/reminders.py`). Reuses the dark-theme card styling from
+    `send_ical_invitation_email` for visual consistency. No `.ics` attachment —
+    that was already sent at confirmation time. Routes through `send_html_email`
+    (Resend/SMTP-blocked-on-Railway), same as every other transactional email here."""
+    subject = f"Starting soon: {stage_name} in 30 minutes"
+    from app.utils.timezones import to_ist
+    time_str = to_ist(start_time).strftime("%B %d, %Y at %I:%M %p IST")
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Interview Starting Soon</title>
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #0b0f19;
+                color: #f3f4f6;
+                margin: 0;
+                padding: 40px 0;
+            }}
+            .card {{
+                max-width: 600px;
+                margin: 0 auto;
+                background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 16px;
+                padding: 40px;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+            }}
+            h2 {{
+                color: #38bdf8;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                padding-bottom: 15px;
+                margin-top: 0;
+                font-size: 24px;
+            }}
+            p {{
+                line-height: 1.6;
+                font-size: 15px;
+            }}
+            .time-box {{
+                background: rgba(56, 189, 248, 0.05);
+                border-left: 4px solid #38bdf8;
+                padding: 20px;
+                margin: 25px 0;
+                border-radius: 0 12px 12px 0;
+            }}
+            .time-label {{
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: #94a3b8;
+                margin-bottom: 5px;
+            }}
+            .time-value {{
+                font-size: 18px;
+                font-weight: bold;
+                color: #f3f4f6;
+            }}
+            .btn-group {{
+                margin: 30px 0;
+                text-align: center;
+            }}
+            .btn {{
+                display: inline-block;
+                background-color: #38bdf8;
+                color: #0f172a;
+                text-decoration: none;
+                padding: 12px 30px;
+                font-weight: bold;
+                border-radius: 8px;
+                margin: 10px;
+                text-align: center;
+                transition: all 0.2s ease;
+            }}
+            .btn:hover {{
+                background-color: #7dd3fc;
+                transform: translateY(-2px);
+            }}
+            .footer {{
+                font-size: 12px;
+                color: #64748b;
+                margin-top: 40px;
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
+                padding-top: 20px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>Your {stage_name} starts soon</h2>
+            <p>Dear {candidate_name},</p>
+            <p>This is a reminder that your <strong>{stage_name}</strong> for the <strong>{job_title}</strong> role is starting soon.</p>
+
+            <div class="time-box">
+                <div class="time-label">Interview Date & Time</div>
+                <div class="time-value">{time_str}</div>
+            </div>
+
+            <p>Please join a few minutes early to make sure your camera and microphone are working.</p>
+
+            <div class="btn-group">
+                <a href="{interview_link}" class="btn">Join Interview</a>
+            </div>
+
+            <div class="footer">
+                <p>This is an automated message from the IntervieHire AI Recruitment Platform.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return send_html_email(candidate_email, subject, html)
+
 
 def send_reschedule_confirmation_email(candidate_name: str, candidate_email: str, job_title: str, stage_name: str, new_time_str: str) -> bool:
     # Deprecated/Fallback: Redirecting reschedules directly through multi-part RFC invites above

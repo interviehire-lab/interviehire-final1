@@ -482,6 +482,15 @@ body.light-theme .afd-item:hover { background: rgba(0,0,0,0.03); }
   cursor: pointer;
 }
 .sched-tz-select:focus { border-color: var(--glass-border-gold); }
+.sched-tz-fixed {
+  padding: 9px 12px;
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  font-family: var(--font-body);
+}
 .sched-range-row {
   display: flex;
   align-items: center;

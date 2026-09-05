@@ -9,7 +9,7 @@
   Self-contained page (no build step) so it doesn't touch the dashboard's tab
   internals. Reuses the existing login cookie. Open at:
      /talent-finder.html?jobId=<JOB_UUID>
-  API base auto-detects localhost:8002/api; override with ?api=<url>.
+  API base auto-detects localhost:8000/api; override with ?api=<url>.
   To wire it as an in-job-role tab later, add a link/button in the job detail:
      <a href="/talent-finder.html?jobId=${job.id}">Talent Finder</a>
 -->
@@ -117,7 +117,7 @@
 <script>
 const qs = new URLSearchParams(location.search);
 const JOB_ID = qs.get('jobId') || '';
-const API = (qs.get('api') || (location.protocol+'//'+location.hostname+':8002/api')).replace(/\/$/,'');
+const API = (qs.get('api') || (location.protocol+'//'+location.hostname+':8000/api')).replace(/\/$/,'');
 let SOURCES = [];           // available source descriptors
 let CSV_ROWS = [];          // parsed rows from /import/csv
 let LAST_RESULTS = [];      // for export + drawer

@@ -49,16 +49,50 @@ if TEST_DB:
     _engine = create_engine(TEST_DB)
     _Session = sessionmaker(bind=_engine)
 
+    # Only drop the backend-owned tables between tests — never the Prisma-owned engine
+    # tables. Postgres refuses to drop InterviewSession (etc.) once the real Prisma
+    # schema is pushed: it also owns TranscriptEvent/InterviewTranscript, which
+    # FK-reference InterviewSession and aren't in SQLAlchemy's Base.metadata at all,
+    # so a plain drop_all() hits "DependentObjectsStillExist".
+    _PRISMA_OWNED = {"Company", "Candidate", "JobRole", "Question", "InterviewSession", "ProctoringLog", "ConsentLog"}
+    _backend_only_tables = [t for name, t in Base.metadata.tables.items() if name not in _PRISMA_OWNED]
+
+    # Every Prisma-owned table, incl. TranscriptEvent/InterviewTranscript which aren't in
+    # SQLAlchemy's Base.metadata at all (see the drop-order comment below) — truncated
+    # (never dropped) between tests. Without this, rows never get cleared: these tables
+    # persist across the whole life of the disposable DB (every test run, and every
+    # separate pytest invocation against the same container), so leftover rows from a
+    # PRIOR test/run accumulate. ConsentLog is the sharpest case — it has no FK to
+    # InterviewSession (see data_rights.py's docstring), so it survives even a Candidate
+    # cascade-delete, and resolve_targets/build_export_package deliberately match it by
+    # `candidateEmail == email` (DPDP: catch orphaned consent records) — since every
+    # _seed_subject() call here defaults to the same "jane@example.com", that OR-match
+    # sweeps up every prior leftover row and inflates counts non-deterministically.
+    _PRISMA_TABLES_SQL = (
+        'TRUNCATE TABLE "Company", "Candidate", "JobRole", "Question", "InterviewSession", '
+        '"ProctoringLog", "ConsentLog", "TranscriptEvent", "InterviewTranscript" CASCADE'
+    )
+
 
 @pytest.fixture
 def db():
+    from sqlalchemy import text
+    with _engine.begin() as conn:
+        conn.execute(text(_PRISMA_TABLES_SQL))
     Base.metadata.create_all(bind=_engine)
     session = _Session()
     try:
         yield session
     finally:
         session.close()
-        Base.metadata.drop_all(bind=_engine)
+        # metadata.drop_all(tables=...) still sweeps ALL Postgres ENUM types across the
+        # whole metadata regardless of the tables filter (a SQLAlchemy/PG quirk), which
+        # re-triggers the same DependentObjectsStillExist error on RoleType/Difficulty/
+        # SessionStatus (owned by the excluded Prisma tables) and rolls back the entire
+        # drop. Per-table .drop() in reverse dependency order sidesteps that sweep.
+        for table in reversed(Base.metadata.sorted_tables):
+            if table in _backend_only_tables:
+                table.drop(bind=_engine, checkfirst=True)
 
 
 def _seed_subject(db, email="jane@example.com", with_engine=True):

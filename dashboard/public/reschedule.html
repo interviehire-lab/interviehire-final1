@@ -10,7 +10,7 @@
   - GET  {API}/public/schedule/{token}   -> current interview details
   - POST {API}/public/reschedule/{token} -> set a new time (updates the calendar
                                             event + emails a fresh iCal invite)
-  API base auto-detects localhost:8002/api; override with ?api=<url>.
+  API base auto-detects localhost:8000/api; override with ?api=<url>.
 -->
 <style>
   :root{ --bg:#0b0f19; --panel:#111827; --panel2:#0f172a; --line:rgba(255,255,255,.08);
@@ -77,19 +77,45 @@
 
 <script>
   const qs = new URLSearchParams(location.search);
-  // API base: ?api= override → localhost:8002 in local dev → the production backend.
+  // API base: ?api= override → localhost:8000 in local dev → the production backend.
   const _isLocal = /^(localhost|127\.|192\.168\.|10\.)/.test(location.hostname);
   const API = (qs.get('api') || (_isLocal
-    ? location.protocol + '//' + location.hostname + ':8002/api'
+    ? location.protocol + '//' + location.hostname + ':8000/api'
     : 'https://interviehire-backend-production-ca93.up.railway.app/api')).replace(/\/$/, '');
   const token = qs.get('token');
   const $ = (id) => document.getElementById(id);
   let CTX = {};
 
-  function show(id){ ['loading','form','done','fatal'].forEach(s => $(s).style.display = s === id ? (id==='form'||id==='loading'?'block':'block') : 'none'); }
-  function fmt(iso){ if(!iso) return 'Not set yet'; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  // All interview scheduling is IST (Asia/Kolkata, UTC+05:30) — regardless of the
+  // candidate's own device/browser timezone. The <input type="datetime-local"> is
+  // an inherently timezone-less widget (just a naive Y-M-D H:m string), so we do
+  // the IST<->UTC math ourselves rather than trusting the browser's local offset.
+  const IST_OFFSET_MS = (5 * 60 + 30) * 60000;
   function pad(n){ return String(n).padStart(2,'0'); }
-  function toLocalInputValue(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes()); }
+  // A real UTC instant (Date/epoch) -> its IST wall-clock parts, read via UTC
+  // getters on a shifted timestamp so this never depends on the browser's own tz.
+  function toISTParts(d){
+    const s = new Date(d.getTime() + IST_OFFSET_MS);
+    return { y:s.getUTCFullYear(), mo:s.getUTCMonth(), da:s.getUTCDate(), h:s.getUTCHours(), mi:s.getUTCMinutes() };
+  }
+  // IST wall-clock parts -> the real UTC Date instant they represent.
+  function fromISTParts(y, mo, da, h, mi){ return new Date(Date.UTC(y, mo, da, h, mi, 0) - IST_OFFSET_MS); }
+  // For prefilling the datetime-local input: IST wall-clock as a naive 'Y-M-DTH:m' string.
+  function toISTInputValue(d){ const p = toISTParts(d); return p.y+'-'+pad(p.mo+1)+'-'+pad(p.da)+'T'+pad(p.h)+':'+pad(p.mi); }
+  // For reading the datetime-local input back: its naive string, interpreted as IST -> real UTC Date.
+  function parseISTInputValue(val){
+    const [datePart, timePart] = val.split('T');
+    const [y, mo, da] = datePart.split('-').map(Number);
+    const [h, mi] = timePart.split(':').map(Number);
+    return fromISTParts(y, mo - 1, da, h, mi);
+  }
+  function show(id){ ['loading','form','done','fatal'].forEach(s => $(s).style.display = s === id ? (id==='form'||id==='loading'?'block':'block') : 'none'); }
+  function fmt(iso){
+    if(!iso) return 'Not set yet';
+    const d = new Date(iso);
+    if(isNaN(d)) return iso;
+    return d.toLocaleString('en-IN', {timeZone:'Asia/Kolkata', weekday:'short', year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) + ' IST';
+  }
 
   async function load(){
     if(!token){ $('fatal-text').textContent = 'No interview token in the link.'; show('fatal'); return; }
@@ -102,12 +128,17 @@
         row('Role', CTX.job_title) +
         row('Stage', CTX.stage) +
         row('Current time', fmt(CTX.scheduled_at));
-      // default the picker to the current time (or +1 day at 1pm if none)
+      // default the picker to the current time (or +1 day at 1pm IST if none) —
+      // always expressed as IST wall-clock, never the candidate's own device timezone.
       let base = CTX.scheduled_at ? new Date(CTX.scheduled_at) : null;
-      if(!base || isNaN(base)){ base = new Date(); base.setDate(base.getDate()+1); base.setHours(13,0,0,0); }
+      if(!base || isNaN(base)){
+        base = new Date(); base.setUTCDate(base.getUTCDate() + 1);
+        const p = toISTParts(base);
+        base = fromISTParts(p.y, p.mo, p.da, 13, 0);
+      }
       const input = $('newtime');
-      input.value = toLocalInputValue(base);
-      const min = new Date(); input.min = toLocalInputValue(min);
+      input.value = toISTInputValue(base);
+      input.min = toISTInputValue(new Date());
       show('form');
     }catch(e){ show('fatal'); }
   }
@@ -126,13 +157,15 @@
     const val = $('newtime').value;
     const msg = $('msg'); msg.className = 'msg'; msg.textContent = '';
     if(!val){ msg.className='msg err'; msg.textContent='Please pick a date and time.'; return; }
-    const chosen = new Date(val);
+    // The picker's naive value is IST wall-clock, not the browser's local timezone.
+    const chosen = parseISTInputValue(val);
     if(isNaN(chosen)){ msg.className='msg err'; msg.textContent='That date/time looks invalid.'; return; }
     if(chosen.getTime() < Date.now() - 60000){ msg.className='msg err'; msg.textContent='Please choose a time in the future.'; return; }
     const btn = $('submit'); btn.disabled = true; btn.textContent = 'Rescheduling…';
     try{
-      // send a naive local ISO (no timezone) — matches how the backend stores slots
-      const newTime = val.length === 16 ? val + ':00' : val;
+      // Send a real, unambiguous UTC instant (computed from the IST-interpreted
+      // picker value above) — never a naive/local string the backend would have to guess at.
+      const newTime = chosen.toISOString();
       const r = await fetch(API + '/public/reschedule/' + encodeURIComponent(token), {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ new_time: newTime })
