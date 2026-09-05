@@ -9,21 +9,8 @@ import { Check, Mic, MonitorUp, ShieldCheck, Video } from 'lucide-react';
 import type { CalibrationResult } from '@/hooks/useGazeCalibration';
 import { roomStyles } from './roomStyles';
 import { WaitingRoom } from './WaitingRoom';
+import { AIVisualAssistant, type AssistantMode } from './AIVisualAssistant';
 import { EARLY_ENTRY_MS } from '@interviehire/shared';
-
-// Deliberately left blank in local dev (.env.local) to keep the room usable
-// without a real UE5 Pixel Streaming server running — see AVATAR_CONFIGURED below,
-// which the room uses to show a placeholder instead of an iframe pointed at
-// this bogus default (which otherwise "successfully" embeds a real, broken,
-// user-visible "localhost refused to connect" browser error page).
-const AVATAR_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_AVATAR_URL);
-const AVATAR_URL = process.env.NEXT_PUBLIC_AVATAR_URL || 'http://localhost:80';
-// Optional dynamic avatar orchestrator (per-candidate independent Lina stream).
-// When NEXT_PUBLIC_ORCHESTRATOR_URL is UNSET, the room uses the single shared
-// AVATAR_URL exactly as before — zero behavior change. When set, and the link
-// carries ?jobId=, the room requests a dedicated per-job stream instead.
-const ORCHESTRATOR_URL = (process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || '').replace(/\/+$/, '');
-const DEFAULT_JOB_ID = process.env.NEXT_PUBLIC_DEFAULT_JOB_ID || '';
 
 // How early a candidate may enter the room before their scheduled slot. The
 // lobby unlocks and the engine's /start accepts a start once inside this window.
@@ -34,17 +21,6 @@ const CONSENT_VERSION = '2026-07-01';
 // Where the candidate reads the full privacy policy (linked from the consent
 // gate). Override per-deployment; falls back to the marketing-site path.
 const PRIVACY_URL = process.env.NEXT_PUBLIC_PRIVACY_URL || 'https://www.interviehire.com/privacy';
-
-function withPixelStreamingParams(rawUrl: string) {
-  try {
-    const url = new URL(rawUrl);
-    if (!url.searchParams.has('AutoConnect')) url.searchParams.set('AutoConnect', 'true');
-    if (!url.searchParams.has('HoveringMouse')) url.searchParams.set('HoveringMouse', 'true');
-    return url.toString();
-  } catch {
-    return rawUrl;
-  }
-}
 
 // Whether this session already has a matching, still-current "granted" consent
 // stored locally. Only a matching-version grant counts; older wording or a
@@ -131,7 +107,11 @@ export default function Interview() {
   const isDeliberateCloseRef = useRef(false);
   const wsReconnectAttemptRef = useRef(0);
   const wsReconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const assistantSpeechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const assistantThinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const candidateWasSpeakingRef = useRef(false);
   const [wsReconnecting, setWsReconnecting] = useState(false);
+  const [assistantActivity, setAssistantActivity] = useState<'idle' | 'thinking' | 'speaking'>('idle');
   // Per-candidate invite token from the link (?ih_invite=). Forwarded to the
   // token-enforced engine endpoints (/start, GET session, WS register).
   const inviteTokenRef = useRef('');
@@ -139,9 +119,10 @@ export default function Interview() {
   const captureStartedRef = useRef(false);
   const [transcriptReady, setTranscriptReady] = useState(false);
 
-  // Post-interview report flow: the transcript is captured live (candidate via
-  // browser STT, interviewer via avatar tab-audio → Whisper), finalized to a
-  // .txt, and evaluated into the final report — no manual paste.
+  // Post-interview report flow: candidate speech is captured through server ASR
+  // (with browser STT as a fallback), while native assistant prompts are stored
+  // directly as interviewer events. The transcript is finalized and evaluated
+  // into the final report without a manual paste step.
   const [ended, setEnded] = useState(false);
   const [reportStatus, setReportStatus] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
@@ -150,8 +131,6 @@ export default function Interview() {
   // driven off the stage the backend stamped into InterviewSession.settings.
   const [screeningOutcome, setScreeningOutcome] = useState<{ fits: boolean; link?: string; fitLabel?: string } | null>(null);
   const screeningEndTriggeredRef = useRef(false);
-  const [avatarCapture, setAvatarCapture] = useState<'off' | 'on' | 'error'>('off');
-  const [avatarCaptureMsg, setAvatarCaptureMsg] = useState('');
   // Per-job interview settings + branding, synced from the recruiter dashboard.
   const [interviewSettings, setInterviewSettings] = useState<any>(null);
   const [branding, setBranding] = useState<{ name?: string; primaryColor?: string; logoUrl?: string; whiteLabel?: boolean } | null>(null);
@@ -163,6 +142,21 @@ export default function Interview() {
   const [scheduledAtMs, setScheduledAtMs] = useState<number | null>(null);
   const [scheduleChecked, setScheduleChecked] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+
+  // Smooth over the conversational gap after an answer. The orb moves into a
+  // thinking state briefly instead of appearing frozen while the next response
+  // travels through transcription, evaluation, and the WebSocket.
+  useEffect(() => {
+    if (voiceActive) {
+      candidateWasSpeakingRef.current = true;
+      if (assistantThinkTimerRef.current) clearTimeout(assistantThinkTimerRef.current);
+      return;
+    }
+    if (!candidateWasSpeakingRef.current || assistantActivity === 'speaking') return;
+    candidateWasSpeakingRef.current = false;
+    setAssistantActivity('thinking');
+    assistantThinkTimerRef.current = setTimeout(() => setAssistantActivity('idle'), 4200);
+  }, [voiceActive, assistantActivity]);
 
   // --- Informed-consent gate (DPDP/GDPR): must precede ANY camera / mic /
   // screen capture. Biometric (face+gaze+voice) gets its own explicit consent;
@@ -189,67 +183,10 @@ export default function Interview() {
   const [micDenied, setMicDenied] = useState(false);
   const [permissionsAcknowledged, setPermissionsAcknowledged] = useState(false);
 
-  // Live interviewer questions. "Lina" (the Convai/UE avatar) asks her own
-  // questions; we surface what she ACTUALLY asked by polling the server
-  // transcript (her tab-audio → Deepgram, speaker:'interviewer'). Only populated
-  // while "Capture interviewer" is on; otherwise the premade blueprint questions
-  // below are shown as a fallback.
+  // Questions received live from Lina. They replace the blueprint fallback as
+  // soon as the conversation engine sends its first response.
   const [linaQuestions, setLinaQuestions] = useState<{ text: string; ts: number }[]>([]);
   const [linaIndex, setLinaIndex] = useState(0);
-  const linaCountRef = useRef(0);
-
-  useEffect(() => {
-    if (sessionId === 'demo-session' || avatarCapture !== 'on') return;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/interviews/${sessionId}/transcript`);
-        if (!res.ok) return;
-        const data = await res.json();
-        // Group Lina's CONSECUTIVE speech into turns (a turn = everything she
-        // said since the candidate last spoke) and show the FULL turn — so the
-        // candidate sees the COMPLETE question with its lead-in, not just a
-        // trailing fragment ("more specifically?") that sentence-splitting would
-        // surface on its own. Candidate speech closes the current turn. Keep only
-        // turns that actually contain a question.
-        const looksLikeQuestion = (s: string) =>
-          /\?/.test(s) ||
-          /\b(what|why|how|when|where|which|who|can you|could you|would you|do you|have you|tell me|describe|walk me|explain|give me|share|talk me)\b/i.test(s);
-        const qs: { text: string; ts: number }[] = [];
-        let cur: { text: string; ts: number } | null = null;
-        for (const e of (data.events || [])) {
-          const sp = e?.speaker;
-          if (sp === 'interviewer' && e?.source !== 'manual') {
-            const t = String(e?.text || '').trim();
-            if (!t) continue;
-            if (cur) cur.text = `${cur.text} ${t}`.trim();
-            else cur = { text: t, ts: e?.timestampMs ?? 0 };
-          } else if (sp === 'candidate') {
-            if (cur && cur.text.length > 8 && looksLikeQuestion(cur.text)) qs.push(cur);
-            cur = null;
-          }
-        }
-        if (cur && cur.text.length > 8 && looksLikeQuestion(cur.text)) qs.push(cur);
-        if (!alive) return;
-        if (qs.length > linaCountRef.current) {
-          linaCountRef.current = qs.length;
-          setLinaIndex(qs.length - 1); // jump to the newest question she asked
-        }
-        setLinaQuestions(qs);
-      } catch { /* transient — ignore */ }
-    };
-    poll();
-    const id = setInterval(poll, 5000);
-    return () => { alive = false; clearInterval(id); };
-  }, [sessionId, avatarCapture]);
-
-  // Defaults to the static shared avatar; the orchestrator effect below swaps in
-  // this session's dedicated StreamerId URL when the feature is enabled.
-  const [avatarSrc, setAvatarSrc] = useState(() => withPixelStreamingParams(AVATAR_URL));
-  // Whether we actually have somewhere real to point the iframe — the static env
-  // var, or (set below) a per-session URL handed back by the orchestrator. False
-  // means "no avatar server available in this environment," not an error state.
-  const [hasRealAvatar, setHasRealAvatar] = useState(AVATAR_CONFIGURED);
 
   // The dashboard's "Launch test interview" opens this room with ?sessionId=…
   // (the FastAPI test-session created from the job blueprint). Use it when
@@ -269,61 +206,6 @@ export default function Interview() {
     if (hasStoredConsent(resolvedId)) setConsentGiven(true);
     setConsentChecked(true);
   }, []);
-
-  // --- Optional: dynamic per-candidate avatar instance via the orchestrator ---
-  // Backward-compatible: no-op unless NEXT_PUBLIC_ORCHESTRATOR_URL is set AND the
-  // emailed link carries ?jobId= (the backend appends it). Requests a dedicated
-  // per-job Lina stream, heartbeats it, and releases it on unmount so the exe
-  // frees immediately. On capacity/error it silently keeps the shared avatar.
-  useEffect(() => {
-    if (!ORCHESTRATOR_URL) return;
-    if (typeof window === 'undefined') return;
-    // Wait for a real session id (don't spawn an exe for the 'demo-session'
-    // placeholder before it resolves).
-    if (!sessionId || sessionId === 'demo-session') return;
-    const params = new URLSearchParams(window.location.search);
-    const jobId = params.get('jobId') || params.get('job') || DEFAULT_JOB_ID;
-    if (!jobId) return;
-
-    const orchSession = sessionId;
-    let released = false;
-    let heartbeat: ReturnType<typeof setInterval> | undefined;
-
-    (async () => {
-      try {
-        const res = await fetch(`${ORCHESTRATOR_URL}/session`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ jobId, sessionId: orchSession }),
-        });
-        if (!res.ok) return; // capacity_full / error → keep the shared avatar
-        const data = await res.json();
-        if (released || !data?.playerUrl) return;
-        setAvatarSrc(withPixelStreamingParams(data.playerUrl));
-        setHasRealAvatar(true);
-        heartbeat = setInterval(() => {
-          fetch(`${ORCHESTRATOR_URL}/session/${encodeURIComponent(orchSession)}/heartbeat`, {
-            method: 'POST',
-          }).catch(() => {});
-        }, 30000);
-      } catch {
-        /* keep the shared avatar */
-      }
-    })();
-
-    return () => {
-      released = true;
-      if (heartbeat) clearInterval(heartbeat);
-      try {
-        fetch(`${ORCHESTRATOR_URL}/session/${encodeURIComponent(orchSession)}`, {
-          method: 'DELETE',
-          keepalive: true,
-        }).catch(() => {});
-      } catch {
-        /* noop */
-      }
-    };
-  }, [sessionId]);
 
   // Re-restore consent if the session id changes AFTER mount (e.g. the demo
   // bootstrap swaps in a real id). This can only reveal a prior consent — it
@@ -450,7 +332,35 @@ export default function Interview() {
         if (msg.type === 'ai_response') {
           setMessages((m) => [...m, { speaker: 'ai', text: msg.text }]);
           markAiFinished();
-          if (msg.text) transcript.recordEvent({ speaker: 'interviewer', text: msg.text, source: 'manual' });
+          if (msg.text) {
+            transcript.recordEvent({ speaker: 'interviewer', text: msg.text, source: 'manual' });
+            setLinaQuestions((current) => {
+              const next = [...current, { text: String(msg.text), ts: Date.now() }];
+              setLinaIndex(next.length - 1);
+              return next;
+            });
+
+            // The native assistant speaks without an external avatar stream. If
+            // browser TTS is unavailable/blocked, the visual speaking state still
+            // runs for a text-length-based duration and the question remains shown.
+            if (assistantSpeechTimerRef.current) clearTimeout(assistantSpeechTimerRef.current);
+            if (assistantThinkTimerRef.current) clearTimeout(assistantThinkTimerRef.current);
+            const estimatedMs = Math.max(1800, Math.min(12000, String(msg.text).split(/\s+/).length * 330));
+            setAssistantActivity('speaking');
+            assistantSpeechTimerRef.current = setTimeout(() => setAssistantActivity('idle'), estimatedMs);
+            try {
+              if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(String(msg.text));
+                utterance.rate = 0.98;
+                utterance.pitch = 1.04;
+                utterance.onstart = () => setAssistantActivity('speaking');
+                utterance.onend = () => setAssistantActivity('idle');
+                utterance.onerror = () => setAssistantActivity('idle');
+                window.speechSynthesis.speak(utterance);
+              }
+            } catch { /* text + visual state remain available */ }
+          }
         }
       };
       ws.onclose = () => {
@@ -475,6 +385,9 @@ export default function Interview() {
         clearTimeout(wsReconnectTimeoutRef.current);
         wsReconnectTimeoutRef.current = null;
       }
+      if (assistantSpeechTimerRef.current) clearTimeout(assistantSpeechTimerRef.current);
+      if (assistantThinkTimerRef.current) clearTimeout(assistantThinkTimerRef.current);
+      try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
       wsRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -671,12 +584,9 @@ export default function Interview() {
 
   // Start transcript capture as soon as calibration is done, independent of the
   // proctoring WebSocket. Candidate speech prefers server-side Deepgram/Whisper
-  // with browser STT as a keyless/error fallback. Interviewer (Lina) voice
-  // → auto-attached to the audio ALREADY shared on the mandatory proctoring
-  // screen-share, so it's captured without the candidate clicking anything (the
-  // old flow required a manual "Capture interviewer" click that real candidates
-  // skipped → no interviewer turns). If no audio was shared, the banner remains
-  // for a manual click (a user gesture, which can open its own audio prompt).
+  // with browser STT as a keyless/error fallback. Lina's text is supplied by the
+  // conversation engine, spoken with browser TTS, and recorded directly as an
+  // interviewer transcript event—no tab-audio capture or avatar stream needed.
   useEffect(() => {
     if (!calibration || captureStartedRef.current) return;
     captureStartedRef.current = true;
@@ -685,40 +595,11 @@ export default function Interview() {
     void transcript.startCandidateCaptureFromStream(micStream).then((result) => {
       if (!result.ok) transcript.startBrowserSTT();
     });
-    const sharedAudio = getScreenAudioStream?.() ?? null;
-    if (sharedAudio) {
-      const r = transcript.startAvatarCaptureFromStream(sharedAudio);
-      if (r.ok) {
-        setAvatarCapture('on');
-        setAvatarCaptureMsg('Interviewer voice is being recorded for transcription.');
-      }
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calibration]);
 
-  // Let the candidate enable interviewer-voice capture (a user gesture is
-  // required for tab-audio sharing). They pick the interview tab and tick
-  // "Share tab audio" — that audio is the avatar's voice (the mic is not in it).
-  async function enableAvatarCapture() {
-    // Reuse the audio already shared via the proctoring screen-share (single
-    // prompt). Only if that share carried no audio do we fall back to a
-    // dedicated getDisplayMedia prompt — so nothing breaks if the candidate
-    // skipped the "share audio" checkbox earlier.
-    const sharedAudio = getScreenAudioStream?.() ?? null;
-    const r = sharedAudio
-      ? transcript.startAvatarCaptureFromStream(sharedAudio)
-      : await transcript.startAvatarCapture();
-    if (r.ok) {
-      setAvatarCapture('on');
-      setAvatarCaptureMsg('Interviewer voice is being recorded for transcription.');
-    } else {
-      setAvatarCapture('error');
-      setAvatarCaptureMsg(r.reason || 'Could not start interviewer audio capture.');
-    }
-  }
-
-  // End → stop all capture, transcribe the avatar audio, finalize the .txt,
-  // complete the session, and evaluate into the report. Fully automatic.
+  // End → stop candidate capture, finalize the .txt, complete the session, and
+  // evaluate into the report. Fully automatic.
   async function endCall() {
     // Mark this as a deliberate close BEFORE closing the socket so the reconnect
     // handler doesn't try to reopen it once the interview is over.
@@ -737,11 +618,7 @@ export default function Interview() {
       endProctoringSession();
 
       setReportStatus('Transcribing interview audio…');
-      const [, audioRes] = await Promise.all([
-        transcript.stopCandidateCapture(),
-        transcript.stopAvatarCapture(),
-      ]);
-      if (audioRes?.error) setReportStatus(audioRes.error);
+      await transcript.stopCandidateCapture();
 
       await transcript.flush();
 
@@ -1037,6 +914,24 @@ export default function Interview() {
   const mm = String(Math.floor(clockSeconds / 60)).padStart(2, '0');
   const ss = String(clockSeconds % 60).padStart(2, '0');
   const clock = `${mm}:${ss}`;
+  const assistantMode: AssistantMode = reportBusy
+    ? 'thinking'
+    : ended
+      ? 'complete'
+      : wsReconnecting || socket?.readyState !== 1
+        ? 'connecting'
+        : assistantActivity === 'speaking'
+          ? 'speaking'
+          : assistantActivity === 'thinking'
+            ? 'thinking'
+            : calibration
+              ? 'listening'
+              : 'idle';
+  const assistantModeLabel = assistantMode === 'connecting'
+    ? 'Connecting'
+    : assistantMode === 'complete'
+      ? 'Complete'
+      : assistantMode.charAt(0).toUpperCase() + assistantMode.slice(1);
   // Prefer Lina's actually-asked questions (from the live transcript) over the
   // premade blueprint list; fall back to premade when none are captured yet.
   const useLina = linaQuestions.length > 0;
@@ -1403,55 +1298,9 @@ export default function Interview() {
           </div>
         )}
 
-        {/* Prominent prompt: the interviewer's voice can only be recorded if the
-            candidate shares the screen/tab WITH audio (browsers can't capture
-            device audio silently). Shown until capture is active. */}
-        {calibration && avatarCapture !== 'on' && (
-          <div
-            onClick={enableAvatarCapture}
-            style={{
-              position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 9000,
-              display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
-              padding: '12px 18px', borderRadius: 12, maxWidth: '92vw',
-              background: avatarCapture === 'error' ? 'linear-gradient(135deg,#7f1d1d,#b91c1c)' : 'linear-gradient(135deg,#0e7490,#0891b2)',
-              color: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.18)',
-              animation: 'ihpulse 1.6s ease-in-out infinite',
-            }}
-            title="Record the interviewer's voice"
-          >
-            <style>{'@keyframes ihpulse{0%,100%{box-shadow:0 8px 24px rgba(8,145,178,0.35)}50%{box-shadow:0 8px 36px rgba(8,145,178,0.75)}}'}</style>
-            <span style={{ fontSize: 22 }}>🎧</span>
-            <div style={{ lineHeight: 1.35 }}>
-              <div style={{ fontWeight: 800, fontSize: 14 }}>
-                {avatarCapture === 'error' ? 'Interviewer audio not captured — click to retry' : 'Click to record the interviewer’s voice'}
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.9 }}>
-                {avatarCaptureMsg || 'Pick “Entire Screen” or this tab and CHECK “Share system/tab audio”.'}
-              </div>
-            </div>
-          </div>
-        )}
-
         <main className="content">
           <section className="avatar-panel">
-            {hasRealAvatar ? (
-              <iframe
-                className="pixel-frame"
-                src={avatarSrc}
-                title="Unreal Engine Pixel Streaming Avatar"
-                allow="microphone; camera; autoplay; fullscreen; gamepad; xr-spatial-tracking"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="pixel-frame avatar-placeholder">
-                <div style={{ fontSize: 40 }}>✦</div>
-                <div style={{ fontWeight: 700, marginTop: 10 }}>Avatar preview unavailable</div>
-                <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4, maxWidth: 320, textAlign: 'center' }}>
-                  No avatar stream is configured in this environment. The interview
-                  itself (questions, transcript, proctoring) continues normally.
-                </div>
-              </div>
-            )}
+            <AIVisualAssistant mode={assistantMode} voiceActive={voiceActive && micOn} />
             <div className="avatar-overlay" />
             <div className="identity">
               <div className="identity-icon">✦</div>
@@ -1460,8 +1309,8 @@ export default function Interview() {
                 <span>AI Interviewer</span>
               </div>
             </div>
-            <div className="status-pill">
-              <i className="red-dot" /> Live · Associate
+            <div className={`status-pill assistant-status assistant-status--${assistantMode}`}>
+              <i className="assistant-status-dot" /> {assistantModeLabel}
             </div>
             {/* Candidate camera as a Google-Meet-style PiP in the corner of Lina's
                 panel, so the right column is free to show the full question. */}
@@ -1491,6 +1340,8 @@ export default function Interview() {
                 <span className={`stt-dot stt-${transcript.sttStatus}`} />
                 {transcript.sttStatus === 'unsupported'
                   ? 'STT unsupported in this browser — use Chrome or Edge'
+                  : transcript.sttStatus === 'unavailable'
+                  ? 'Live transcription unavailable here — server ASR or Chrome/Edge required'
                   : transcript.sttStatus === 'error'
                   ? `STT error: ${transcript.sttError}`
                   : transcript.liveCaption
@@ -1547,23 +1398,6 @@ export default function Interview() {
             </button>
           </div>
           <div className="control-actions">
-            <button
-              type="button"
-              title={
-                avatarCapture === 'on'
-                  ? avatarCaptureMsg || 'Capturing the interviewer’s voice ✓'
-                  : avatarCapture === 'error'
-                  ? avatarCaptureMsg || 'Interviewer audio not captured — click to retry'
-                  : 'Capture the interviewer’s voice for the transcript (share this tab with audio)'
-              }
-              onClick={enableAvatarCapture}
-              disabled={avatarCapture === 'on'}
-              style={{
-                color: avatarCapture === 'on' ? '#34d399' : avatarCapture === 'error' ? '#f87171' : undefined,
-              }}
-            >
-              🎧
-            </button>
             <button type="button" title="Microphone" onClick={toggleMic} className={micOn ? '' : 'muted'}>
               {micOn ? '🎙' : '🔇'}
             </button>

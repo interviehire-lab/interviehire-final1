@@ -77,7 +77,7 @@ export function useTranscript(sessionId: string) {
   // no network reaching the browser's speech backend, or repeated 'no-speech'/
   // 'not-allowed'/'service-not-allowed' errors. `sttStatus`/`sttError` let the
   // room show a real indicator instead of silently producing an empty transcript.
-  const [sttStatus, setSttStatus] = useState<'unsupported' | 'idle' | 'listening' | 'error'>('idle');
+  const [sttStatus, setSttStatus] = useState<'unsupported' | 'unavailable' | 'idle' | 'listening' | 'error'>('idle');
   const [sttError, setSttError] = useState<string | null>(null);
   // Live caption text (interim + final), for the demo/debug on-screen caption —
   // separate from queueRef, which only holds committed events for the backend.
@@ -175,7 +175,7 @@ export function useTranscript(sessionId: string) {
     [sessionId],
   );
 
-  // ── Browser Web Speech API capture for candidate speech (UE5 room) ──
+  // ── Browser Web Speech API fallback for candidate speech ──
   const startBrowserSTT = useCallback(() => {
     if (typeof window === 'undefined') return false;
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -209,6 +209,17 @@ export function useTranscript(sessionId: string) {
         // A silent no-speech timeout is normal (candidate pausing) — everything
         // else is worth knowing about, since this used to fail with zero trace.
         if (e?.error === 'no-speech') return;
+        if (e?.error === 'network' || e?.error === 'service-not-allowed') {
+          console.info('[STT] browser speech service is unavailable; server ASR is required in this browser.');
+          // Prevent onend from entering an endless restart/error loop. Browsers
+          // such as the in-app preview expose SpeechRecognition but cannot reach
+          // the vendor speech service, which is availability—not mic failure.
+          recognitionRef.current = null;
+          setSttStatus('unavailable');
+          setSttError('Live transcription is unavailable in this browser. Configure server ASR or use Chrome/Edge.');
+          try { rec.stop(); } catch { /* noop */ }
+          return;
+        }
         console.error('[STT] recognition error:', e?.error, e?.message || '');
         setSttStatus('error');
         setSttError(String(e?.error || 'unknown error'));
