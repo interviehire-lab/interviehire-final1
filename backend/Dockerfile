@@ -1,4 +1,10 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1
+
+# Railway can reuse this Dockerfile for the always-on API and the short-lived
+# reminder cron service. Set RUNTIME_TARGET=reminders only on the cron service.
+ARG RUNTIME_TARGET=api
+
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -22,6 +28,8 @@ RUN mkdir -p uploads/jd uploads/resumes uploads/attachments \
     && chown -R app:app /app \
     && chmod +x /usr/local/bin/docker-entrypoint.sh
 
+FROM base AS api
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
@@ -29,3 +37,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+
+FROM base AS reminders
+
+# Railway cron executions must finish and exit. This invokes the same idempotent
+# job as the internal HTTP endpoint, but avoids keeping an API process alive.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["python", "-m", "app.jobs.reminders"]
+
+FROM ${RUNTIME_TARGET} AS runtime

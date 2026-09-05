@@ -107,7 +107,7 @@ cross-network WebRTC). Start order on the PC: UE app → signalling (`:80`) → 
 
 | Service | Var | Value |
 |---|---|---|
-| engine | `DEEPGRAM_API_KEY` | avatar STT |
+| engine | `DEEPGRAM_API_KEY` | preferred server-side candidate + avatar STT |
 | engine | `OPENROUTER_API_KEY` / `DEEPSEEK_API_KEY` | LLM report (same OpenRouter key) |
 | engine + backend | `DATABASE_URL` | **Railway** Postgres — same URL for both (shared DB) |
 | backend | `FRONTEND_URL` | `https://app.interviehire.com` |
@@ -119,3 +119,9 @@ cross-network WebRTC). Start order on the PC: UE app → signalling (`:80`) → 
 | web | `NEXT_PUBLIC_AVATAR_URL` | `https://avatar.interviehire.com` |
 | dashboard | `NEXT_PUBLIC_API_URL` | backend on Render |
 | dashboard | `NEXT_PUBLIC_ENGINE_WEB_URL` | `https://interview.interviehire.com` |
+
+## Reminder automation on Railway
+
+The reminder runner is packaged as a short-lived Docker target. Follow
+[`deploy/RAILWAY-REMINDERS.md`](deploy/RAILWAY-REMINDERS.md) to add the separate
+five-minute Railway cron service and configure the canonical Twilio templates.

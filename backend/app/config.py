@@ -11,7 +11,7 @@ load_dotenv(_env_path)
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/hiring_dashboard"
- 
+
     # App
     SECRET_KEY: str = "change-this-in-production"
     APP_NAME: str = "Hiring Dashboard"
@@ -120,6 +120,16 @@ class Settings(BaseSettings):
     TWILIO_WHATSAPP_CONFIRMATION_CONTENT_SID: str = ""
     TWILIO_WHATSAPP_REMINDER_CONTENT_SID: str = ""
 
+    # Numbered Twilio Content variables are generated from these explicit semantic
+    # orders. The approved templates must use the same order; changing a template
+    # no longer requires a code deploy, only updating the corresponding order.
+    TWILIO_WHATSAPP_CONFIRMATION_VARIABLE_ORDER: str = (
+        "first_name,stage_name,job_title,org_name,date,time,interview_link,reschedule_link"
+    )
+    TWILIO_WHATSAPP_REMINDER_VARIABLE_ORDER: str = (
+        "first_name,stage_name,job_title,minutes_before,interview_link"
+    )
+
     # Interview reminder job (email + WhatsApp + robocall, ~REMINDER_MINUTES_BEFORE
     # the scheduled start). No global disable switch — email always attempts to send
     # regardless of Twilio config; only the Twilio-backed channels no-op individually
@@ -133,4 +143,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
- 

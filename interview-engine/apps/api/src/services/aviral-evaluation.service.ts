@@ -106,17 +106,22 @@ export async function evaluateInterviewWithAviral(sessionId: string): Promise<an
     niceToHaveSkills: session.jobRole.secondaryCriteria,
   };
 
-  const askedQuestionIndexes = new Set(
-    transcript
-      .filter((entry) => entry?.speaker === 'ai' && isValidQuestionIndex(entry.questionIndex, questions.length))
-      .map((entry) => Number(entry.questionIndex)),
-  );
-  const answeredQuestions = pairAnsweredEvalQuestions(transcript, questions)
-    .filter(({ questionIndex }) => askedQuestionIndexes.has(questionIndex));
+  // Candidate audio can be transcribed server-side even when interviewer/tab
+  // audio was unavailable. In that valid case there is no surviving `ai` turn,
+  // but pairAnsweredEvalQuestions can still associate explicit/fallback indexes.
+  // Requiring a separate ai turn here caused a successful primary report to be
+  // paired with an empty, zero-score Aviral report.
+  const answeredQuestions = pairAnsweredEvalQuestions(transcript, questions);
 
   const inputs: CandidateResponseInput[] = answeredQuestions.map(({ question, answer }, index) =>
     buildResponseInput(session.id, question, answer, index),
   );
+
+  if (inputs.length === 0) {
+    throw new Error(
+      'Structured evaluation has no candidate answers to grade. Refusing to persist an empty zero-score report.',
+    );
+  }
 
   const rawEvaluations = await evaluateInputsWithDeepSeek(context, inputs);
 
@@ -496,8 +501,4 @@ function normalizeTranscript(raw: unknown): TranscriptEntry[] {
     }
   }
   return [];
-}
-
-function isValidQuestionIndex(value: unknown, questionCount: number): value is number {
-  return Number.isInteger(value) && Number(value) >= 0 && Number(value) < questionCount;
 }

@@ -181,13 +181,10 @@ export async function evaluateInterviewData(input: {
     companyEvaluationNotes: 'Transcript-only evaluation. Proctoring events are shown separately and do not change scoring.',
   };
 
-  const askedQuestionIndexes = new Set(
-    transcript
-      .filter((entry) => entry?.speaker === 'ai' && isValidQuestionIndex(entry.questionIndex, questions.length))
-      .map((entry) => Number(entry.questionIndex)),
-  );
-  const answeredQuestions = pairAnsweredEvalQuestions(transcript, questions)
-    .filter(({ questionIndex }) => askedQuestionIndexes.has(questionIndex));
+  // Server-side candidate ASR remains evaluable even when interviewer/tab audio
+  // was not captured. The pairing helper uses explicit indexes when available
+  // and a deterministic sequential fallback otherwise.
+  const answeredQuestions = pairAnsweredEvalQuestions(transcript, questions);
   const preparedAnswers = answeredQuestions.map(({ question, answer, questionIndex, answerTurn }) => {
     return prepareAnswerEvaluation({
       answerId: `${input.interviewId}-question-${questionIndex + 1}-answer-${answerTurn}`,
@@ -196,6 +193,9 @@ export async function evaluateInterviewData(input: {
       context,
     });
   });
+  if (preparedAnswers.length === 0) {
+    throw new Error('Evaluation has no candidate answers to grade; refusing to persist an empty zero-score report.');
+  }
   const [evaluations, authorshipAssessments] = await Promise.all([
     evaluatePreparedAnswers(context, preparedAnswers),
     analyzeAiAuthorship(preparedAnswers.map((answer) => ({
@@ -1219,9 +1219,6 @@ function normalizeTranscript(raw: unknown): TranscriptEntry[] {
   return [];
 }
 
-function isValidQuestionIndex(value: unknown, questionCount: number): value is number {
-  return Number.isInteger(value) && Number(value) >= 0 && Number(value) < questionCount;
-}
 
 function collectCoverageEvidence(comparison: EvalModelAnswerComparison): string[] {
   return [

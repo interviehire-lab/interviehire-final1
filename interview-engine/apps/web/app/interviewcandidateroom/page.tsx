@@ -670,7 +670,8 @@ export default function Interview() {
   }, [calibration, socket]);
 
   // Start transcript capture as soon as calibration is done, independent of the
-  // proctoring WebSocket. Candidate speech → browser STT. Interviewer (Lina) voice
+  // proctoring WebSocket. Candidate speech prefers server-side Deepgram/Whisper
+  // with browser STT as a keyless/error fallback. Interviewer (Lina) voice
   // → auto-attached to the audio ALREADY shared on the mandatory proctoring
   // screen-share, so it's captured without the candidate clicking anything (the
   // old flow required a manual "Capture interviewer" click that real candidates
@@ -680,7 +681,10 @@ export default function Interview() {
     if (!calibration || captureStartedRef.current) return;
     captureStartedRef.current = true;
     transcript.markStart();
-    transcript.startBrowserSTT();
+    const micStream = videoRef.current?.srcObject as MediaStream | null;
+    void transcript.startCandidateCaptureFromStream(micStream).then((result) => {
+      if (!result.ok) transcript.startBrowserSTT();
+    });
     const sharedAudio = getScreenAudioStream?.() ?? null;
     if (sharedAudio) {
       const r = transcript.startAvatarCaptureFromStream(sharedAudio);
@@ -730,12 +734,16 @@ export default function Interview() {
     try {
       stopRecordingCapture();
       transcript.stopBrowserSTT();
-      void transcript.flush();
       endProctoringSession();
 
-      setReportStatus('Transcribing interviewer audio…');
-      const audioRes = await transcript.stopAvatarCapture();
+      setReportStatus('Transcribing interview audio…');
+      const [, audioRes] = await Promise.all([
+        transcript.stopCandidateCapture(),
+        transcript.stopAvatarCapture(),
+      ]);
       if (audioRes?.error) setReportStatus(audioRes.error);
+
+      await transcript.flush();
 
       setReportStatus('Building transcript…');
       const fin = await transcript.finalize();

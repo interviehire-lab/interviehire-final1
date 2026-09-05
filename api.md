@@ -2857,6 +2857,13 @@ Status codes: 200 OK; 401 unauthorized.
 
 Notes: Delegates to `app.jobs.reminders.run_reminders`, also runnable as a CLI (`python -m app.jobs.reminders [--dry-run] [--limit N]`), modeled directly on `app/jobs/retention.py`'s shape. Unlike retention, **no global disable switch** — for each of the `screening`/`functional` stages independently, selects applicants with `{stage}_scheduled_at` set, in the future, within the reminder window, `{stage}_status == InterviewStatus.scheduled`, and `{stage}_reminder_sent_at IS NULL`; bounded by `limit` (query not exposed — CLI only) or `REMINDER_MAX_PER_RUN` (default 200) total across both stages. For each due applicant+stage (outside dry-run): sends the reminder email (`send_interview_reminder_email`, always attempted — does not depend on Twilio config), then independently best-effort attempts a WhatsApp message and a robocall (each individually no-ops when Twilio isn't configured or the phone isn't real — see `app/utils/twilio_client.py` / `app/utils/phone.py`; a failure on one channel never blocks the others), then sets `{stage}_reminder_sent_at = now()` and commits regardless of individual channel outcomes (so a reminder is attempted exactly once per applicant per stage, never retried). Reminder timing is **not** exact-30-minute precision — it fires on whichever run first observes the applicant inside the window, so actual lead time is between `REMINDER_MINUTES_BEFORE` and (`REMINDER_MINUTES_BEFORE` − cron interval) minutes. New config (`app/config.py`): `REMINDER_MINUTES_BEFORE` (default 30), `REMINDER_MAX_PER_RUN` (default 200), plus `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_WHATSAPP_FROM`/`TWILIO_VOICE_FROM` (all blank by default — Twilio-backed channels no-op until configured).
 
+#### GET /api/internal/integrations/status
+
+Return deployment-readiness booleans for Twilio senders, authentication, Content
+templates, configured variable orders, and reminder batch settings. Secret values
+are never returned. Requires the same `x-internal-secret` header as the reminder
+runner; returns 401 when absent or incorrect.
+
 ---
 
 ## Interview Engine — Fastify
@@ -3586,9 +3593,16 @@ Status codes: 200 OK (may have stored:0 if all skipped); 400 Bad Request {"error
 
 Notes: Global rate limit (200/min). Calls recordEvents(sessionId, rawEvents) which upserts the InterviewTranscript metadata row (status 'recording'), normalizes each event, bulk-inserts via createMany, increments eventCount. Only the literal message 'Interview session not found' maps to 404.
 
+#### GET /api/interviews/{sessionId}/transcript/audio/status
+
+Reports whether server ASR is configured for the session. Returns
+`{ available: boolean, provider: "deepgram" | "whisper" | null }`, or 404 for an
+unknown session. The candidate room uses this to prefer server transcription and
+fall back to browser speech recognition without exposing provider credentials.
+
 #### POST /api/interviews/{sessionId}/transcript/audio
 
-Upload an audio recording (one speaker's audio, whole interview or a chunk) and transcribe it server-side (Whisper/Deepgram ASR) into timestamped transcript events. This is how the Convai avatar's voice becomes interviewer transcript lines.
+Upload candidate-microphone or interviewer-tab audio and transcribe it server-side (Deepgram preferred, Whisper fallback) into timestamped transcript events.
 
 - **Auth:** public. Server-side transcription requires DEEPGRAM_API_KEY or OPENAI_API_KEY; without it returns 503.
 - **Path params:** `sessionId`:string — the interview session id
@@ -3604,15 +3618,15 @@ startMs  (text)    optional  — number; offset in ms applied to transcribed seg
 Response: 200 OK (application/json), two success variants:
 ```
 // speech transcribed:
-{ ok: true, segments: number, stored: number, skipped: number }
+{ ok: true, provider: 'deepgram'|'whisper', segments: number, transcript: string, stored: number, skipped: number }
 // ASR returned no segments:
 { ok: true, stored: 0, note: 'No speech detected in the audio.' }
 ```
 (stored/skipped from recordEvents; events recorded with source:'whisper', isFinal:true, timestampMs = segment.startMs)
 
-Status codes: 200 OK; 400 Bad Request {"error":"No audio file uploaded"} (no file part); 404 Not Found {"error":"Session not found"} (unknown sessionId); 502 Bad Gateway {"error":<message|'Audio transcription failed'>, "stored":0} (transcription threw); 503 Service Unavailable {"error":"Server-side transcription is not configured. Set DEEPGRAM_API_KEY (or OPENAI_API_KEY) to transcribe interviewer audio.", "stored":0} (asrAvailable()===false).
+Status codes: 200 OK; 400 Bad Request {"error":"No audio file uploaded"} (no file part); 404 Not Found {"error":"Session not found"} (unknown sessionId); 502 Bad Gateway {"error":<message|'Audio transcription failed'>, "stored":0} (transcription threw); 503 Service Unavailable when neither ASR provider is configured.
 
-Notes: Global rate limit + @fastify/multipart default limits. Writes file synchronously to <cwd>/uploads (created if missing) before transcribing. transcribeAudioSegments(dest, startMs, mimeType) returns segments {text, startMs}; each becomes a transcript event for the resolved speaker.
+Notes: Global rate limit + @fastify/multipart default limits. Audio is written temporarily under `<cwd>/uploads`, transcribed, persisted as transcript events, and deleted in a `finally` block.
 
 #### GET /api/interviews/{sessionId}/transcript
 

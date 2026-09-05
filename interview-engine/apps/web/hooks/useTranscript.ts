@@ -36,16 +36,33 @@ interface QueuedEvent extends TranscriptEventInput {
 
 const FLUSH_INTERVAL_MS = 4000;
 
+function createAudioRecorder(stream: MediaStream): MediaRecorder {
+  const mimeType = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+  ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
+  return mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+}
+
 export function useTranscript(sessionId: string) {
   const startRef = useRef<number>(Date.now());
   const queueRef = useRef<QueuedEvent[]>([]);
   const flushingRef = useRef(false);
   const recognitionRef = useRef<any>(null);
+  const candidateRecorderRef = useRef<MediaRecorder | null>(null);
+  const candidateStreamRef = useRef<MediaStream | null>(null);
+  const candidateStartMsRef = useRef<number>(0);
+  const candidateSegTimerRef = useRef<any>(null);
+  const candidateActiveRef = useRef<boolean>(false);
+  const candidateUploadsRef = useRef<Set<Promise<any>>>(new Set());
   const avatarRecorderRef = useRef<MediaRecorder | null>(null);
   const avatarStreamRef = useRef<MediaStream | null>(null);
   const avatarStartMsRef = useRef<number>(0);
   const avatarSegTimerRef = useRef<any>(null);
   const avatarActiveRef = useRef<boolean>(false);
+  const avatarUploadsRef = useRef<Set<Promise<any>>>(new Set());
 
   // Live flagcheck: accumulate the candidate's finalized speech and run the
   // synchronous tier-1 AI-tone heuristics over it so the room can surface a
@@ -204,6 +221,7 @@ export function useTranscript(sessionId: string) {
       };
       rec.start();
       recognitionRef.current = rec;
+      setSttError(null);
       setSttStatus('idle'); // flips to 'listening' on first onresult
       return true;
     } catch (err) {
@@ -231,19 +249,26 @@ export function useTranscript(sessionId: string) {
   // lines. Must be called from a user gesture (browser requirement).
   // Upload one finished audio segment (a self-contained webm) for server-side
   // (Deepgram) transcription. startMs anchors the segment on the interview clock.
-  const uploadAvatarSegment = useCallback(async (blob: Blob, startMs: number) => {
+  const uploadAudioSegment = useCallback(async (
+    blob: Blob,
+    startMs: number,
+    speaker: TranscriptSpeaker,
+  ) => {
     if (!blob.size || !sessionId) return null;
     try {
       // Fields MUST come before the file (@fastify/multipart's req.file() only
       // exposes fields parsed before the file part).
       const form = new FormData();
-      form.append('speaker', 'interviewer');
+      form.append('speaker', speaker);
       form.append('startMs', String(Math.max(0, Math.round(startMs))));
-      form.append('file', blob, `interviewer-${Date.now()}.webm`);
+      const extension = blob.type.includes('mp4') ? 'mp4' : 'webm';
+      form.append('file', blob, `${speaker}-${Date.now()}.${extension}`);
       const res = await fetch(`${API_URL}/api/interviews/${sessionId}/transcript/audio`, { method: 'POST', body: form });
-      return await res.json().catch(() => null);
+      const result = await res.json().catch(() => null);
+      if (!res.ok) return { ok: false, status: res.status, ...(result ?? {}) };
+      return result;
     } catch {
-      return null;
+      return { ok: false, error: 'Audio transcription request failed.' };
     }
   }, [sessionId]);
 
@@ -254,19 +279,18 @@ export function useTranscript(sessionId: string) {
   const SEGMENT_MS = 20000;
   const recordOneSegment = useCallback((stream: MediaStream) => {
     if (!avatarActiveRef.current) return;
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
     const segStartMs = nowMs();
     avatarStartMsRef.current = segStartMs; // so stopAvatarCapture can anchor the final partial segment
     const chunks: BlobPart[] = [];
     let rec: MediaRecorder;
-    try { rec = new MediaRecorder(stream, { mimeType }); } catch { return; }
+    try { rec = createAudioRecorder(stream); } catch { return; }
     avatarRecorderRef.current = rec;
     rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
     rec.onstop = () => {
       const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-      void uploadAvatarSegment(blob, segStartMs);
+      const upload = uploadAudioSegment(blob, segStartMs, 'interviewer');
+      avatarUploadsRef.current.add(upload);
+      void upload.finally(() => avatarUploadsRef.current.delete(upload));
       // Chain the next segment while capture is still active.
       if (avatarActiveRef.current && avatarStreamRef.current) recordOneSegment(avatarStreamRef.current);
     };
@@ -274,7 +298,7 @@ export function useTranscript(sessionId: string) {
     avatarSegTimerRef.current = setTimeout(() => {
       try { rec.stop(); } catch { /* noop */ }
     }, SEGMENT_MS);
-  }, [nowMs, uploadAvatarSegment]);
+  }, [nowMs, uploadAudioSegment]);
 
   // Capture the avatar's voice from the DEVICE's audio output. Browsers can't
   // read it silently, so we use getDisplayMedia — the candidate must pick a
@@ -346,15 +370,120 @@ export function useTranscript(sessionId: string) {
         rec.onstop = () => resolve(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }));
         try { rec.requestData?.(); rec.stop(); } catch { resolve(new Blob([], { type: 'audio/webm' })); }
       });
-      result = await uploadAvatarSegment(blob, segStartMs);
+      const upload = uploadAudioSegment(blob, segStartMs, 'interviewer');
+      avatarUploadsRef.current.add(upload);
+      result = await upload.finally(() => avatarUploadsRef.current.delete(upload));
     }
+    await Promise.allSettled([...avatarUploadsRef.current]);
     avatarStreamRef.current?.getTracks().forEach((t) => t.stop());
     avatarStreamRef.current = null;
     return result;
-  }, [uploadAvatarSegment]);
+  }, [uploadAudioSegment]);
+
+  // ── Candidate microphone capture with server-side ASR ──
+  // Prefer Deepgram/Whisper when configured. Browser SpeechRecognition remains
+  // an automatic fallback for local/keyless development and provider failures.
+  const startCandidateCaptureFromStream = useCallback(async (
+    stream: MediaStream | null,
+  ): Promise<{ ok: boolean; reason?: string; provider?: string }> => {
+    const audioTracks = stream?.getAudioTracks() ?? [];
+    if (!audioTracks.length || typeof MediaRecorder === 'undefined') {
+      return { ok: false, reason: 'No microphone audio stream is available.' };
+    }
+
+    try {
+      const statusRes = await fetch(`${API_URL}/api/interviews/${sessionId}/transcript/audio/status`);
+      const status = await statusRes.json().catch(() => ({}));
+      if (!statusRes.ok || !status?.available) {
+        return { ok: false, reason: 'Server transcription is not configured.' };
+      }
+
+      candidateStreamRef.current = new MediaStream(audioTracks);
+      candidateActiveRef.current = true;
+      setSttStatus('listening');
+      setSttError(null);
+
+      const recordSegment = (audioStream: MediaStream): void => {
+        if (!candidateActiveRef.current) return;
+        const segStartMs = nowMs();
+        candidateStartMsRef.current = segStartMs;
+        const chunks: BlobPart[] = [];
+        let recorder: MediaRecorder;
+        try { recorder = createAudioRecorder(audioStream); } catch {
+          candidateActiveRef.current = false;
+          setSttStatus('error');
+          setSttError('Microphone recording could not start.');
+          startBrowserSTT();
+          return;
+        }
+        candidateRecorderRef.current = recorder;
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) chunks.push(event.data);
+        };
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+          const upload = uploadAudioSegment(blob, segStartMs, 'candidate').then((result) => {
+            if (result?.transcript) setLiveCaption(String(result.transcript));
+            if (result?.ok === false && candidateActiveRef.current) {
+              candidateActiveRef.current = false;
+              setSttStatus('error');
+              setSttError(result.error || 'Server transcription failed; using browser fallback.');
+              startBrowserSTT();
+            }
+            return result;
+          });
+          candidateUploadsRef.current.add(upload);
+          void upload.finally(() => candidateUploadsRef.current.delete(upload));
+          if (candidateActiveRef.current && candidateStreamRef.current) {
+            recordSegment(candidateStreamRef.current);
+          }
+        };
+        recorder.start();
+        candidateSegTimerRef.current = setTimeout(() => {
+          try { recorder.stop(); } catch { /* noop */ }
+        }, SEGMENT_MS);
+      };
+
+      recordSegment(candidateStreamRef.current);
+      return { ok: true, provider: String(status.provider || 'server') };
+    } catch {
+      return { ok: false, reason: 'Could not reach the server transcription service.' };
+    }
+  }, [nowMs, sessionId, startBrowserSTT, uploadAudioSegment]);
+
+  const stopCandidateCapture = useCallback(async (): Promise<void> => {
+    candidateActiveRef.current = false;
+    if (candidateSegTimerRef.current) {
+      clearTimeout(candidateSegTimerRef.current);
+      candidateSegTimerRef.current = null;
+    }
+    const recorder = candidateRecorderRef.current;
+    candidateRecorderRef.current = null;
+    if (recorder && recorder.state !== 'inactive') {
+      const startMs = candidateStartMsRef.current;
+      const blob: Blob = await new Promise((resolve) => {
+        const chunks: BlobPart[] = [];
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) chunks.push(event.data);
+        };
+        recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+        try { recorder.requestData?.(); recorder.stop(); } catch {
+          resolve(new Blob([], { type: 'audio/webm' }));
+        }
+      });
+      const upload = uploadAudioSegment(blob, startMs, 'candidate');
+      candidateUploadsRef.current.add(upload);
+      await upload.finally(() => candidateUploadsRef.current.delete(upload));
+    }
+    await Promise.allSettled([...candidateUploadsRef.current]);
+    candidateStreamRef.current = null;
+  }, [uploadAudioSegment]);
 
   useEffect(() => () => {
     avatarStreamRef.current?.getTracks().forEach((t) => t.stop());
+    candidateActiveRef.current = false;
+    if (candidateSegTimerRef.current) clearTimeout(candidateSegTimerRef.current);
+    try { candidateRecorderRef.current?.stop(); } catch { /* noop */ }
   }, []);
 
   return {
@@ -370,6 +499,8 @@ export function useTranscript(sessionId: string) {
     downloadUrl,
     startBrowserSTT,
     stopBrowserSTT,
+    startCandidateCaptureFromStream,
+    stopCandidateCapture,
     startAvatarCapture,
     startAvatarCaptureFromStream,
     stopAvatarCapture,

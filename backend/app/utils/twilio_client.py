@@ -29,6 +29,22 @@ _TWILIO_API_BASE = "https://api.twilio.com/2010-04-01"
 _REQUEST_TIMEOUT = 10  # seconds — matches the SMTP timeout convention in email_sender.py
 
 
+def build_content_variables(order: str, values: dict[str, str]) -> dict[str, str]:
+    """Map a comma-separated semantic order to Twilio's numbered placeholders.
+
+    Raising on an unknown/missing name is intentional: sending a candidate a
+    template with values in the wrong positions is worse than skipping the
+    best-effort WhatsApp channel and retaining email/voice delivery.
+    """
+    names = [name.strip() for name in order.split(",") if name.strip()]
+    if not names:
+        raise ValueError("Twilio Content variable order is empty")
+    unknown = [name for name in names if name not in values]
+    if unknown:
+        raise ValueError(f"Unknown Twilio Content variable(s): {', '.join(unknown)}")
+    return {str(index): values[name] for index, name in enumerate(names, start=1)}
+
+
 def _twilio_configured() -> bool:
     return bool(settings.TWILIO_ACCOUNT_SID and (
         settings.TWILIO_AUTH_TOKEN or (settings.TWILIO_API_KEY_SID and settings.TWILIO_API_KEY_SECRET)
@@ -131,17 +147,23 @@ def send_schedule_confirmation_whatsapp(
     )
     content_sid = settings.TWILIO_WHATSAPP_CONFIRMATION_CONTENT_SID
     if content_sid:
-        # ⚠️ Variable positions (1-4) must match your approved template's actual
-        # order in the Twilio Content Editor — this is a guessed default (name, role,
-        # date+time, link); verify/reorder against the real template before relying
-        # on it. `org_name`/`reschedule_link` aren't included below since a 4-variable
-        # template is the common case — add a "5" here if your template carries more.
-        variables = {
-            "1": first_name,
-            "2": f"{stage_name} interview for {job_title}",
-            "3": f"{date_str} at {time_str}",
-            "4": interview_link,
-        }
+        try:
+            variables = build_content_variables(
+                settings.TWILIO_WHATSAPP_CONFIRMATION_VARIABLE_ORDER,
+                {
+                    "first_name": first_name,
+                    "stage_name": stage_name,
+                    "job_title": job_title,
+                    "org_name": org_name,
+                    "date": date_str,
+                    "time": time_str,
+                    "interview_link": interview_link,
+                    "reschedule_link": reschedule_link,
+                },
+            )
+        except ValueError as error:
+            logger.error("Invalid Twilio confirmation Content variable order: %s", error)
+            return False
         return send_whatsapp_message(phone, content_sid=content_sid, content_variables=variables)
     return send_whatsapp_message(phone, body=body)
 

@@ -36,7 +36,7 @@ from app.database import SessionLocal
 from app.models.applicant import Applicant, InterviewStatus
 from app.models.job import Job
 from app.utils.email_sender import send_interview_reminder_email
-from app.utils.twilio_client import send_whatsapp_message, place_reminder_call
+from app.utils.twilio_client import build_content_variables, send_whatsapp_message, place_reminder_call
 
 # stage key -> (scheduled_at column, status column, reminder_sent_at column, display name)
 STAGES = {
@@ -135,18 +135,19 @@ def run_reminders(db: Session, *, dry_run: bool = True, limit: Optional[int] = N
             try:
                 reminder_content_sid = settings.TWILIO_WHATSAPP_REMINDER_CONTENT_SID
                 if reminder_content_sid:
-                    # ⚠️ Same caveat as the confirmation send (twilio_client.py) —
-                    # this variable order is a guessed default, verify against the
-                    # real approved template before relying on it.
                     wa_sent = send_whatsapp_message(
                         applicant.phone,
                         content_sid=reminder_content_sid,
-                        content_variables={
-                            "1": first_name,
-                            "2": f"{stage_name} interview for {job_title}",
-                            "3": f"{minutes_before} minutes",
-                            "4": interview_link,
-                        },
+                        content_variables=build_content_variables(
+                            settings.TWILIO_WHATSAPP_REMINDER_VARIABLE_ORDER,
+                            {
+                                "first_name": first_name,
+                                "stage_name": stage_name,
+                                "job_title": job_title,
+                                "minutes_before": str(minutes_before),
+                                "interview_link": interview_link,
+                            },
+                        ),
                     )
                 else:
                     wa_body = (

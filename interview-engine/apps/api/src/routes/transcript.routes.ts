@@ -8,7 +8,7 @@ import {
   recordEvents,
   transcriptFilePath,
 } from '../services/transcript.service.js';
-import { asrAvailable, transcribeAudioSegments } from '../services/asr.service.js';
+import { asrAvailable, asrProvider, transcribeAudioSegments } from '../services/asr.service.js';
 import { generateTranscriptReport } from '../services/transcript-report.service.js';
 import { evaluateInterview } from '../services/evaluation.service.js';
 import { evaluateInterviewWithAviral } from '../services/aviral-evaluation.service.js';
@@ -25,6 +25,15 @@ type TranscriptSpeaker = 'candidate' | 'interviewer';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function transcriptRoutes(app: FastifyInstance) {
+  // Lets the candidate room choose server ASR before recording. Only provider
+  // availability is exposed; API keys never leave the server.
+  app.get('/:sessionId/transcript/audio/status', async (req: any, reply) => {
+    const { sessionId } = req.params;
+    const session = await prisma.interviewSession.findUnique({ where: { id: sessionId }, select: { id: true } });
+    if (!session) return reply.code(404).send({ error: 'Session not found' });
+    return { available: asrAvailable(), provider: asrProvider() };
+  });
+
   // Ingest live transcript events. Accepts a single { ...event } or { events: [...] }.
   // Best-effort: malformed events are skipped, never 500. Returns counts so the
   // client can detect (and retry) a fully-rejected batch.
@@ -53,12 +62,10 @@ export async function transcriptRoutes(app: FastifyInstance) {
     }
   });
 
-  // Ingest an audio recording (one speaker's audio for the whole interview, or a
-  // chunk) and transcribe it server-side with Whisper into timestamped events.
-  // This is how the Convai avatar's voice (captured from the interview tab's
-  // audio) becomes interviewer transcript lines. Multipart: file + fields
-  // { speaker, startMs }. Requires OPENAI_API_KEY; returns 503 when absent so the
-  // client can show a clear "interviewer transcription unavailable" notice.
+  // Ingest a candidate-microphone or interviewer-tab audio chunk and transcribe
+  // it server-side with Deepgram (preferred) or Whisper into timestamped events.
+  // Multipart: file + fields { speaker, startMs }. Returns 503 when neither ASR
+  // provider is configured so the candidate client can switch to browser STT.
   app.post('/:sessionId/transcript/audio', async (req: any, reply) => {
     const { sessionId } = req.params;
     const session = await prisma.interviewSession.findUnique({ where: { id: sessionId }, select: { id: true } });
@@ -78,14 +85,13 @@ export async function transcriptRoutes(app: FastifyInstance) {
     const mimeType = part.mimetype || 'audio/webm';
     fs.writeFileSync(dest, await part.toBuffer());
 
-    if (!asrAvailable()) {
-      return reply.code(503).send({
-        error: 'Server-side transcription is not configured. Set DEEPGRAM_API_KEY (or OPENAI_API_KEY) to transcribe interviewer audio.',
-        stored: 0,
-      });
-    }
-
     try {
+      if (!asrAvailable()) {
+        return reply.code(503).send({
+          error: 'Server-side transcription is not configured. Set DEEPGRAM_API_KEY (or OPENAI_API_KEY).',
+          stored: 0,
+        });
+      }
       const segments = await transcribeAudioSegments(dest, startMs, mimeType);
       if (!segments || !segments.length) {
         return { ok: true, stored: 0, note: 'No speech detected in the audio.' };
@@ -94,10 +100,19 @@ export async function transcriptRoutes(app: FastifyInstance) {
         sessionId,
         segments.map((s) => ({ speaker, text: s.text, timestampMs: s.startMs, source: 'whisper', isFinal: true })),
       );
-      return { ok: true, segments: segments.length, ...result };
+      return {
+        ok: true,
+        provider: asrProvider(),
+        segments: segments.length,
+        transcript: segments.map((segment) => segment.text).join(' '),
+        ...result,
+      };
     } catch (err: any) {
       req.log?.error?.(err, 'audio transcription failed');
       return reply.code(502).send({ error: err?.message || 'Audio transcription failed', stored: 0 });
+    } finally {
+      // Audio is transient transport data; transcript events are the durable copy.
+      fs.rmSync(dest, { force: true });
     }
   });
 
