@@ -134,6 +134,7 @@ export const roomStyles = `
     gap: 30px;
     padding: 12px 30px 30px;
   }
+  .content--conversational { grid-template-columns: minmax(0, 1fr); }
 
   .avatar-panel, .candidate-panel, .question-card {
     border: 1px solid var(--line);
@@ -162,16 +163,36 @@ export const roomStyles = `
   .ai-visual--speaking { --orb-a: #f95738; --orb-b: #fb7185; }
   .ai-visual--complete { --orb-a: #d4ff00; --orb-b: #34d399; }
 
+  .ai-visual { --speak-energy: 0; }
+
   .ai-ambient {
     position: absolute; width: min(46vw, 430px); aspect-ratio: 1; border-radius: 50%;
-    background: var(--orb-b); filter: blur(110px); opacity: .08;
-    transition: background 700ms ease, opacity 700ms ease;
+    background: var(--orb-b); filter: blur(110px);
+    opacity: calc(.08 + var(--speak-energy) * .2);
+    transition: background 700ms ease, opacity 120ms linear;
   }
   .ai-stage {
     position: relative; z-index: 1;
     width: clamp(150px, 20vw, 220px); aspect-ratio: 1;
     display: grid; place-items: center;
+    transform: scale(calc(1 + var(--speak-energy) * .06));
+    transition: transform 120ms linear;
   }
+
+  /* Soft, organically-morphing blobs drifting behind the sphere — the "plasma
+     cloud" softness that reads as an AI voice orb rather than a static icon.
+     Independent timings/directions so the two never sync into something
+     mechanical-looking. Colored via the same --orb-a/--orb-b the sphere and
+     every other mode-color already key off, so this stays in sync for free. */
+  .ai-blob {
+    position: absolute; inset: 6%; border-radius: 46% 54% 63% 37% / 45% 40% 60% 55%;
+    filter: blur(22px); opacity: .5; mix-blend-mode: screen;
+  }
+  .ai-blob-1 { background: color-mix(in srgb, var(--orb-a) 70%, transparent); animation: ai-blob-morph-1 9s ease-in-out infinite; }
+  .ai-blob-2 { background: color-mix(in srgb, var(--orb-b) 65%, transparent); animation: ai-blob-morph-2 11s ease-in-out infinite reverse; opacity: .38; }
+  .ai-visual--speaking .ai-blob-1 { animation-duration: 3.2s; }
+  .ai-visual--speaking .ai-blob-2 { animation-duration: 3.8s; }
+
   .ai-sphere {
     position: relative; width: 72%; aspect-ratio: 1; overflow: hidden; border-radius: 50%;
     background:
@@ -181,12 +202,17 @@ export const roomStyles = `
     box-shadow:
       inset -24px -25px 42px rgba(0,0,0,.42),
       inset 11px 10px 24px rgba(255,255,255,.09),
-      0 0 48px color-mix(in srgb, var(--orb-a) 20%, transparent);
-    transition: background 700ms ease, box-shadow 700ms ease;
+      0 0 calc(48px + var(--speak-energy) * 46px) color-mix(in srgb, var(--orb-a) calc(20% + var(--speak-energy) * 30%), transparent);
+    transition: background 700ms ease, box-shadow 120ms linear;
     animation: ai-sphere-breathe 4.8s ease-in-out infinite;
   }
   .ai-sphere-highlight { position: absolute; top: 16%; left: 23%; width: 27%; height: 13%; border-radius: 50%; background: rgba(255,255,255,.24); filter: blur(6px); transform: rotate(-20deg); }
-  .ai-core { position: absolute; inset: 45%; border-radius: 50%; background: rgba(255,255,255,.88); box-shadow: 0 0 16px var(--orb-a); opacity: .7; animation: ai-core-pulse 2.4s ease-in-out infinite; }
+  .ai-core {
+    position: absolute; inset: 45%; border-radius: 50%; background: rgba(255,255,255,.88);
+    box-shadow: 0 0 16px var(--orb-a); opacity: .7;
+    filter: brightness(calc(1 + var(--speak-energy) * .6));
+    animation: ai-core-pulse 2.4s ease-in-out infinite;
+  }
 
   .ai-response-wave { position: absolute; z-index: 3; bottom: 110px; display: flex; align-items: center; gap: 5px; height: 18px; }
   .ai-response-wave i { width: 2px; height: 3px; border-radius: 999px; background: var(--orb-a); opacity: .28; animation: ai-wave 1.8s ease-in-out infinite; }
@@ -209,9 +235,20 @@ export const roomStyles = `
   @keyframes ai-dot { 50% { opacity: .35; scale: .72; } }
   @keyframes ai-copy-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
+  @keyframes ai-blob-morph-1 {
+    0%, 100% { border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%; transform: rotate(0deg) scale(1); }
+    33%      { border-radius: 60% 40% 35% 65% / 55% 65% 35% 45%; transform: rotate(9deg) scale(1.06); }
+    66%      { border-radius: 35% 65% 55% 45% / 40% 30% 70% 60%; transform: rotate(-7deg) scale(.96); }
+  }
+  @keyframes ai-blob-morph-2 {
+    0%, 100% { border-radius: 55% 45% 40% 60% / 60% 35% 65% 40%; transform: rotate(0deg) scale(1); }
+    50%      { border-radius: 38% 62% 65% 35% / 42% 58% 42% 58%; transform: rotate(-11deg) scale(1.08); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .ai-visual * { animation: none !important; }
     .ai-state-detail { animation: none !important; }
+    .ai-stage, .ai-ambient, .ai-sphere { transition: none !important; }
   }
 
   .avatar-overlay {

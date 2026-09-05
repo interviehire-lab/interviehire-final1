@@ -51,6 +51,7 @@ applies Prisma migrations, and writes process logs under `.runtime/logs/`.
 
 ```bash
 ./scripts/start-local.sh
+./scripts/logs-local.sh            # follow all local logs with colored service prefixes
 ./scripts/stop-local.sh
 ```
 

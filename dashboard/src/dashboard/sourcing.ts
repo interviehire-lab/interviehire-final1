@@ -94,7 +94,8 @@ function initSourcing() {
       interviewEnabled: 'iset-toggle-status', allowMobile: 'iset-toggle-mobile',
       allowLate: 'iset-toggle-late', continueFromMiddle: 'iset-toggle-continue',
       allowReattempt: 'iset-toggle-reattempt', requireCv: 'iset-toggle-cv',
-      proctoring: 'iset-toggle-proctor', whiteLabel: 'iset-toggle-whitelabel',
+      proctoring: 'iset-toggle-proctor', conversationalInterview: 'iset-toggle-conversational',
+      whiteLabel: 'iset-toggle-whitelabel',
     };
     const activeJob = () => AppState.jobs.find(j => j.id === AppState.activeJobId);
     const applySettingsToUi = (s) => {
@@ -1348,4 +1349,3 @@ function showPremiumToast(message, type = 'success', action = null) {
 
 
 export { addCandidateToAppState, addCandidateToManualQueue, checkAllResumesDone, cleanNameLine, createPlaceholderEmail, csvParsedCandidates, currentSourcingMode, currentSourcingTab, currentTargetStage, downloadCsvTemplate, extractCandidateNameFromFilename, extractExplicitResumeName, extractHeaderResumeName, extractResumeEmail, extractResumeIdentity, extractResumeLinkedIn, extractResumePhone, extractTextFromResumeFile, handleCsvFileSelect, handleResumesFileSelect, importCsvCandidates, importManualQueue, importResumesCandidates, initSourcing, isLikelyPersonName, nameFromEmail, navigateToSourcing, normalizeCandidateName, normalizeResumeText, parseCsvFile, processCsvText, removeCandidateFromQueue, renderCsvPreview, renderManualQueue, showPremiumToast, simulateResumesParsing, sourcingQueue, switchSourcingMode, switchSourcingTab, uploadedFiles };
-

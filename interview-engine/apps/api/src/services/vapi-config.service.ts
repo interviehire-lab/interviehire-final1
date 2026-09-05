@@ -1,9 +1,26 @@
-export function buildVapiAssistantConfig(input: {companyName:string; companyDescription?:string; jobRole:string; roleRequirements:string; questions:string[]; evaluationCriteria?:Record<string, unknown>; voiceId?:string}) {
-  const systemPrompt = `You are an experienced professional interviewer for ${input.companyName}, conducting interviews for the ${input.jobRole} position. Assess domain knowledge, communication skills, problem-solving ability, and cultural fit. Ask the provided questions naturally and ask relevant follow-ups that probe examples, trade-offs, metrics, and lessons learned. Company Description: ${input.companyDescription || 'N/A'} Role Requirements: ${input.roleRequirements} Questions to Cover: ${input.questions.join(' | ')} Evaluation Focus Areas: ${JSON.stringify(input.evaluationCriteria || {})}`;
+const CLOSING_LINE = "Thanks. That completes our interview. I'll end the session now, and your report will be prepared automatically.";
+
+/**
+ * Read-only setup preview for the single shared Vapi assistant. Values that are
+ * credentials (or a subjective voice choice) deliberately remain placeholders:
+ * this object is returned by a public setup endpoint and must never disclose a
+ * Railway secret.
+ */
+export function buildVapiAssistantConfig() {
+  const publicEngineUrl = (process.env.PUBLIC_ENGINE_URL?.trim() || '<PUBLIC_ENGINE_URL>').replace(/\/$/, '');
   return {
-    name: `Interview Assistant - ${input.companyName}`,
-    model: { provider: 'openai', model: 'gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }] },
-    voice: { provider: 'elevenlabs', voiceId: input.voiceId || 'default' },
-    transcriber: { provider: 'deepgram', model: 'nova-2' }
+    name: 'IntervieHire Adaptive Interviewer',
+    model: {
+      provider: 'custom-llm',
+      url: `${publicEngineUrl}/api/vapi/llm`,
+      model: 'interviehire-director',
+      metadataSendMode: 'variable',
+      headers: { 'x-vapi-webhook-secret': '<VAPI_WEBHOOK_SECRET>' },
+    },
+    transcriber: { provider: 'deepgram', model: 'nova-2' },
+    voice: { provider: 'cartesia', voiceId: '<CARTESIA_VOICE_ID>' },
+    firstMessage: '{{firstQuestion}}',
+    clientMessages: ['transcript', 'speech-update'],
+    endCallPhrases: [CLOSING_LINE],
   };
 }

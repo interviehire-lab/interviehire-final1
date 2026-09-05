@@ -35,6 +35,7 @@ interface QueuedEvent extends TranscriptEventInput {
 }
 
 const FLUSH_INTERVAL_MS = 4000;
+const SEGMENT_MS = 20000;
 
 function createAudioRecorder(stream: MediaStream): MediaRecorder {
   const mimeType = [
@@ -61,12 +62,6 @@ export function useTranscript(sessionId: string) {
   const candidateSegTimerRef = useRef<any>(null);
   const candidateActiveRef = useRef<boolean>(false);
   const candidateUploadsRef = useRef<Set<Promise<any>>>(new Set());
-  const avatarRecorderRef = useRef<MediaRecorder | null>(null);
-  const avatarStreamRef = useRef<MediaStream | null>(null);
-  const avatarStartMsRef = useRef<number>(0);
-  const avatarSegTimerRef = useRef<any>(null);
-  const avatarActiveRef = useRef<boolean>(false);
-  const avatarUploadsRef = useRef<Set<Promise<any>>>(new Set());
 
   // Live flagcheck: accumulate the candidate's finalized speech and run the
   // synchronous tier-1 AI-tone heuristics over it so the room can surface a
@@ -132,6 +127,25 @@ export function useTranscript(sessionId: string) {
       timestampMs: Math.max(0, Date.now() - startRef.current),
       createdAt: new Date().toISOString(),
     });
+  }, []);
+
+  // Vapi persists both sides through handleCandidateTranscript(), so this only
+  // updates browser-visible state. It intentionally does not enqueue another
+  // transcript event (which would duplicate the server-owned conversation).
+  const acceptExternalTranscript = useCallback((
+    speaker: TranscriptSpeaker,
+    text: string,
+    isFinal = true,
+  ) => {
+    const clean = text.trim();
+    if (!clean) return;
+    setLiveCaption(clean);
+    setSttError(null);
+    setSttStatus('listening');
+    if (speaker === 'candidate' && isFinal) {
+      candidateTextRef.current = `${candidateTextRef.current} ${clean}`.trim();
+      setAiToneAssessment(analyzeAiToneHeuristics(candidateTextRef.current));
+    }
   }, []);
 
   // Periodic background flush.
@@ -255,15 +269,9 @@ export function useTranscript(sessionId: string) {
 
   useEffect(() => () => { stopBrowserSTT(); }, [stopBrowserSTT]);
 
-  // ── Avatar/interviewer voice capture ──
-  // The Convai avatar's voice arrives as audio inside the cross-origin pixel-
-  // streaming iframe, so it can't be read directly. Instead we capture the
-  // interview TAB's audio output (which carries the avatar's voice, NOT the
-  // candidate's mic) via getDisplayMedia, record it for the whole interview, and
-  // upload it on stop — the backend transcribes it with Whisper into interviewer
-  // lines. Must be called from a user gesture (browser requirement).
-  // Upload one finished audio segment (a self-contained webm) for server-side
-  // (Deepgram) transcription. startMs anchors the segment on the interview clock.
+  // Upload one finished candidate-audio segment (a self-contained webm) for
+  // server-side Deepgram/Whisper transcription. startMs anchors the segment on
+  // the interview clock.
   const uploadAudioSegment = useCallback(async (
     blob: Blob,
     startMs: number,
@@ -286,114 +294,6 @@ export function useTranscript(sessionId: string) {
       return { ok: false, error: 'Audio transcription request failed.' };
     }
   }, [sessionId]);
-
-  // Record the avatar/interviewer audio in ~20s SEGMENTS, uploading each as a
-  // complete webm. Segmenting (vs one blob at the end) makes a 20–30 min
-  // interview robust: each chunk is transcribed as it's captured, nothing is lost
-  // if the tab closes mid-interview, and we never upload one giant file.
-  const SEGMENT_MS = 20000;
-  const recordOneSegment = useCallback((stream: MediaStream) => {
-    if (!avatarActiveRef.current) return;
-    const segStartMs = nowMs();
-    avatarStartMsRef.current = segStartMs; // so stopAvatarCapture can anchor the final partial segment
-    const chunks: BlobPart[] = [];
-    let rec: MediaRecorder;
-    try { rec = createAudioRecorder(stream); } catch { return; }
-    avatarRecorderRef.current = rec;
-    rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-    rec.onstop = () => {
-      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-      const upload = uploadAudioSegment(blob, segStartMs, 'interviewer');
-      avatarUploadsRef.current.add(upload);
-      void upload.finally(() => avatarUploadsRef.current.delete(upload));
-      // Chain the next segment while capture is still active.
-      if (avatarActiveRef.current && avatarStreamRef.current) recordOneSegment(avatarStreamRef.current);
-    };
-    rec.start();
-    avatarSegTimerRef.current = setTimeout(() => {
-      try { rec.stop(); } catch { /* noop */ }
-    }, SEGMENT_MS);
-  }, [nowMs, uploadAudioSegment]);
-
-  // Capture the avatar's voice from the DEVICE's audio output. Browsers can't
-  // read it silently, so we use getDisplayMedia — the candidate must pick a
-  // surface (Entire Screen / this tab) AND tick "Share audio". We keep only the
-  // audio track. Must be called from a user gesture.
-  const startAvatarCapture = useCallback(async (): Promise<{ ok: boolean; reason?: string }> => {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia) {
-      return { ok: false, reason: 'Audio capture is not supported in this browser. Use Chrome or Edge.' };
-    }
-    if (avatarActiveRef.current) return { ok: true };
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        // Ask for clean system/tab audio (no AEC/AGC that would mangle speech).
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } as any,
-      });
-      const audioTracks = stream.getAudioTracks();
-      stream.getVideoTracks().forEach((t) => t.stop());
-      if (!audioTracks.length) {
-        stream.getTracks().forEach((t) => t.stop());
-        return { ok: false, reason: 'No audio was shared. Re-share and CHECK the "Share tab audio" / "Share system audio" box.' };
-      }
-      const audioStream = new MediaStream(audioTracks);
-      avatarStreamRef.current = audioStream;
-      avatarActiveRef.current = true;
-      // If the candidate stops sharing from the browser bar, mark inactive.
-      audioTracks[0].addEventListener('ended', () => { avatarActiveRef.current = false; });
-      recordOneSegment(audioStream);
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, reason: err?.name === 'NotAllowedError' ? 'Screen/audio sharing was denied — it’s required to record the interviewer.' : 'Could not start interviewer audio capture.' };
-    }
-  }, [recordOneSegment]);
-
-  // Same as startAvatarCapture, but records from an audio stream we ALREADY have
-  // (the audio track siphoned off the proctoring screen-share). This avoids a
-  // second getDisplayMedia prompt — the candidate only shares their screen once.
-  // Falls back to startAvatarCapture (a dedicated prompt) if no audio is given.
-  const startAvatarCaptureFromStream = useCallback(
-    (audioStream: MediaStream | null): { ok: boolean; reason?: string } => {
-      if (avatarActiveRef.current) return { ok: true };
-      const audioTracks = audioStream?.getAudioTracks() ?? [];
-      if (!audioTracks.length) {
-        return { ok: false, reason: 'No audio was shared. Re-share your screen and CHECK the "Share system/tab audio" box.' };
-      }
-      const audio = new MediaStream(audioTracks);
-      avatarStreamRef.current = audio;
-      avatarActiveRef.current = true;
-      audioTracks[0].addEventListener('ended', () => { avatarActiveRef.current = false; });
-      recordOneSegment(audio);
-      return { ok: true };
-    },
-    [recordOneSegment],
-  );
-
-  // Stop avatar capture: end the current segment (which uploads it) and release
-  // the shared stream. Returns the last upload result (or null).
-  const stopAvatarCapture = useCallback(async (): Promise<any> => {
-    avatarActiveRef.current = false;
-    if (avatarSegTimerRef.current) { clearTimeout(avatarSegTimerRef.current); avatarSegTimerRef.current = null; }
-    const rec = avatarRecorderRef.current;
-    avatarRecorderRef.current = null;
-    let result: any = null;
-    if (rec && rec.state !== 'inactive') {
-      const segStartMs = avatarStartMsRef.current;
-      const blob: Blob = await new Promise((resolve) => {
-        const chunks: BlobPart[] = [];
-        rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-        rec.onstop = () => resolve(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }));
-        try { rec.requestData?.(); rec.stop(); } catch { resolve(new Blob([], { type: 'audio/webm' })); }
-      });
-      const upload = uploadAudioSegment(blob, segStartMs, 'interviewer');
-      avatarUploadsRef.current.add(upload);
-      result = await upload.finally(() => avatarUploadsRef.current.delete(upload));
-    }
-    await Promise.allSettled([...avatarUploadsRef.current]);
-    avatarStreamRef.current?.getTracks().forEach((t) => t.stop());
-    avatarStreamRef.current = null;
-    return result;
-  }, [uploadAudioSegment]);
 
   // ── Candidate microphone capture with server-side ASR ──
   // Prefer Deepgram/Whisper when configured. Browser SpeechRecognition remains
@@ -525,7 +425,6 @@ export function useTranscript(sessionId: string) {
   }, [releaseOwnedCandidateMic, uploadAudioSegment]);
 
   useEffect(() => () => {
-    avatarStreamRef.current?.getTracks().forEach((t) => t.stop());
     candidateActiveRef.current = false;
     if (candidateSegTimerRef.current) clearTimeout(candidateSegTimerRef.current);
     try { candidateRecorderRef.current?.stop(); } catch { /* noop */ }
@@ -540,6 +439,7 @@ export function useTranscript(sessionId: string) {
     markStart,
     nowMs,
     recordEvent,
+    acceptExternalTranscript,
     flush,
     finalize,
     downloadUrl,
@@ -547,8 +447,5 @@ export function useTranscript(sessionId: string) {
     stopBrowserSTT,
     startCandidateCaptureFromStream,
     stopCandidateCapture,
-    startAvatarCapture,
-    startAvatarCaptureFromStream,
-    stopAvatarCapture,
   };
 }

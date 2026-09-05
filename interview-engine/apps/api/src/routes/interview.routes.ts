@@ -430,8 +430,8 @@ export async function interviewRoutes(app: FastifyInstance) {
     return { session: updated, initialQuestion: firstQuestion };
   });
   app.get('/sessions/:id/vapi-config', async (req:any) => {
-    const session = await prisma.interviewSession.findUniqueOrThrow({where:{id:req.params.id}, include:{company:true,jobRole:{include:{questions:true}}}});
-    return buildVapiAssistantConfig({companyName:session.company.name, companyDescription:session.company.description || undefined, jobRole:session.jobRole.title, roleRequirements:session.jobRole.requirements, questions:session.jobRole.questions.map((q: { text: string })=>q.text), evaluationCriteria:session.jobRole.evaluationCriteria as any});
+    await prisma.interviewSession.findUniqueOrThrow({ where: { id: req.params.id }, select: { id: true } });
+    return buildVapiAssistantConfig();
   });
   app.post('/sessions/:id/complete', async (req:any, reply:any) => {
     if (await blockedByInviteToken(req, reply)) return reply;

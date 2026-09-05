@@ -867,6 +867,7 @@ function defaultInterviewSettings() {
     allowReattempt: false,
     requireCv: true,
     proctoring: true,
+    conversationalInterview: false,
     whiteLabel: false,
     accessControl: 'link',
   };

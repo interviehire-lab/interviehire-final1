@@ -6,6 +6,10 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-05** — **Conversational interviews now hide scripted questions and end under interviewer control.** For jobs with `InterviewSession.settings.conversationalInterview === true`, the candidate room no longer renders the prepared-question sidebar or its progress/navigation UI; the animated interviewer expands to the full interview area so adaptive follow-ups remain a natural voice conversation. Flag-off sessions retain the existing question card and manual controls. In `handleCandidateTranscript()`, a valid director decision `{ action: "complete" }` is now honored even when unused prepared questions remain (previously it was silently overridden by the next prepared question). The closing utterance is now **“Thanks. That completes our interview. I'll end the session now, and your report will be prepared automatically.”**; both Vapi's generated `endCallPhrases` configuration and the candidate's assistant-transcript listener recognize that line, stop the Vapi call, and run the existing finalize → complete → report flow exactly once without requiring a candidate click. This changes the possible timing/text of the `ai.text` response from **POST /api/interview/sessions/:id/answers** and **POST /api/vapi/llm**, but not either route's schema.
+- **2026-09-05** — **Test-interview launcher now satisfies CV-required jobs without weakening production enforcement.** **POST /api/jobs/{job_id}/test-session** still creates/reuses the same analytics-excluded throwaway applicant and returns the same `{ session_id }` response, but now assigns that synthetic applicant an explicit synthetic `resume_text` before `sync_applicant_to_ai()`. Previously the route copied the job's default `interviewSettings.requireCv: true` into the test `InterviewSession` while creating a candidate with empty résumé text, so the engine's correct **POST /api/interview/sessions/:id/start** `CV_REQUIRED` gate made “Launch test interview” unusable. Real applicants and the engine's CV gate are unchanged.
+- **2026-09-05** — **Vapi live conversational interviews — step 3.** **POST /api/vapi/llm** (also accepted at **POST /api/vapi/llm/chat/completions** for clients that append the OpenAI-compatible suffix) now optionally authenticates callers with `x-vapi-webhook-secret`: when `VAPI_WEBHOOK_SECRET` is configured the header must match or the route returns **401** `{ "error": "Unauthorized" }`; when unset, authentication is skipped with a one-time warning to preserve zero-key local development. Rejected requests log whether the header was present, never its value. **GET /api/interview/sessions/:id/vapi-config** is repurposed from a per-job OpenAI/ElevenLabs configuration into a read-only preview of the one shared IntervieHire assistant (custom LLM at `${PUBLIC_ENGINE_URL}/api/vapi/llm`, Deepgram `nova-2`, Cartesia voice placeholder, `{{firstQuestion}}`, transcript client messages, and the exact completion phrase); it still validates that the requested session exists but deliberately returns credential/voice placeholders rather than exposing Railway secrets. The candidate room now uses `@vapi-ai/web` only when the per-job `InterviewSession.settings.conversationalInterview` flag is exactly `true`, passing `{ metadata: { sessionId }, variableValues: { firstQuestion } }` at call start; Vapi transcripts drive live captions/read-only blueprint progress, Vapi speech events drive the assistant state, and call end enters the existing finalize/complete/report flow. Flag-off sessions retain server-ASR/browser-STT and manual question controls. The dashboard settings JSON gains `conversationalInterview` (default `false`; passed unchanged through the existing settings sync). Retired unconditional dead code: candidate-room WebSocket `ai_response`/browser `speechSynthesis`/Lina question shadow-state and the unused avatar-audio capture methods in `useTranscript.ts`.
+- **2026-09-05** — **New Vapi Custom-LLM webhook — step 2 of wiring real-time voice into the existing adaptive interview director.** Added **POST /api/vapi/llm** (new `interview-engine/apps/api/src/routes/vapi.routes.ts`, registered via `app.register(vapiRoutes, { prefix: '/api/vapi' })` in `server.ts`). This is a plain OpenAI-chat-completions-compatible SSE endpoint — the exact contract shape Vapi's (and ElevenLabs') "Custom LLM" mechanism expects — so an external voice platform can drive `handleCandidateTranscript()` (`services/interview-conversation.service.ts`, **completely unchanged**) over a standard HTTP shape instead of the existing (unused in the main candidate room) WebSocket `candidate_transcript`/`ai_response` path. Request body (zod-validated): `{ messages: [{role, content}, ...] (required, min 1), model?, stream?, metadata?: {sessionId?}, call?: {metadata?: {sessionId?}} }` — the session id is read from `metadata.sessionId` or `call.metadata.sessionId` (**UNVERIFIED against a real Vapi payload**; Vapi's docs did not give full field-level detail on the request shape, only the response contract, confirmed via ElevenLabs' equivalent + the shared OpenAI-compatible convention both platforms use — flagged in code comments, and the raw body is logged at `warn` level whenever no sessionId is found, to make the real field easy to spot on first live use). The route extracts the last `role: "user"` message's `content` as the candidate's answer text, calls `handleCandidateTranscript(sessionId, text, {})`, and streams the result back as SSE: one `data: {"id","object":"chat.completion.chunk","choices":[{"delta":{"content": aiText},"finish_reason":null}]}` chunk (the function returns its whole decision in one shot, not token-by-token, so this is one chunk, not real incremental streaming) followed by `data: [DONE]`. Errors: **400** `{"error":"sessionId not found in request metadata"}` (no sessionId resolved) or `{"error":"No user message text found"}` (last user message has empty/whitespace-only content). No existing route changed. This route is intentionally the *only* new backend piece for this phase — no new persistent service, no change to `page.tsx`/`useTranscript.ts`/`AIVisualAssistant.tsx` yet; those (Vapi Web SDK wiring, dead-code retirement, call-status → `AssistantMode` mapping, per-job feature flag) are explicitly deferred to a later step.
 - **2026-09-05** — **WhatsApp sends now support Twilio Content Templates (`ContentSid`), not just freeform text.** Follow-up to the same-day entry below: WhatsApp Business API generally rejects a freeform-text business-initiated message (a confirmation or reminder) outside an open 24h session with the recipient — it requires a pre-approved Content Template. `app/utils/twilio_client.py::send_whatsapp_message` now accepts optional `content_sid`/`content_variables` and sends via `ContentSid`/`ContentVariables` (JSON-encoded) when a template is configured, falling back to freeform `Body` only when it isn't (fine for Sandbox testing, likely rejected on an approved production sender). **New config:** `TWILIO_WHATSAPP_CONFIRMATION_CONTENT_SID`, `TWILIO_WHATSAPP_REMINDER_CONTENT_SID` (`app/config.py`, both blank by default). Both the confirmation helper (`send_schedule_confirmation_whatsapp`) and the reminder job (`app/jobs/reminders.py`) now prefer their respective Content SID when set, building a 4-variable payload (`{"1": first_name, "2": "<stage> interview for <job_title>", "3": date/time or "<N> minutes", "4": interview_link}`) — **this variable order is an unverified default guess, not confirmed against the actual approved template text**; it must be checked against the real template in the Twilio Content Editor before relying on it in production. No route/schema change — same three endpoints as below, still additive side-effect behavior only.
 - **2026-09-05** — **Candidate-facing interview-scheduling automations: WhatsApp confirmations + a 30-minute-before reminder job (email + WhatsApp + robocall), all via Twilio's REST API called with raw HTTPS (`requests`) — no `twilio` SDK dependency, same pattern as the existing Resend integration.** (1) **WhatsApp confirmation, additive alongside the existing email confirmation (does NOT touch or duplicate it):** **POST /api/jobs/applicants/{applicant_id}/schedule** (`app/routers/jobs.py:schedule_interview`) and **POST /api/public/reschedule/{token}** (`app/routers/public.py:public_reschedule_interview`) now, immediately after their existing iCal-email try/except, each call a new shared helper `send_schedule_confirmation_whatsapp` (`app/utils/twilio_client.py`) in its own try/except — a WhatsApp failure can never affect the email send or the response. **Request/response schemas of both endpoints are UNCHANGED** — this is purely additive side-effect behavior, not a schema change. No-ops (returns `False`, logs) whenever Twilio isn't configured (`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` blank) or `applicant.phone` isn't a real number (`None`/blank/the literal bulk-upload placeholder `"+1 555-0199"` — new guard `app/utils/phone.py::has_real_phone`/`to_e164`). (2) **New internal-only endpoint POST /api/internal/run-reminders** (new router `backend/app/routers/internal_jobs.py`, mounted at prefix `/api/internal`) — runs the new pre-interview reminder batch job (`app/jobs/reminders.py::run_reminders`, modeled on `app/jobs/retention.py`'s shape: CLI `python -m app.jobs.reminders [--dry-run] [--limit N]` + this endpoint). Same `x-internal-secret` auth pattern as `POST /api/privacy/internal/run-retention`; defaults to dry-run (`?dry_run=false` to arm). For each of the `screening`/`functional` stages independently, selects applicants whose `{stage}_scheduled_at` is set, in the future, within `REMINDER_MINUTES_BEFORE` (default 30) minutes, `{stage}_status == InterviewStatus.scheduled`, and `{stage}_reminder_sent_at IS NULL`; bounded by `REMINDER_MAX_PER_RUN` (default 200) per run. Unlike retention, **there is no global disable switch** — the reminder EMAIL (new `send_interview_reminder_email` in `app/utils/email_sender.py`, same dark-theme card styling as `send_ical_invitation_email`, routed through the existing `send_html_email` dispatcher) is always attempted; only the WhatsApp/robocall channels individually no-op per-applicant when Twilio isn't configured or the phone isn't real, independent of each other and of the email outcome. The robocall (`app/utils/twilio_client.py::place_reminder_call`) uses Twilio's Calls API inline-TwiML `Twiml` param (`<Response><Say voice="Polly.Joanna">…</Say></Response>`, message XML-escaped) — no public webhook endpoint needed to serve TwiML. Reminder timing is NOT exact-30-minute precision: it fires once per applicant per stage the first run that observes it inside the window, so actual lead time is between `REMINDER_MINUTES_BEFORE` and (`REMINDER_MINUTES_BEFORE` − cron interval) minutes — documented in the job's docstring. **DB:** two new NULLABLE `applicants` columns, **`screening_reminder_sent_at`** and **`functional_reminder_sent_at`** (`TIMESTAMP WITH TIME ZONE`, added via `main.py:init_db()` `ADD COLUMN IF NOT EXISTS`) — guard against re-sending; not serialized in `ApplicantOut`, so no existing response schema changed. **New config** (`app/config.py`): `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` (bare E.164, e.g. `+14155238886` — `whatsapp:` prefix added in code), `TWILIO_VOICE_FROM`, `REMINDER_MINUTES_BEFORE` (default 30), `REMINDER_MAX_PER_RUN` (default 200) — all blank/safe-by-default. No new pip dependency (`requests` already present).
 - **2026-09-04** — **Candidate room: honor the per-job `proctoring` toggle; `EARLY_ENTRY_MS` deduplicated.** No request/response schema changed on either route below — both entries are documentation/internal-refactor notes required because they touch previously-documented behavior. (1) **GET /api/interview/sessions/:id** (`interview-engine/apps/api/src/routes/interview.routes.ts`) already returned the full `InterviewSession.settings` blob verbatim, which already included the recruiter's `proctoring: boolean` toggle (`InterviewSettings.proctoring`, dashboard `state.ts:defaultInterviewSettings`, synced into `InterviewSession.settings` by `backend/app/utils/ai_sync.py`) — but the candidate room (`interviewcandidateroom/page.tsx`) never read it, so proctoring (camera face/gaze/object detection + screen-share-based violation monitoring, `useProctoring.ts`) ran unconditionally once consent + permissions were granted. The room now computes `proctoringSettingEnabled = interviewSettings?.proctoring !== false` (missing/undefined stays permissive — `true` — for older sessions) and ANDs it into the `useProctoring(...)` enabled flag, skips requiring camera/screen-share in the pre-interview permission gate (and adjusts its copy) when off, and skips the gaze-calibration screen (falling back to a neutral default calibration) when off. Microphone (needed for answer STT, independent of proctoring) is unaffected. No backend or route changes were needed. (2) **POST /api/interview/sessions/:id/start**: the `EARLY_ENTRY_MS` (10 min) constant was previously defined independently in this route AND in the candidate room's `page.tsx`, kept in sync by hand (and a comment admitting it). Both now import a single `EARLY_ENTRY_MS` export from `interview-engine/packages/shared/src/index.ts` (`@interviehire/shared`) — same value (10 * 60 * 1000 ms), identical runtime behavior, no schema/response change.
@@ -48,7 +52,7 @@
 ## Conventions
 
 - **Backend — FastAPI** runs on **port `8000`**; all HTTP routes are mounted under the **`/api`** prefix (e.g. `/api/auth`, `/api/jobs`). Its WebSocket route (`/ws`) is mounted with **no prefix** (root).
-- **Interview Engine — Fastify** runs on **port `4000`** (host `0.0.0.0`, `PORT` env override). Per-module prefixes: `companyRoutes → /api/company`, `interviewRoutes → /api/interview`, `transcriptRoutes → /api/interviews`, `assistantRoutes → /api/assistant`. The health check (`/health`) and the WebSocket gateway (`/ws`) are at the **root** (no `/api` prefix).
+- **Interview Engine — Fastify** runs on **port `4000`** (host `0.0.0.0`, `PORT` env override). Per-module prefixes: `companyRoutes → /api/company`, `interviewRoutes → /api/interview`, `transcriptRoutes → /api/interviews`, `assistantRoutes → /api/assistant`, `vapiRoutes → /api/vapi`. The health check (`/health`) and the WebSocket gateway (`/ws`) are at the **root** (no `/api` prefix).
 - **Dashboard — Next route handlers** run on **port `3000`**, under `dashboard/app/api/*` (e.g. `/api/parse-file`, `/api/fetch-doc`, `/api/deepseek`).
 - **Auth model:** Backend authentication uses a **JWT in an httpOnly cookie** named `token`, valid for **7 days** (`max_age=604800s`). The token may also be supplied via an `Authorization: Bearer <jwt>` header. Super Admins additionally carry an `active_org_id` cookie that selects the active organisation context. Interview-engine and dashboard routes are largely public (no user auth); they rely on global rate limiting and/or server-side API keys.
 - **WebSocket endpoints** are denoted with the pseudo-method **`WS`** and collected in the final **WebSocket Endpoints** section. All WS frames are JSON text.
@@ -3135,7 +3139,7 @@ Notes: No Fastify schema. The token guard runs after the findUniqueOrThrow: only
 
 #### GET /api/interview/sessions/:id/vapi-config
 
-Builds and returns a Vapi voice-assistant configuration object derived from the session's company, job role, questions, and evaluation criteria.
+Validates that the session exists, then returns the shared Vapi assistant setup preview. The frontend does not call this route at runtime; it is intended for one-time dashboard setup.
 
 - **Auth:** Public. Global rate limit.
 - **Path params:** `id`:string — InterviewSession.id
@@ -3146,16 +3150,26 @@ Request: none
 Response:
 ```
 200 OK (application/json)
-Vapi assistant config object produced by buildVapiAssistantConfig({
-  companyName, companyDescription?, jobRole (title),
-  roleRequirements, questions: string[], evaluationCriteria
-})
-// shape defined by services/vapi-config.service.ts (name, model, voice, transcriber, firstMessage, systemPrompt/messages, etc.)
+{
+  "name": "IntervieHire Adaptive Interviewer",
+  "model": {
+    "provider": "custom-llm",
+    "url": "<PUBLIC_ENGINE_URL>/api/vapi/llm",
+    "model": "interviehire-director",
+    "metadataSendMode": "variable",
+    "headers": { "x-vapi-webhook-secret": "<VAPI_WEBHOOK_SECRET>" }
+  },
+  "transcriber": { "provider": "deepgram", "model": "nova-2" },
+  "voice": { "provider": "cartesia", "voiceId": "<CARTESIA_VOICE_ID>" },
+  "firstMessage": "{{firstQuestion}}",
+  "clientMessages": ["transcript", "speech-update"],
+  "endCallPhrases": ["Thanks. That completes our interview. I'll end the session now, and your report will be prepared automatically."]
+}
 ```
 
 Status codes: 200 OK; 404/500 — findUniqueOrThrow throws on unknown id; 429 rate limited.
 
-Notes: No Fastify schema. Exact shape is whatever buildVapiAssistantConfig returns (see vapi-config.service.ts).
+Notes: No Fastify schema. `PUBLIC_ENGINE_URL` is read from the engine environment. Secret and voice values remain placeholders because this is a public route; replace them while creating the assistant in Vapi. The installed `@vapi-ai/web` type contract confirms direct custom-model headers, `metadataSendMode: "variable"`, and call-level `metadata` overrides.
 
 #### POST /api/interview/sessions/:id/complete
 
@@ -3211,7 +3225,7 @@ Response:
 
 Status codes: **403 `{ error:'This interview link is invalid or has expired.', code:'INVALID_TOKEN' }`** — session has a non-null `inviteToken` and `?token=` doesn't match (via `blockedByInviteToken`, checked before body validation); 400 'Answer text is required' (empty/missing text); 200 OK; 404/500 — handleCandidateTranscript throws 'Interview session not found' for unknown id (surfaced as 500); 429 rate limited.
 
-Notes: No Fastify schema. **`blockedByInviteToken(req, reply)` runs first** — a token-bound session only serves the matching `?token=`; token-free sessions pass through unaffected. Determines active question index from last AI transcript entry; enforces MAX_FOLLOWUPS_PER_QUESTION; updates session.status to IN_PROGRESS. Best-effort recordEventSafe for both turns.
+Notes: No Fastify schema. **`blockedByInviteToken(req, reply)` runs first** — a token-bound session only serves the matching `?token=`; token-free sessions pass through unaffected. Determines active question index from last AI transcript entry; enforces MAX_FOLLOWUPS_PER_QUESTION; updates session.status to IN_PROGRESS. A director `action: "complete"` ends the interview even when unused prepared questions remain; otherwise it probes or advances normally. Best-effort recordEventSafe for both turns.
 
 #### POST /api/interview/sessions/:id/transcript-text
 
@@ -3832,6 +3846,47 @@ Status codes: 200 OK (success, incl. when nothing matched — `count: 0`); 401 U
 
 Notes: Not under the `/api` prefix (registered at `/internal`). Best-effort/idempotent — each unlink is wrapped in try/catch and skips non-existent files, so replaying the same request is safe. Every DB lookup (transcript path, session transcript) is individually guarded, so a missing session or transcript is simply skipped.
 
+### `interview-engine/apps/api/src/routes/vapi.routes.ts`
+
+Custom-LLM webhook for a real-time voice platform (Vapi, or any provider using the same OpenAI-chat-completions-compatible "Custom LLM" contract, e.g. ElevenLabs Conversational AI) to drive the existing adaptive interview director over plain HTTP + SSE, instead of the WebSocket `candidate_transcript`/`ai_response` path. `handleCandidateTranscript()` (`services/interview-conversation.service.ts`) itself is unchanged — this route is purely a protocol adapter.
+
+#### POST /api/vapi/llm (alias: POST /api/vapi/llm/chat/completions)
+
+- **Auth:** optional shared-secret gate. When `VAPI_WEBHOOK_SECRET` is non-empty, request header `x-vapi-webhook-secret` must match exactly; missing/wrong → **401** `{ "error": "Unauthorized" }`. When the env var is unset, the gate is skipped and a one-time warning is logged for zero-key local development.
+- **Path params:** none
+- **Query params:** none
+
+Request: `application/json`
+```
+{
+  messages: [{ role: string, content: string }, ...],  // required, min 1 item
+  model?: string,
+  stream?: boolean,
+  metadata?: { sessionId?: string },
+  call?: { metadata?: { sessionId?: string } }
+}
+```
+Validated with `zod`. The session id is read from `metadata.sessionId`, falling back to `call.metadata.sessionId` — **this field path is an unverified best guess** against the standard "set call metadata, get it echoed back on every Custom-LLM turn" convention; it has not yet been confirmed against a real Vapi request (only the response contract was confirmed precisely, via ElevenLabs' docs + the shared OpenAI-compatible convention both platforms use). If wrong, the full raw request body is logged at `warn` level (`[vapi.routes] no sessionId found in request`) so the real field is easy to spot on first live use. The candidate's answer text is the `content` of the last `role: "user"` message in `messages`.
+
+Response: `200 OK`, `Content-Type: text/event-stream` (unbuffered — written directly via `reply.raw`, not Fastify's normal JSON reply path).
+```
+data: {"id":"chatcmpl-<timestamp>","object":"chat.completion.chunk","choices":[{"delta":{"content":"<AI response text>"},"finish_reason":null}]}
+
+data: [DONE]
+
+```
+`handleCandidateTranscript()` returns its whole decision in one LLM call, not token-by-token, so exactly one content chunk is streamed before `[DONE]` — this is valid SSE framing for the consuming platform, not literal incremental generation.
+
+Errors (both `application/json`, non-streamed):
+- **400** `{ "error": "sessionId not found in request metadata" }` — neither `metadata.sessionId` nor `call.metadata.sessionId` was present.
+- **400** `{ "error": "No user message text found" }` — no `role: "user"` message, or its `content` is empty/whitespace-only.
+
+Status codes: 200 OK (SSE stream); 400 Bad Request (missing sessionId or empty user text); 401 Unauthorized (configured secret missing/wrong); 422 (zod validation failure on `messages` — Fastify's default schema-error response).
+
+Notes: Registered via `app.register(vapiRoutes, { prefix: '/api/vapi' })` in `server.ts`. No new persistent service. For opted-in jobs, the candidate room starts Vapi with call metadata `{ sessionId }`; the installed SDK contract confirms this override and custom-LLM `metadataSendMode: "variable"`, while the raw-body warning remains in place until the first real Vapi payload confirms the live field path.
+
+Both paths execute the identical handler. The `/chat/completions` alias exists because some OpenAI-compatible clients append that suffix to the configured base URL. Locally, Fastify logs are rendered with `pino-pretty`; production keeps newline-delimited JSON for Railway and other log aggregators. Authorization, cookie, and Vapi secret headers are redacted in both modes.
+
 ### `interview-engine/apps/api/src/server.ts`
 
 #### GET /health
@@ -3854,7 +3909,7 @@ Response:
 
 Status codes: 200 OK.
 
-Notes: No global prefix at the server level — `/health` is served at root. Per-module prefixes applied at registration: companyRoutes → /api/company, interviewRoutes → /api/interview, transcriptRoutes → /api/interviews, assistantRoutes → /api/assistant; registerWebsocket(app) adds WS routes. Server-level config: CORS { origin: true, credentials: true }; rate limit { max: 200, timeWindow: '1 minute' }; @fastify/multipart and @fastify/websocket registered. Listens on host 0.0.0.0, port from process.env.PORT or 4000. dotenv loads ../../../.env relative to the compiled server dir. There is NO root "/" route.
+Notes: No global prefix at the server level — `/health` is served at root. Per-module prefixes applied at registration: companyRoutes → /api/company, interviewRoutes → /api/interview, transcriptRoutes → /api/interviews, assistantRoutes → /api/assistant, internalRoutes → /internal, vapiRoutes → /api/vapi; registerWebsocket(app) adds WS routes. Server-level config: CORS { origin: true, credentials: true }; rate limit { max: 200, timeWindow: '1 minute' }; @fastify/multipart and @fastify/websocket registered. Listens on host 0.0.0.0, port from process.env.PORT or 4000. dotenv loads ../../../.env relative to the compiled server dir. There is NO root "/" route.
 
 ---
 

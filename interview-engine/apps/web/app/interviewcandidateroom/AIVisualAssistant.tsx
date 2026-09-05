@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type AssistantMode = 'connecting' | 'idle' | 'listening' | 'thinking' | 'speaking' | 'complete';
 
@@ -39,6 +39,7 @@ const COPY: Record<AssistantMode, Array<{ title: string; detail: string }>> = {
 export function AIVisualAssistant({ mode, voiceActive = false }: Props) {
   const [copyIndex, setCopyIndex] = useState(0);
   const copy = COPY[mode];
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setCopyIndex(0);
@@ -47,12 +48,55 @@ export function AIVisualAssistant({ mode, voiceActive = false }: Props) {
     return () => window.clearInterval(timer);
   }, [mode, copy.length]);
 
+  // Drive the orb's "speaking" energy in real time. Browser speechSynthesis
+  // doesn't expose the synthesized waveform (no MediaStream/AnalyserNode access
+  // like a real <audio> element would give us — see useTranscript.ts's mic-level
+  // meter for that pattern), so there's no raw amplitude to read here. Instead
+  // this generates a smoothed, non-repeating random walk — the same trick most
+  // "AI is talking" orb UIs use even when they DO have real audio, because raw
+  // waveform amplitude looks too jittery on its own. The result: a single CSS
+  // custom property (--speak-energy, 0..1) on the root element, which every
+  // reactive visual below reads via calc()/var() — one signal, many effects,
+  // no per-frame inline styles scattered across the tree.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (mode !== 'speaking') {
+      el.style.setProperty('--speak-energy', '0');
+      return;
+    }
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      el.style.setProperty('--speak-energy', '0.4');
+      return;
+    }
+    let raf = 0;
+    let current = 0.35;
+    let target = 0.35;
+    let lastTargetChangeMs = 0;
+    const loop = (t: number) => {
+      if (t - lastTargetChangeMs > 140 + Math.random() * 180) {
+        target = 0.3 + Math.random() * 0.7;
+        lastTargetChangeMs = t;
+      }
+      current += (target - current) * 0.14;
+      el.style.setProperty('--speak-energy', current.toFixed(3));
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(raf);
+      el.style.setProperty('--speak-energy', '0');
+    };
+  }, [mode]);
+
   const message = copy[copyIndex] ?? copy[0];
 
   return (
-    <div className={`ai-visual ai-visual--${mode}${voiceActive ? ' is-voice-active' : ''}`}>
+    <div ref={rootRef} className={`ai-visual ai-visual--${mode}${voiceActive ? ' is-voice-active' : ''}`}>
       <div className="ai-ambient" />
       <div className="ai-stage" aria-hidden="true">
+        <div className="ai-blob ai-blob-1" />
+        <div className="ai-blob ai-blob-2" />
         <div className="ai-sphere">
           <div className="ai-sphere-highlight" />
           <div className="ai-core" />

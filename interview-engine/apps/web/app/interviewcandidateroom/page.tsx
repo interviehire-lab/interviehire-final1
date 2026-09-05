@@ -1,9 +1,9 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Vapi from '@vapi-ai/web';
 import { WS_URL, API_URL } from '@/lib/api';
 import { GazeCalibration } from '@/hooks/GazeCalibration';
 import { useProctoring, getBestViolationRecordingMimeType } from '@/hooks/useProctoring';
-import { useSpeechMetrics } from '@/hooks/useSpeechMetrics';
 import { useTranscript } from '@/hooks/useTranscript';
 import { Check, Mic, MonitorUp, ShieldCheck, Video } from 'lucide-react';
 import type { CalibrationResult } from '@/hooks/useGazeCalibration';
@@ -21,6 +21,29 @@ const CONSENT_VERSION = '2026-07-01';
 // Where the candidate reads the full privacy policy (linked from the consent
 // gate). Override per-deployment; falls back to the marketing-site path.
 const PRIVACY_URL = process.env.NEXT_PUBLIC_PRIVACY_URL || 'https://www.interviehire.com/privacy';
+const VAPI_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY || '';
+const VAPI_ASSISTANT_ID = process.env.NEXT_PUBLIC_VAPI_ASSISTANT_ID || '';
+const CLOSING_LINE = "Thanks. That completes our interview. I'll end the session now, and your report will be prepared automatically.";
+
+function formatVapiError(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (value instanceof Error && value.message.trim()) return value.message.trim();
+  if (!value || typeof value !== 'object') return '';
+
+  const error = value as Record<string, unknown>;
+  // The Vapi SDK emits errors as { type, stage, error: { message, ... } }.
+  // Some failure paths instead place that nested object in `message`, so only
+  // interpolate a value after recursively reducing it to a real string.
+  for (const candidate of [error.error, error.message, error.detail, error.reason]) {
+    const detail = formatVapiError(candidate);
+    if (detail) return detail;
+  }
+
+  const context = [error.type, error.stage]
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .join(' · ');
+  return context;
+}
 
 // Whether this session already has a matching, still-current "granted" consent
 // stored locally. Only a matching-version grant counts; older wording or a
@@ -98,8 +121,8 @@ export default function Interview() {
   // highlight — separate from micOn (which only means "not manually muted").
   const [voiceActive, setVoiceActive] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
-  const { markAiFinished } = useSpeechMetrics();
   const transcript = useTranscript(sessionId);
+  const acceptExternalTranscript = transcript.acceptExternalTranscript;
   const wsRef = useRef<WebSocket | null>(null);
   // WebSocket reconnect-with-backoff. isDeliberateCloseRef is set right before any
   // close WE initiate (unmount cleanup, endCall) so the onclose handler below can
@@ -107,7 +130,6 @@ export default function Interview() {
   const isDeliberateCloseRef = useRef(false);
   const wsReconnectAttemptRef = useRef(0);
   const wsReconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const assistantSpeechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assistantThinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const candidateWasSpeakingRef = useRef(false);
   const [wsReconnecting, setWsReconnecting] = useState(false);
@@ -119,10 +141,9 @@ export default function Interview() {
   const captureStartedRef = useRef(false);
   const [transcriptReady, setTranscriptReady] = useState(false);
 
-  // Post-interview report flow: candidate speech is captured through server ASR
-  // (with browser STT as a fallback), while native assistant prompts are stored
-  // directly as interviewer events. The transcript is finalized and evaluated
-  // into the final report without a manual paste step.
+  // Post-interview report flow: legacy sessions use server ASR (with browser STT
+  // fallback); conversational sessions are persisted by the adaptive director.
+  // Both finalize and evaluate into the same report without a manual paste step.
   const [ended, setEnded] = useState(false);
   const [reportStatus, setReportStatus] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
@@ -133,6 +154,10 @@ export default function Interview() {
   const screeningEndTriggeredRef = useRef(false);
   // Per-job interview settings + branding, synced from the recruiter dashboard.
   const [interviewSettings, setInterviewSettings] = useState<any>(null);
+  const [interviewSettingsLoaded, setInterviewSettingsLoaded] = useState(false);
+  // Deliberately opt-in: unlike mature proctoring, real-time voice is new,
+  // metered, and must be enabled explicitly per job.
+  const conversationalInterviewEnabled = interviewSettings?.conversationalInterview === true;
   const [branding, setBranding] = useState<{ name?: string; primaryColor?: string; logoUrl?: string; whiteLabel?: boolean } | null>(null);
   const [startError, setStartError] = useState('');
   // Scheduled-slot barrier: when a session has a future scheduledAt, the room is
@@ -183,10 +208,12 @@ export default function Interview() {
   const [micDenied, setMicDenied] = useState(false);
   const [permissionsAcknowledged, setPermissionsAcknowledged] = useState(false);
 
-  // Questions received live from Lina. They replace the blueprint fallback as
-  // soon as the conversation engine sends its first response.
-  const [linaQuestions, setLinaQuestions] = useState<{ text: string; ts: number }[]>([]);
-  const [linaIndex, setLinaIndex] = useState(0);
+  const vapiRef = useRef<Vapi | null>(null);
+  const vapiCallActiveRef = useRef(false);
+  const seenVapiQuestionsRef = useRef<Set<number>>(new Set());
+  const questionsRef = useRef(questions);
+  const endingRef = useRef(false);
+  const endCallRef = useRef<() => Promise<void>>(async () => {});
 
   // The dashboard's "Launch test interview" opens this room with ?sessionId=…
   // (the FastAPI test-session created from the job blueprint). Use it when
@@ -217,7 +244,11 @@ export default function Interview() {
   // Load per-job interview settings + company branding for a real session. Best
   // effort: on any failure we stay permissive so the interview still runs.
   useEffect(() => {
-    if (!sessionId || sessionId === 'demo-session') return;
+    if (!sessionId || sessionId === 'demo-session') {
+      setInterviewSettingsLoaded(true);
+      return;
+    }
+    setInterviewSettingsLoaded(false);
     let alive = true;
     (async () => {
       try {
@@ -235,11 +266,85 @@ export default function Interview() {
       } catch {
         /* permissive on error */
       } finally {
-        if (alive) setScheduleChecked(true);
+        if (alive) {
+          setScheduleChecked(true);
+          setInterviewSettingsLoaded(true);
+        }
       }
     })();
     return () => { alive = false; };
   }, [sessionId]);
+
+  useEffect(() => {
+    questionsRef.current = questions;
+  }, [questions]);
+
+  // Vapi owns the conversational audio loop only for opted-in jobs. The
+  // proctoring WebSocket remains connected independently below.
+  useEffect(() => {
+    if (!conversationalInterviewEnabled) return;
+    if (!VAPI_PUBLIC_KEY || !VAPI_ASSISTANT_ID) {
+      setStartError('Conversational voice is enabled, but the Vapi public key or assistant ID is missing.');
+      return;
+    }
+
+    const vapi = new Vapi(VAPI_PUBLIC_KEY);
+    vapiRef.current = vapi;
+
+    const onCallStart = () => {
+      vapiCallActiveRef.current = true;
+      setAssistantActivity('idle');
+    };
+    const onCallEnd = () => {
+      vapiCallActiveRef.current = false;
+      setAssistantActivity('idle');
+      void endCallRef.current();
+    };
+    const onSpeechStart = () => {
+      if (assistantThinkTimerRef.current) clearTimeout(assistantThinkTimerRef.current);
+      setAssistantActivity('speaking');
+    };
+    const onSpeechEnd = () => setAssistantActivity('idle');
+    const onMessage = (message: any) => {
+      if (message?.type !== 'transcript' && message?.type !== "transcript[transcriptType='final']") return;
+      const text = String(message.transcript || '').trim();
+      if (!text || (message.role !== 'user' && message.role !== 'assistant')) return;
+      const isFinal = message.transcriptType === 'final';
+      acceptExternalTranscript(message.role === 'user' ? 'candidate' : 'interviewer', text, isFinal);
+      if (message.role !== 'assistant' || !isFinal) return;
+
+      setMessages((current) => [...current, { speaker: 'ai', text }]);
+      const normalized = text.replace(/\s+/g, ' ').trim().toLowerCase();
+      const matchedIndex = questionsRef.current.findIndex(
+        (item) => item.text.replace(/\s+/g, ' ').trim().toLowerCase() === normalized,
+      );
+      if (matchedIndex >= 0 && !seenVapiQuestionsRef.current.has(matchedIndex)) {
+        seenVapiQuestionsRef.current.add(matchedIndex);
+        setQuestionIndex(matchedIndex);
+      }
+      if (normalized.includes(CLOSING_LINE.toLowerCase())) void endCallRef.current();
+    };
+    const onError = (error: any) => {
+      const detail = formatVapiError(error) || 'Unable to start the conversational voice call.';
+      console.error('[Vapi] call error', error);
+      setStartError(`Voice interview error: ${detail}`);
+      setAssistantActivity('idle');
+    };
+
+    vapi.on('call-start', onCallStart);
+    vapi.on('call-end', onCallEnd);
+    vapi.on('speech-start', onSpeechStart);
+    vapi.on('speech-end', onSpeechEnd);
+    vapi.on('message', onMessage);
+    vapi.on('error', onError);
+
+    return () => {
+      vapi.removeAllListeners();
+      if (vapiCallActiveRef.current) void vapi.stop().catch(() => {});
+      vapiCallActiveRef.current = false;
+      if (vapiRef.current === vapi) vapiRef.current = null;
+    };
+  }, [conversationalInterviewEnabled, sessionId, acceptExternalTranscript]);
 
   // Lobby heartbeat: drives the countdown and auto-unlocks the room the moment
   // the entry window opens. Only runs while genuinely waiting, so it stops once
@@ -329,39 +434,6 @@ export default function Interview() {
           setStartError('This interview link is invalid or has expired.');
           return;
         }
-        if (msg.type === 'ai_response') {
-          setMessages((m) => [...m, { speaker: 'ai', text: msg.text }]);
-          markAiFinished();
-          if (msg.text) {
-            transcript.recordEvent({ speaker: 'interviewer', text: msg.text, source: 'manual' });
-            setLinaQuestions((current) => {
-              const next = [...current, { text: String(msg.text), ts: Date.now() }];
-              setLinaIndex(next.length - 1);
-              return next;
-            });
-
-            // The native assistant speaks without an external avatar stream. If
-            // browser TTS is unavailable/blocked, the visual speaking state still
-            // runs for a text-length-based duration and the question remains shown.
-            if (assistantSpeechTimerRef.current) clearTimeout(assistantSpeechTimerRef.current);
-            if (assistantThinkTimerRef.current) clearTimeout(assistantThinkTimerRef.current);
-            const estimatedMs = Math.max(1800, Math.min(12000, String(msg.text).split(/\s+/).length * 330));
-            setAssistantActivity('speaking');
-            assistantSpeechTimerRef.current = setTimeout(() => setAssistantActivity('idle'), estimatedMs);
-            try {
-              if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(String(msg.text));
-                utterance.rate = 0.98;
-                utterance.pitch = 1.04;
-                utterance.onstart = () => setAssistantActivity('speaking');
-                utterance.onend = () => setAssistantActivity('idle');
-                utterance.onerror = () => setAssistantActivity('idle');
-                window.speechSynthesis.speak(utterance);
-              }
-            } catch { /* text + visual state remain available */ }
-          }
-        }
       };
       ws.onclose = () => {
         if (!alive || isDeliberateCloseRef.current) return;
@@ -385,12 +457,9 @@ export default function Interview() {
         clearTimeout(wsReconnectTimeoutRef.current);
         wsReconnectTimeoutRef.current = null;
       }
-      if (assistantSpeechTimerRef.current) clearTimeout(assistantSpeechTimerRef.current);
       if (assistantThinkTimerRef.current) clearTimeout(assistantThinkTimerRef.current);
-      try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
       wsRef.current?.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   // Recruiter-configurable per-job toggle (InterviewSettings.proctoring, synced via
@@ -538,7 +607,7 @@ export default function Interview() {
 
   // --- Auto-start the recorded session once calibrated + connected ---
   useEffect(() => {
-    if (!calibration || sessionStartedRef.current) return;
+    if (!calibration || !interviewSettingsLoaded || sessionStartedRef.current) return;
     if (socket?.readyState !== WebSocket.OPEN) return;
     sessionStartedRef.current = true;
     (async () => {
@@ -552,6 +621,7 @@ export default function Interview() {
         // message and stop instead of proceeding into a broken room.
         const startTokenQS = inviteTokenRef.current ? `?token=${encodeURIComponent(inviteTokenRef.current)}` : '';
         const startRes = await fetch(`${API_URL}/api/interview/sessions/${sessionId}/start${startTokenQS}`, { method: 'POST' });
+        const startJson = await startRes.json().catch(() => null);
         // Hard-block ONLY on a 4xx recruiter-policy gate (disabled / late /
         // no-reattempt / CV-required / invalid invite). On a 5xx or network
         // error, log and PROCEED into the interview instead of trapping the
@@ -559,8 +629,7 @@ export default function Interview() {
         // synced/blueprint questions, and a transient engine/session error must
         // not block a legitimately scheduled candidate.
         if (startRes.status >= 400 && startRes.status < 500) {
-          let msg = 'This interview could not be started.';
-          try { const j = await startRes.json(); if (j?.error) msg = j.error; } catch { /* keep default */ }
+          const msg = startJson?.error || 'This interview could not be started.';
           setStartError(msg);
           try { endProctoringSession(); } catch { /* noop */ }
           setRecordingStatus('');
@@ -570,6 +639,20 @@ export default function Interview() {
           console.error(`Engine /start returned ${startRes.status}; proceeding into the interview anyway.`);
         }
         startRecording();
+        if (conversationalInterviewEnabled) {
+          const vapi = vapiRef.current;
+          if (!vapi || !VAPI_ASSISTANT_ID) {
+            setStartError('Conversational voice could not start because Vapi is not configured.');
+            return;
+          }
+          const firstQuestion = String(startJson?.initialQuestion || questionsRef.current[0]?.text || '').trim();
+          setAssistantActivity('thinking');
+          const call = await vapi.start(VAPI_ASSISTANT_ID, {
+            metadata: { sessionId },
+            variableValues: { firstQuestion },
+          });
+          if (!call) throw new Error('Vapi did not create a call. Check the public key and assistant ID.');
+        }
         // Transcript capture (markStart + browser STT + auto interviewer-audio
         // capture) is started in the calibration-gated effect below — NOT here —
         // so it never depends on the proctoring WebSocket being OPEN. A flaky WS
@@ -577,30 +660,39 @@ export default function Interview() {
         // STT never started and the interview captured zero transcript events.
       } catch (err) {
         console.error('startSession failed', err);
+        if (conversationalInterviewEnabled) {
+          setStartError(`Voice interview could not start: ${err instanceof Error ? err.message : 'Unknown Vapi error'}`);
+        }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calibration, socket]);
+  }, [calibration, socket, interviewSettingsLoaded, conversationalInterviewEnabled]);
 
   // Start transcript capture as soon as calibration is done, independent of the
-  // proctoring WebSocket. Candidate speech prefers server-side Deepgram/Whisper
-  // with browser STT as a keyless/error fallback. Lina's text is supplied by the
-  // conversation engine, spoken with browser TTS, and recorded directly as an
-  // interviewer transcript event—no tab-audio capture or avatar stream needed.
+  // proctoring WebSocket. Flag-off candidate speech prefers server-side
+  // Deepgram/Whisper with browser STT as a keyless/error fallback. Flag-on calls
+  // are transcribed and persisted by Vapi plus the server-side director.
   useEffect(() => {
-    if (!calibration || captureStartedRef.current) return;
+    if (!calibration || !interviewSettingsLoaded || captureStartedRef.current) return;
     captureStartedRef.current = true;
     transcript.markStart();
+    if (conversationalInterviewEnabled) return;
     const micStream = videoRef.current?.srcObject as MediaStream | null;
     void transcript.startCandidateCaptureFromStream(micStream).then((result) => {
       if (!result.ok) transcript.startBrowserSTT();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calibration]);
+  }, [calibration, interviewSettingsLoaded, conversationalInterviewEnabled]);
 
   // End → stop candidate capture, finalize the .txt, complete the session, and
   // evaluate into the report. Fully automatic.
   async function endCall() {
+    if (endingRef.current) return;
+    endingRef.current = true;
+    if (vapiCallActiveRef.current && vapiRef.current) {
+      vapiCallActiveRef.current = false;
+      await vapiRef.current.stop().catch((error) => console.error('[Vapi] stop failed', error));
+    }
     // Mark this as a deliberate close BEFORE closing the socket so the reconnect
     // handler doesn't try to reopen it once the interview is over.
     isDeliberateCloseRef.current = true;
@@ -658,10 +750,13 @@ export default function Interview() {
     }
   }
 
+  endCallRef.current = endCall;
+
   function toggleMic() {
     const stream = videoRef.current?.srcObject as MediaStream | null;
     const next = !micOn;
     stream?.getAudioTracks().forEach((t) => (t.enabled = next));
+    if (conversationalInterviewEnabled) vapiRef.current?.setMuted(!next);
     setMicOn(next);
   }
 
@@ -932,14 +1027,8 @@ export default function Interview() {
     : assistantMode === 'complete'
       ? 'Complete'
       : assistantMode.charAt(0).toUpperCase() + assistantMode.slice(1);
-  // Prefer Lina's actually-asked questions (from the live transcript) over the
-  // premade blueprint list; fall back to premade when none are captured yet.
-  const useLina = linaQuestions.length > 0;
-  const qList = useLina ? linaQuestions : questions;
-  const qIdx = useLina ? Math.min(linaIndex, linaQuestions.length - 1) : questionIndex;
-  const question = useLina
-    ? { text: linaQuestions[qIdx]?.text || '…', tag: 'LINA · LIVE', hint: 'This is what your interviewer just asked.' }
-    : (questions[questionIndex] || { text: 'No questions loaded.', tag: 'Interview', hint: 'Please wait.' });
+  const qIdx = Math.min(questionIndex, Math.max(0, questions.length - 1));
+  const question = questions[qIdx] || { text: 'No questions loaded.', tag: 'Interview', hint: 'Please wait.' };
 
   const isMobileDevice = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
   const mobileBlocked = !!interviewSettings && interviewSettings.allowMobile === false && isMobileDevice;
@@ -1298,7 +1387,7 @@ export default function Interview() {
           </div>
         )}
 
-        <main className="content">
+        <main className={`content${conversationalInterviewEnabled ? ' content--conversational' : ''}`}>
           <section className="avatar-panel">
             <AIVisualAssistant mode={assistantMode} voiceActive={voiceActive && micOn} />
             <div className="avatar-overlay" />
@@ -1351,41 +1440,37 @@ export default function Interview() {
             )}
           </section>
 
-          <aside className="right-stack">
-            <section className="question-card">
-              <div className="question-top">
-                <div className="tag">{question.tag}</div>
-              </div>
-              <h2>{question.text}</h2>
-              <div className="question-meta">
-                {useLina
-                  // Lina's questions are reconstructed live from the transcript, so
-                  // qList.length is only "how many asked so far", not a reliable
-                  // total (it always equals qIdx + 1) — showing it as a fraction
-                  // would be misleading, so show just the running count instead.
-                  ? `Interviewer asked ${String(qIdx + 1).padStart(2, '0')}`
-                  : `Question ${String(qIdx + 1).padStart(2, '0')}/${String(qList.length).padStart(2, '0')}`}
-              </div>
-              <p>{question.hint}</p>
-              <div className="question-actions">
-                <button
-                  className="circle-btn"
-                  type="button"
-                  disabled={qIdx === 0}
-                  onClick={() => (useLina ? setLinaIndex((i) => Math.max(0, i - 1)) : setQuestionIndex((i) => Math.max(0, i - 1)))}
-                >
-                  ‹
-                </button>
-                <button
-                  className="next-btn"
-                  type="button"
-                  onClick={() => (useLina ? setLinaIndex((i) => Math.min(qList.length - 1, i + 1)) : setQuestionIndex((i) => Math.min(qList.length - 1, i + 1)))}
-                >
-                  NEXT ›
-                </button>
-              </div>
-            </section>
-          </aside>
+          {!conversationalInterviewEnabled && (
+            <aside className="right-stack">
+              <section className="question-card">
+                <div className="question-top">
+                  <div className="tag">{question.tag}</div>
+                </div>
+                <h2>{question.text}</h2>
+                <div className="question-meta">
+                  Question {String(qIdx + 1).padStart(2, '0')}/{String(questions.length).padStart(2, '0')}
+                </div>
+                <p>{question.hint}</p>
+                <div className="question-actions">
+                  <button
+                    className="circle-btn"
+                    type="button"
+                    disabled={qIdx === 0}
+                    onClick={() => setQuestionIndex((i) => Math.max(0, i - 1))}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    className="next-btn"
+                    type="button"
+                    onClick={() => setQuestionIndex((i) => Math.min(questions.length - 1, i + 1))}
+                  >
+                    NEXT ›
+                  </button>
+                </div>
+              </section>
+            </aside>
+          )}
         </main>
 
         <footer className="controlbar">

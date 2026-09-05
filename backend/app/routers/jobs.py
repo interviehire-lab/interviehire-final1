@@ -61,6 +61,10 @@ _ensure_upload_dir(UPLOAD_DIR)
 # Throwaway "Launch test interview" candidates are tagged with this sentinel in
 # `remarks` so they never surface in the recruiter funnel, roster, or analytics.
 TEST_SESSION_REMARK = "__ih_test_session__"
+TEST_SESSION_RESUME = (
+    "Synthetic recruiter-preview profile. This record exists only to exercise "
+    "the configured interview flow and is excluded from candidate analytics."
+)
 
 
 def _is_test_applicant(a: Applicant) -> bool:
@@ -1497,6 +1501,12 @@ def create_test_session(
     else:
         # Reuse: refresh the name in case the signed-in account changed since last test.
         test_applicant.name = tester_name
+
+    # Test sessions inherit the job's real interview settings, including the
+    # default requireCv=true policy. Give the synthetic preview candidate a
+    # clearly-labelled synthetic résumé so the launcher can exercise that flow
+    # without weakening CV enforcement for any real candidate.
+    test_applicant.resume_text = TEST_SESSION_RESUME
 
     # Schedule a minute in the past so the engine never treats it as locked/early.
     now = datetime.now(timezone.utc) - timedelta(minutes=1)

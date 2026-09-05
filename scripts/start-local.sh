@@ -34,22 +34,22 @@ info "Applying interview-engine database migrations..."
 (cd "$REPO_ROOT/interview-engine" && npx prisma migrate deploy --schema apps/api/prisma/schema.prisma)
 
 start_process interview-api "$REPO_ROOT/interview-engine" \
-  env DATABASE_URL="$DATABASE_URL" REDIS_URL="$REDIS_URL" PORT="$ENGINE_API_PORT" \
+  env FORCE_COLOR=1 DATABASE_URL="$DATABASE_URL" REDIS_URL="$REDIS_URL" PORT="$ENGINE_API_PORT" \
   npm run dev -w apps/api
 
 start_process fastapi-backend "$REPO_ROOT/backend" \
-  env DATABASE_URL="$DATABASE_URL" SECRET_KEY="${BACKEND_SECRET_KEY:-local-development-secret-change-me}" \
+  env FORCE_COLOR=1 DATABASE_URL="$DATABASE_URL" SECRET_KEY="${BACKEND_SECRET_KEY:-local-development-secret-change-me}" \
   FRONTEND_URL="http://localhost:$DASHBOARD_PORT" INTERVIEW_ROOM_URL="http://localhost:$CANDIDATE_PORT" \
   ENGINE_API_URL="http://127.0.0.1:$ENGINE_API_PORT" INTERNAL_SERVICE_SECRET="${INTERNAL_SERVICE_SECRET:-local-development-internal-secret}" \
   COOKIE_SAMESITE=lax COOKIE_SECURE=false \
-  "$REPO_ROOT/backend/.venv/bin/python" -m uvicorn main:app --host 0.0.0.0 --port "$BACKEND_PORT" --reload
+  "$REPO_ROOT/backend/.venv/bin/python" -m uvicorn main:app --host 0.0.0.0 --port "$BACKEND_PORT" --reload --use-colors
 
 start_process candidate-web "$REPO_ROOT/interview-engine/apps/web" \
-  env NEXT_PUBLIC_API_URL="http://localhost:$ENGINE_API_PORT" NEXT_PUBLIC_WS_URL="ws://localhost:$ENGINE_API_PORT/ws" \
+  env FORCE_COLOR=1 NEXT_PUBLIC_API_URL="http://localhost:$ENGINE_API_PORT" NEXT_PUBLIC_WS_URL="ws://localhost:$ENGINE_API_PORT/ws" \
   npx next dev -p "$CANDIDATE_PORT"
 
 start_process dashboard "$REPO_ROOT/dashboard" \
-  env NEXT_PUBLIC_API_URL=/api BACKEND_ORIGIN="http://127.0.0.1:$BACKEND_PORT" PORT="$DASHBOARD_PORT" \
+  env FORCE_COLOR=1 NEXT_PUBLIC_API_URL=/api BACKEND_ORIGIN="http://127.0.0.1:$BACKEND_PORT" PORT="$DASHBOARD_PORT" \
   npm run dev -- -p "$DASHBOARD_PORT"
 
 failed=0
@@ -63,4 +63,4 @@ if [ "$failed" -ne 0 ]; then
   exit 1
 fi
 
-success "All local services are running. Use scripts/stop-local.sh to stop them."
+success "All local services are running. Use scripts/logs-local.sh to follow logs or scripts/stop-local.sh to stop them."

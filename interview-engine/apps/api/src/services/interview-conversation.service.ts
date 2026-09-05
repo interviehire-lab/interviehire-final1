@@ -8,12 +8,12 @@ import { recordEventSafe } from './transcript.service.js';
 // Guardrails keep evaluation intact: a follow-up reuses the parent questionIndex
 // (so pairing merges the follow-up answer), prepared questions are always asked
 // verbatim (their rubric is keyed to the exact text), and the closing line is
-// unchanged (the candidate UI substring-matches it). No key / any error → the
+// stable (the candidate UI substring-matches it to end automatically). No key / any error → the
 // original scripted advance.
 
 const MAX_FOLLOWUPS_PER_QUESTION = 2;
 const CLOSING_LINE =
-  'Thanks. That completes the structured interview. You can click Complete session when you are ready to see the report.';
+  "Thanks. That completes our interview. I'll end the session now, and your report will be prepared automatically.";
 
 const hasDeepSeekKey = () =>
   !!process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY !== 'replace-me';
@@ -195,6 +195,14 @@ export async function handleCandidateTranscript(
     aiQuestionIndex = questionIndex; // same index → evaluation merges this probe's answer into the question's bucket
     interviewPhase = 'follow_up';
     emotionState = 'curious';
+  } else if (decision?.action === 'complete') {
+    // The interviewer may conclude early when the director determines that no
+    // useful questions remain. The spoken closing line makes Vapi and the room
+    // end the call without requiring the candidate to click anything.
+    aiText = CLOSING_LINE;
+    aiQuestionIndex = null;
+    interviewPhase = 'closing';
+    emotionState = 'encouraging';
   } else if (hasNextQuestion) {
     aiText = questions[questionIndex + 1].text; // prepared question, verbatim
     aiQuestionIndex = questionIndex + 1;
