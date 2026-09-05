@@ -179,6 +179,18 @@ export const roomStyles = `
     transition: transform 120ms linear;
   }
 
+  /* LiveKit AgentAudioVisualizerAura, live-voice modes only (see useAura on
+     AIVisualAssistant). Sized to roughly match .ai-stage's footprint above so
+     switching a job between voiceProvider values doesn't visibly reflow the
+     room; the component's own "xl" size variant is overridden to fill this
+     wrapper instead of its fixed 448px default (see className on the JSX). */
+  .ai-aura-stage {
+    position: relative; z-index: 1;
+    width: clamp(220px, 32vw, 420px); aspect-ratio: 1;
+    display: grid; place-items: center;
+    overflow: hidden;
+  }
+
   /* Soft, organically-morphing blobs drifting behind the sphere — the "plasma
      cloud" softness that reads as an AI voice orb rather than a static icon.
      Independent timings/directions so the two never sync into something

@@ -7,6 +7,8 @@ require_command curl
 require_command docker
 docker info >/dev/null 2>&1 || fail "Docker is not running."
 
+load_env_file "$REPO_ROOT/interview-engine/.env"
+
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-interviehire}"
 export POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 export REDIS_PORT="${REDIS_PORT:-6379}"
@@ -18,7 +20,14 @@ export ENGINE_PUBLIC_URL="${ENGINE_PUBLIC_URL:-http://localhost:$ENGINE_API_PORT
 export ENGINE_WS_PUBLIC_URL="${ENGINE_WS_PUBLIC_URL:-ws://localhost:$ENGINE_API_PORT/ws}"
 
 info "Building and starting all containers..."
-compose up --build -d
+if [ -n "${LIVEKIT_URL:-}" ] && [ -n "${LIVEKIT_API_KEY:-}" ] && [ -n "${LIVEKIT_API_SECRET:-}" ] \
+  && [ -n "${DEEPGRAM_API_KEY:-}" ] && [ -n "${CARTESIA_API_KEY:-}" ]; then
+  compose --profile livekit up --build -d
+  info "LiveKit voice agent enabled."
+else
+  compose up --build -d
+  warn "LiveKit voice agent skipped. Add LiveKit, Deepgram, and Cartesia keys to interview-engine/.env to enable it."
+fi
 
 failed=0
 wait_for_url "Interview API" "http://127.0.0.1:$ENGINE_API_PORT/health" 120 || failed=1

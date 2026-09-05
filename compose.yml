@@ -43,6 +43,25 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+  voice-agent:
+    profiles: ["livekit"]
+    build:
+      context: ./interview-engine/apps/voice-agent
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./interview-engine/.env
+        required: false
+    environment:
+      - ENGINE_INTERNAL_URL=http://api:4000
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-local-development-internal-secret}
+      - LIVEKIT_AGENT_NAME=${LIVEKIT_AGENT_NAME:-interviehire-interviewer}
+      - INTERVIEW_HARD_LIMIT_SECONDS=1800
+      - INTERVIEW_CLOSING_RESERVE_SECONDS=45
+      - PORT=8081
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
   backend:
     build:
       context: ./backend

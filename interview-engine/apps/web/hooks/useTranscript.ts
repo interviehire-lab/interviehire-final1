@@ -129,9 +129,10 @@ export function useTranscript(sessionId: string) {
     });
   }, []);
 
-  // Vapi persists both sides through handleCandidateTranscript(), so this only
-  // updates browser-visible state. It intentionally does not enqueue another
-  // transcript event (which would duplicate the server-owned conversation).
+  // The LiveKit voice agent persists both sides through
+  // handleCandidateTranscript(), so this only updates browser-visible state.
+  // It intentionally does not enqueue another transcript event (which would
+  // duplicate the server-owned conversation).
   const acceptExternalTranscript = useCallback((
     speaker: TranscriptSpeaker,
     text: string,

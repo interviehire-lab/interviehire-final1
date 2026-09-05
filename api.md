@@ -6,6 +6,11 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-05** — **Removed the LiveKit blueprint-size cap too — same reasoning as the follow-up-cap removal directly below.** A recruiter hit the "at most 6 prepared questions" rejection while trying to start a real test interview and asked why, given follow-ups were already made unlimited in the entry below — the two caps existed for the same reason (guarantee every prepared question fits in 30 minutes under a *fixed* per-question time budget) and the same fix applies: now that the director paces itself against real time-remaining context, a fixed question-count/estimated-minutes ceiling is no longer needed either. `interview-policy.ts`'s `validateLiveKitQuestionPlan()` and `INTERVIEW_MAX_MAIN_QUESTIONS` are **removed**, along with every call site: **POST /api/interview/sessions/:id/start** and **POST /api/interview/sessions/:id/livekit-token** no longer return **409** `LIVEKIT_BLUEPRINT_TOO_LARGE` at all (their other status codes are unchanged); **POST /internal/livekit/sessions/:id/start**'s response **drops the `plan` field** (was `{ok, questionCount, estimatedMinutes}`) and no longer returns that 409 either. The absolute 30-minute hard deadline (`shouldForceClose`/`deadlineReached`) remains the only backstop — a long blueprint now simply risks not being fully covered if the director doesn't pace aggressively enough, rather than being blocked from starting at all.
+- **2026-09-05** — **Removed the hard follow-up caps — the director now paces itself using time/topic context instead of a fixed count.** Superseding the "at most 1 follow-up per question and 3 follow-ups total" limits introduced earlier the same day (kept below for history): live testing showed the fixed cap was too blunt — it could block a genuinely useful follow-up (or, per the interview-policy module's separate time-based gate, silently veto one) regardless of what the LLM director actually judged worthwhile. `interview-policy.ts`'s `mayAskFollowUp()` (the hard gate) and its backing constants `INTERVIEW_MAX_FOLLOWUPS_PER_QUESTION`/`INTERVIEW_MAX_FOLLOWUPS_TOTAL` are **removed** — `handleCandidateTranscript()`'s `wantsFollowUp` no longer consults a count/time gate at all, honoring the director's `{action:"followup"}` decision outright (the only remaining veto is the absolute 30-minute `deadlineReached` cutoff, unchanged). In exchange, `decideNextTurn()`'s DeepSeek prompt now receives real pacing context every turn — follow-ups already asked (this question + the whole interview), how many prepared questions remain, and time remaining before the hard cutoff (`interview-policy.ts`'s `secondsRemaining()`) — with explicit instructions to weigh a follow-up's value against that budget itself, rather than a code-level counter doing it. No response schema change — `POST /internal/livekit/sessions/:id/turn` and `handleCandidateTranscript()`'s return shape are unaffected; this is purely a director-prompt/decision-logic change.
+
+- **2026-09-05** — **Vapi removed — LiveKit is now the only real-time voice provider.** Superseding every Vapi-related entry below (kept for history, not current behavior): Vapi's ~$0.05/min hosting fee on top of its own STT/TTS made it too costly to keep as a second, parallel path once LiveKit (documented in the entry directly below) was proven working — this removes it entirely rather than keeping it as a per-job fallback. **Removed routes:** **POST /api/vapi/llm** (alias `/chat/completions`) and **GET /api/interview/sessions/:id/vapi-config**, plus their backing files `interview-engine/apps/api/src/routes/vapi.routes.ts` and `services/vapi-config.service.ts` (deleted) and the `vapiRoutes` registration in `server.ts`. **Removed config:** `VAPI_WEBHOOK_SECRET`, `PUBLIC_ENGINE_URL` (was Vapi-webhook-reachability only — LiveKit's worker connects outbound, no public engine URL needed), `NEXT_PUBLIC_VAPI_PUBLIC_KEY`, `NEXT_PUBLIC_VAPI_ASSISTANT_ID`; removed the `@vapi-ai/web` browser dependency. **Settings simplification:** `InterviewSession.settings.voiceProvider` ('vapi'|'livekit') is retired — `settings.conversationalInterview === true` now directly means "use LiveKit" everywhere it's checked (was previously gated on `voiceProvider === 'livekit'` as a second, separate flag). This changes the gate condition (not the request/response shape) on **POST /api/interview/sessions/:id/start** (LiveKit-blueprint validation trigger) and **POST /api/interview/sessions/:id/livekit-token** (its `LIVEKIT_NOT_ENABLED` 409, error text updated from "This interview is not configured for LiveKit." to "This interview is not configured for conversational voice."). The dashboard's "Voice provider" select (Vapi/LiveKit) is removed from Interview Settings — only the "Conversational AI voice interview" toggle remains, and it now means LiveKit unconditionally; `defaultInterviewSettings()` no longer sets `voiceProvider`. **Frontend:** `hooks/useVoiceInterview.ts`'s `VoiceProvider` type narrows from `'legacy'|'vapi'|'livekit'` to `'legacy'|'livekit'`; the entire Vapi SDK branch (call lifecycle, volume-level smoothing/throttling, transcript/error handlers) is deleted, and `agentVolume` (Vapi-only) is removed from the hook's return value and from `AIVisualAssistant`'s props — the aura now always drives off LiveKit's real `audioTrack`. **New:** **POST /api/interview/voice-test-session** (documented below, under `GET /demo-session`) backs a new standalone `/voice-test` page — a minimal LiveKit-only harness for manually testing the voice pipeline with a real conversation, outside the full candidate-room flow.
+- **2026-09-05** — **LiveKit voice provider — lower-cost alternative to Vapi, opt-in per job.** Vapi bills ~$0.05/min hosting on top of its own STT/TTS pass-through, pushing a 30-minute interview toward $0.08/min; this adds a self-hosted-worker path (LiveKit Cloud for WebRTC transport only + a new outbound Railway worker, `interview-engine/apps/voice-agent/`, doing Deepgram STT + the unchanged engine director + Cartesia Sonic TTS) targeting under $1 total per 30-minute interview. Selectable per job (`InterviewSession.settings.voiceProvider: 'vapi' | 'livekit'`, dashboard "Voice provider" select, default `'vapi'` — instant rollback to Vapi by switching a job back) — Vapi's own routes/behavior (documented above) are completely unchanged. **New engine routes:** **POST /api/interview/sessions/:id/livekit-token** (mints a short-lived room-scoped LiveKit token for the browser + configures automatic agent dispatch) and three internal-only routes for the Railway worker — **POST /internal/livekit/sessions/:id/start**, **POST /internal/livekit/sessions/:id/turn** (idempotent-by-`turnId` relay into the unchanged `handleCandidateTranscript`), **POST /internal/livekit/sessions/:id/complete** (idempotent-by-session-status) — all documented below. **Response schema change:** **POST /api/interview/sessions/:id/start** now additionally returns `startedAt`/`deadlineAt`/`hardLimitSeconds` (additive; existing `session`/`initialQuestion` fields unchanged) so the browser and the LiveKit worker derive the same authoritative deadline from the engine instead of computing it independently. **New shared policy module** `apps/api/src/services/interview-policy.ts` (`hardLimitSeconds`, `deadlineFor`, `shouldForceClose`, `mayAskFollowUp`, `validateLiveKitQuestionPlan`) — hard cap 30 minutes regardless of any recruiter-configured `settings.hardDurationSeconds`; at most 1 follow-up per question and 3 follow-ups total (was 2 per question, unbounded total); a LiveKit job's active question set is rejected (both at `/start` and `/livekit-token`, **409** `LIVEKIT_BLUEPRINT_TOO_LARGE`) if it exceeds 6 questions or an estimated 24 minutes, so every prepared question is guaranteed to fit before the hard deadline. `handleCandidateTranscript()`'s return shape gains `shouldEnd: boolean` and `completionReason: 'director_completed'|'all_questions_asked'|'time_limit'|null` (additive; existing `text`/`interviewPhase`/`emotionState` unchanged) — completion is now only accepted once every prepared question has been reached (or the hard deadline forces it), closing the gap where the director could previously end an interview with unused prepared questions still on the blueprint. The director's own DeepSeek call token budget dropped from 600 to 250 (its JSON response is `{action, utterance, reason, targetPointId}` — a short probe never needed more; tightens worst-case latency). **Voice-agent worker** (new npm workspace `apps/voice-agent`, `@livekit/agents` + Deepgram/Cartesia/Silero-VAD plugins): registers with LiveKit Cloud under `LIVEKIT_AGENT_NAME`, is dispatched per-room via the token route's `RoomAgentDispatch` metadata, drives Deepgram `flux-general-en` STT → the engine's internal `/turn` route (never a second LLM) → Cartesia `sonic-3` TTS, publishes `activity`/`transcript`/`session`/`interview-ended` events over a LiveKit data channel (topic `interviehire.voice`) that the browser's `useVoiceInterview` hook consumes, and independently enforces the same hard deadline client-side (`setTimeout` at both the closing-reserve mark and the absolute deadline) as a second safety net beyond the engine's own `shouldForceClose`. Also enforces a per-answer hard limit (150s) via LiveKit's `UserStateChanged` event — if a candidate is still mid-answer past that mark, the agent speaks a brief redirect (`session.say`), independent of and in addition to the interview-wide deadline. **Browser:** new `hooks/useVoiceInterview.ts` unifies Vapi and LiveKit behind one `{start, stop, setMuted, connected, ...}` interface (`livekit-client`'s `Room`, publishing the same mic track already granted for proctoring/recording — no second microphone prompt); `page.tsx` selects the provider from `interviewSettings.voiceProvider`/`conversationalInterview` and is otherwise unchanged from the step-3 Vapi wiring documented below (same progress-indicator/question-hiding behavior, same finalize→complete→report tail on call end). **Deploy:** `deploy/RAILWAY-LIVEKIT.md` (new Railway service runbook); local dev (`compose.yml`, `scripts/start-local.sh`/`start-containers.sh`) starts the worker automatically, and only, when `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET`/`DEEPGRAM_API_KEY`/`CARTESIA_API_KEY` are all present — absent those, the rest of the stack (including Vapi-mode jobs) is completely unaffected, preserving the zero-key-path rule.
 - **2026-09-05** — **Conversational interviews now hide scripted questions and end under interviewer control.** For jobs with `InterviewSession.settings.conversationalInterview === true`, the candidate room no longer renders the prepared-question sidebar or its progress/navigation UI; the animated interviewer expands to the full interview area so adaptive follow-ups remain a natural voice conversation. Flag-off sessions retain the existing question card and manual controls. In `handleCandidateTranscript()`, a valid director decision `{ action: "complete" }` is now honored even when unused prepared questions remain (previously it was silently overridden by the next prepared question). The closing utterance is now **“Thanks. That completes our interview. I'll end the session now, and your report will be prepared automatically.”**; both Vapi's generated `endCallPhrases` configuration and the candidate's assistant-transcript listener recognize that line, stop the Vapi call, and run the existing finalize → complete → report flow exactly once without requiring a candidate click. This changes the possible timing/text of the `ai.text` response from **POST /api/interview/sessions/:id/answers** and **POST /api/vapi/llm**, but not either route's schema.
 - **2026-09-05** — **Test-interview launcher now satisfies CV-required jobs without weakening production enforcement.** **POST /api/jobs/{job_id}/test-session** still creates/reuses the same analytics-excluded throwaway applicant and returns the same `{ session_id }` response, but now assigns that synthetic applicant an explicit synthetic `resume_text` before `sync_applicant_to_ai()`. Previously the route copied the job's default `interviewSettings.requireCv: true` into the test `InterviewSession` while creating a candidate with empty résumé text, so the engine's correct **POST /api/interview/sessions/:id/start** `CV_REQUIRED` gate made “Launch test interview” unusable. Real applicants and the engine's CV gate are unchanged.
 - **2026-09-05** — **Vapi live conversational interviews — step 3.** **POST /api/vapi/llm** (also accepted at **POST /api/vapi/llm/chat/completions** for clients that append the OpenAI-compatible suffix) now optionally authenticates callers with `x-vapi-webhook-secret`: when `VAPI_WEBHOOK_SECRET` is configured the header must match or the route returns **401** `{ "error": "Unauthorized" }`; when unset, authentication is skipped with a one-time warning to preserve zero-key local development. Rejected requests log whether the header was present, never its value. **GET /api/interview/sessions/:id/vapi-config** is repurposed from a per-job OpenAI/ElevenLabs configuration into a read-only preview of the one shared IntervieHire assistant (custom LLM at `${PUBLIC_ENGINE_URL}/api/vapi/llm`, Deepgram `nova-2`, Cartesia voice placeholder, `{{firstQuestion}}`, transcript client messages, and the exact completion phrase); it still validates that the requested session exists but deliberately returns credential/voice placeholders rather than exposing Railway secrets. The candidate room now uses `@vapi-ai/web` only when the per-job `InterviewSession.settings.conversationalInterview` flag is exactly `true`, passing `{ metadata: { sessionId }, variableValues: { firstQuestion } }` at call start; Vapi transcripts drive live captions/read-only blueprint progress, Vapi speech events drive the assistant state, and call end enters the existing finalize/complete/report flow. Flag-off sessions retain server-ASR/browser-STT and manual question controls. The dashboard settings JSON gains `conversationalInterview` (default `false`; passed unchanged through the existing settings sync). Retired unconditional dead code: candidate-room WebSocket `ai_response`/browser `speechSynthesis`/Lina question shadow-state and the unused avatar-audio capture methods in `useTranscript.ts`.
@@ -52,7 +57,7 @@
 ## Conventions
 
 - **Backend — FastAPI** runs on **port `8000`**; all HTTP routes are mounted under the **`/api`** prefix (e.g. `/api/auth`, `/api/jobs`). Its WebSocket route (`/ws`) is mounted with **no prefix** (root).
-- **Interview Engine — Fastify** runs on **port `4000`** (host `0.0.0.0`, `PORT` env override). Per-module prefixes: `companyRoutes → /api/company`, `interviewRoutes → /api/interview`, `transcriptRoutes → /api/interviews`, `assistantRoutes → /api/assistant`, `vapiRoutes → /api/vapi`. The health check (`/health`) and the WebSocket gateway (`/ws`) are at the **root** (no `/api` prefix).
+- **Interview Engine — Fastify** runs on **port `4000`** (host `0.0.0.0`, `PORT` env override). Per-module prefixes: `companyRoutes → /api/company`, `interviewRoutes → /api/interview`, `transcriptRoutes → /api/interviews`, `assistantRoutes → /api/assistant`. The health check (`/health`) and the WebSocket gateway (`/ws`) are at the **root** (no `/api` prefix).
 - **Dashboard — Next route handlers** run on **port `3000`**, under `dashboard/app/api/*` (e.g. `/api/parse-file`, `/api/fetch-doc`, `/api/deepseek`).
 - **Auth model:** Backend authentication uses a **JWT in an httpOnly cookie** named `token`, valid for **7 days** (`max_age=604800s`). The token may also be supplied via an `Authorization: Bearer <jwt>` header. Super Admins additionally carry an `active_org_id` cookie that selects the active organisation context. Interview-engine and dashboard routes are largely public (no user auth); they rely on global rate limiting and/or server-side API keys.
 - **WebSocket endpoints** are denoted with the pseudo-method **`WS`** and collected in the final **WebSocket Endpoints** section. All WS frames are JSON text.
@@ -3078,7 +3083,27 @@ Response:
 
 Status codes: 200 OK; 429 rate limited; 500 on Prisma/upsert failure.
 
-Notes: No Fastify schema. Upserts company by slug; finds-or-creates role/questions/candidate/session. Side-effecting GET (writes to DB).
+Notes: No Fastify schema. Upserts company by slug; finds-or-creates role/questions/candidate/session. Side-effecting GET (writes to DB). Shares its seed logic (`getOrCreateDemoSession()`) with `POST /voice-test-session` below.
+
+#### POST /api/interview/voice-test-session
+
+Lightweight manual-testing harness for the real-time voice pipeline (director + LiveKit + `AgentAudioVisualizerAura`), reached via the standalone `/voice-test` page — bypasses the full candidate-room consent/permission/proctoring flow entirely. Reuses the exact same demo company/role/questions as `GET /demo-session`, but additionally force-sets `settings.conversationalInterview = true` on the returned session so it passes the `/livekit-token` gate below.
+
+- **Auth:** Public. Same trust level as `/demo-session` (no real candidate data touched).
+- **Path params:** none
+- **Query params:** none
+
+Request: none (body ignored)
+
+Response:
+```
+200 OK (application/json)
+{ sessionId: string }
+```
+
+Status codes: 200 OK; 500 on Prisma failure.
+
+Notes: No Fastify schema. Side-effecting POST — merges `conversationalInterview: true` into the demo session's existing `settings` (does not clobber other keys) and persists it, so every call after the first is a no-op on that field. The caller still needs to call `POST /api/interview/sessions/:id/start` and then `POST /api/interview/sessions/:id/livekit-token` itself — this route only prepares the session, it doesn't start the call.
 
 #### GET /api/interview/sessions/:id
 
@@ -3129,47 +3154,44 @@ Response:
 200 OK (application/json)
 {
   session: InterviewSession,   // full updated row (status='IN_PROGRESS', startedAt set, transcript updated)
-  initialQuestion: string      // first active question text, or fallback 'Tell me about your software engineering background.'
+  initialQuestion: string,     // first active question text, or fallback 'Tell me about your software engineering background.'
+  startedAt: string,           // ISO 8601 — session.startedAt (set on this call if it was previously null)
+  deadlineAt: string,          // ISO 8601 — startedAt + hardLimitSeconds, from interview-policy.ts::deadlineFor
+  hardLimitSeconds: number     // effective hard cap for this session (min(settings.hardDurationSeconds, 1800)), from interview-policy.ts::hardLimitSeconds
 }
 ```
 
 Status codes: 200 OK; 403 `{ "error": "This interview link is invalid or has expired.", "code": "INVALID_TOKEN" }` when the session is token-bound and the `token` query param doesn't match; 403 recruiter-settings gates — `INTERVIEW_DISABLED` (settings.interviewEnabled === false), `NO_REATTEMPT` (settings.allowReattempt === false and status COMPLETED/EVALUATED), `LATE_ATTEMPT` (settings.allowLate === false and now > scheduledAt + 5min grace), `ACCESS_SCHEDULED_ONLY` / `ACCESS_INVITED_ONLY` (settings.accessControl), and `TOO_EARLY` `{ "error": "This interview has not opened yet. Please return at your scheduled time.", "code": "TOO_EARLY" }` (scheduledAt is set and now < scheduledAt − 10min early-entry window); 400 `CV_REQUIRED` (settings.requireCv === true and no candidate resume); 404/500 — uses findUniqueOrThrow, so unknown id throws (P2025) surfaced as 500-class; 429 rate limited.
 
-Notes: No Fastify schema. The token guard runs after the findUniqueOrThrow: only sessions with a non-null `inviteToken` enforce it, so token-free sessions are unaffected and the existing settings checks still apply. **Scheduled-slot barrier:** the `TOO_EARLY` guard is UNCONDITIONAL on any session that has a `scheduledAt` (not gated behind a setting) and rejects a start until the early-entry window opens (`scheduledAt − 10min`); `EARLY_ENTRY_MS` is a single shared constant exported from `@interviehire/shared` (`interview-engine/packages/shared/src/index.ts`), imported by both this route and the candidate room's `page.tsx` (which renders a countdown "waiting room" lobby until the same instant) — no more hand-kept-in-sync duplicate constants. Sessions with no `scheduledAt` (plain link / demo) are unaffected. firstQuestion = first isActive question (orderBy createdAt asc) of the jobRole, else fallback. Calls ensureTranscriptMeta(id).
+Notes: No Fastify schema. The token guard runs after the findUniqueOrThrow: only sessions with a non-null `inviteToken` enforce it, so token-free sessions are unaffected and the existing settings checks still apply. **Scheduled-slot barrier:** the `TOO_EARLY` guard is UNCONDITIONAL on any session that has a `scheduledAt` (not gated behind a setting) and rejects a start until the early-entry window opens (`scheduledAt − 10min`); `EARLY_ENTRY_MS` is a single shared constant exported from `@interviehire/shared` (`interview-engine/packages/shared/src/index.ts`), imported by both this route and the candidate room's `page.tsx` (which renders a countdown "waiting room" lobby until the same instant) — no more hand-kept-in-sync duplicate constants. Sessions with no `scheduledAt` (plain link / demo) are unaffected. firstQuestion = first isActive question (orderBy createdAt asc) of the jobRole, else fallback. Calls ensureTranscriptMeta(id). **2026-09-05 (LiveKit migration):** response gained `startedAt`/`deadlineAt`/`hardLimitSeconds` (previously only `session`/`initialQuestion`) so the candidate room's countdown and the LiveKit voice agent's timing both derive from the same server-issued values instead of recomputing locally; existing consumers reading only `session`/`initialQuestion` are unaffected by the additive fields.
 
-#### GET /api/interview/sessions/:id/vapi-config
+#### POST /api/interview/sessions/:id/livekit-token
 
-Validates that the session exists, then returns the shared Vapi assistant setup preview. The frontend does not call this route at runtime; it is intended for one-time dashboard setup.
+Mints a short-lived, room-scoped LiveKit participant token for the candidate browser and configures agent dispatch so the Railway `apps/voice-agent` worker automatically joins the same room. Only the resulting token — never `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` — reaches the browser.
 
-- **Auth:** Public. Global rate limit.
+- **Auth:** Public. Global rate limit. Per-candidate invite enforcement when the session is token-bound (same `blockedByInviteToken` guard as `/start`).
 - **Path params:** `id`:string — InterviewSession.id
-- **Query params:** none
+- **Query params:** `token`:string (optional) — invite token, same semantics as `/start`.
 
-Request: none
+Request: none (body ignored)
 
 Response:
 ```
 200 OK (application/json)
 {
-  "name": "IntervieHire Adaptive Interviewer",
-  "model": {
-    "provider": "custom-llm",
-    "url": "<PUBLIC_ENGINE_URL>/api/vapi/llm",
-    "model": "interviehire-director",
-    "metadataSendMode": "variable",
-    "headers": { "x-vapi-webhook-secret": "<VAPI_WEBHOOK_SECRET>" }
-  },
-  "transcriber": { "provider": "deepgram", "model": "nova-2" },
-  "voice": { "provider": "cartesia", "voiceId": "<CARTESIA_VOICE_ID>" },
-  "firstMessage": "{{firstQuestion}}",
-  "clientMessages": ["transcript", "speech-update"],
-  "endCallPhrases": ["Thanks. That completes our interview. I'll end the session now, and your report will be prepared automatically."]
+  url: string,                 // LIVEKIT_URL, e.g. wss://<project>.livekit.cloud
+  token: string,                // short-lived participant JWT (ttl = hardLimitSeconds + 5min)
+  roomName: string,             // "interview-<sessionId>"
+  participantIdentity: string,  // "candidate-<candidateId>-<8 hex chars>"
+  startedAt: string,            // ISO 8601 — session.startedAt (must already be set — see 409 below)
+  deadlineAt: string,           // ISO 8601 — interview-policy.ts::deadlineFor(startedAt, settings)
+  hardLimitSeconds: number
 }
 ```
 
-Status codes: 200 OK; 404/500 — findUniqueOrThrow throws on unknown id; 429 rate limited.
+Status codes: 200 OK; 403 (invite-token mismatch, same as `/start`); 404 `{"error":"Interview session not found","code":"SESSION_NOT_FOUND"}`; 409 `{"error":"Start the interview session before requesting a LiveKit token.","code":"SESSION_NOT_STARTED"}` (session isn't `IN_PROGRESS` yet or has no `startedAt` — call `/start` first); 409 `{"error":"This interview is not configured for conversational voice.","code":"LIVEKIT_NOT_ENABLED"}` (`settings.conversationalInterview !== true`); 503 `{"error":"LiveKit is not configured on the interview engine.","code":"LIVEKIT_NOT_CONFIGURED"}` when `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` aren't all set.
 
-Notes: No Fastify schema. `PUBLIC_ENGINE_URL` is read from the engine environment. Secret and voice values remain placeholders because this is a public route; replace them while creating the assistant in Vapi. The installed `@vapi-ai/web` type contract confirms direct custom-model headers, `metadataSendMode: "variable"`, and call-level `metadata` overrides.
+Notes: Room name is deterministic per session (`interview-<sessionId>`) so the worker and the browser always converge on the same room without an extra coordination call. `roomConfig.agents` uses `RoomAgentDispatch({ agentName, metadata })` (`@livekit/protocol`) — LiveKit Cloud dispatches the named worker automatically on room creation; `metadata` (`{ sessionId, startedAt, deadlineAt }`) is what the worker's `agent.ts` reads via `ctx.job.metadata` to resolve its own timing without a second engine round-trip. The participant token's own `metadata` is intentionally narrower (`{ sessionId }` only). `departureTimeout: 30`, `maxParticipants: 2`.
 
 #### POST /api/interview/sessions/:id/complete
 
@@ -3816,6 +3838,107 @@ Notes: Global rate limit. If transcriptFilePath(sessionId) does not exist it cal
 
 Internal service-to-service routes (prefix `/internal`), called ONLY by the FastAPI backend — never the browser — and guarded by a shared-secret header. Because the two services share one Postgres, the backend performs all DB anonymise/erase itself (deleting a Candidate cascades its sessions/transcripts/proctoring at the DB level); the engine's sole job here is to unlink its ON-DISK artifacts. Part of the DPDP Act 2023 right-to-erasure flow.
 
+**2026-09-05 addition:** three `/internal/livekit/*` routes below, called ONLY by the Railway `apps/voice-agent` worker (never the browser) — the same `x-internal-secret` gate as `POST /internal/data-rights/erase-files`, via the shared `hasInternalAccess(req)` helper.
+
+#### POST /internal/livekit/sessions/:id/start
+
+Session bootstrap for a LiveKit interview job: validates the prepared-question plan fits the LiveKit cost/time budget, marks the session `IN_PROGRESS`, seeds the first AI question into the transcript if none exists yet, and returns the same authoritative timing values the voice-agent worker uses for its local deadline/closing timers.
+
+- **Auth:** internal only — `x-internal-secret` must match `INTERNAL_SERVICE_SECRET`; missing/mismatched → **401** `{"error":"unauthorized","code":"BAD_INTERNAL_SECRET"}`.
+- **Path params:** `id`:string — InterviewSession.id
+- **Query params:** none
+
+Request: `application/json` — body is accepted but not required (`{ source, jobId, roomName, startedAt, deadlineAt }`, all informational/logging only; the response's own `startedAt`/`deadlineAt` are server-computed, not echoed from the request).
+
+Response:
+```
+200 OK (application/json)
+{
+  sessionId: string,
+  candidateName: string,
+  roleTitle: string,
+  initialQuestion: string,
+  startedAt: string,        // ISO 8601
+  deadlineAt: string,       // ISO 8601 — interview-policy.ts::deadlineFor(startedAt, settings)
+  hardLimitSeconds: number  // interview-policy.ts::hardLimitSeconds(settings), capped at 1800
+}
+```
+
+Status codes: 200 OK; 401 (bad/missing secret); 404 `{"error":"Interview session not found","code":"SESSION_NOT_FOUND"}`.
+
+Notes: Idempotent on the seeded first question — only pushes it onto `transcript` if no `speaker:'ai'` entry exists yet, so a retried/duplicated worker start doesn't double-seed. Calls `ensureTranscriptMeta(id)`, same as the browser's own `POST /api/interview/sessions/:id/start`.
+
+#### POST /internal/livekit/sessions/:id/turn
+
+Per-turn relay into the unchanged adaptive director (`handleCandidateTranscript`), called once per candidate utterance the LiveKit worker's STT finalizes. Idempotent by `turnId` so a network retry from the worker can never double-charge a DeepSeek call or double-append the transcript.
+
+- **Auth:** internal only, same gate as above.
+- **Path params:** `id`:string — InterviewSession.id
+- **Query params:** none
+
+Request: `application/json`
+```
+{
+  text: string,          // required, the candidate's finalized transcript for this turn
+  turnId?: string,       // idempotency key; also accepted via the `idempotency-key` header (body wins if both present)
+  metrics?: object        // forwarded verbatim into handleCandidateTranscript's metrics arg
+}
+```
+
+Response:
+```
+200 OK (application/json)
+{
+  answer: { text: string },
+  replayed?: true,        // present only when turnId matched a prior AI transcript entry — see Notes
+  ai: {
+    text: string,
+    interviewPhase: "questioning" | "follow_up" | "closing",
+    emotionState: "curious" | "encouraging",
+    shouldEnd: boolean,
+    completionReason: "director_completed" | "all_questions_asked" | "time_limit" | "candidate_ended" | null,
+    deadlineAt?: string,
+    hardLimitSeconds?: number
+  }
+}
+```
+
+Status codes: 200 OK; 400 `{"error":"Candidate transcript text is required","code":"EMPTY_TRANSCRIPT"}`; 401 (bad/missing secret).
+
+Notes: When `turnId` matches an existing `speaker:'ai'` transcript entry's stored `livekitTurnId`, the route replays that entry's text/phase instead of calling the director again (`replayed: true`) — this is the idempotency guarantee for the worker's retry-on-timeout behavior. Otherwise it calls `handleCandidateTranscript(id, text, { ...metrics, livekitTurnId })` **unchanged** — same director, same transcript-event persistence, same question-coverage/deadline enforcement as before this route existed.
+
+#### POST /internal/livekit/sessions/:id/complete
+
+Marks the session's interview finished from the voice-agent worker's side (candidate hangup, director-signalled completion, or the worker's own 30-minute hard timer). Idempotent — safe to call more than once (e.g. both a graceful completion and the hard-deadline force-disconnect racing).
+
+- **Auth:** internal only, same gate as above.
+- **Path params:** `id`:string — InterviewSession.id
+- **Query params:** none
+
+Request: `application/json`
+```
+{
+  reason: "director_completed" | "all_questions_asked" | "time_limit" | "candidate_ended",  // invalid/missing → defaults to "candidate_ended"
+  completedAt?: string,
+  durationSeconds?: number,
+  source?: string
+}
+```
+
+Response:
+```
+200 OK (application/json)
+{
+  session: InterviewSession,       // unchanged if already EVALUATED, else updated to status='COMPLETED'
+  transcript: TranscriptResult | null,  // finalizeTranscript(id) result; null if finalization failed (logged, not fatal)
+  completionReason: string
+}
+```
+
+Status codes: 200 OK; 401 (bad/missing secret); 404 `{"error":"Interview session not found","code":"SESSION_NOT_FOUND"}`.
+
+Notes: Idempotent two ways — (1) a `type:'interview_completion'` transcript marker is only appended once; (2) the session row is only transitioned to `COMPLETED` when not already `EVALUATED` (a race between the worker's graceful completion and its hard-deadline timer, or a retried request, is a no-op the second time, not a duplicate report/eval). `finalizeTranscript` failure is caught and logged; the route still returns 200 with `transcript: null` rather than failing the worker's shutdown.
+
 #### POST /internal/data-rights/erase-files
 
 Files-only erasure: unlink the on-disk transcript `.txt` and recording blobs for a set of engine interview sessions. Best-effort and idempotent (missing files ignored).
@@ -3846,47 +3969,6 @@ Status codes: 200 OK (success, incl. when nothing matched — `count: 0`); 401 U
 
 Notes: Not under the `/api` prefix (registered at `/internal`). Best-effort/idempotent — each unlink is wrapped in try/catch and skips non-existent files, so replaying the same request is safe. Every DB lookup (transcript path, session transcript) is individually guarded, so a missing session or transcript is simply skipped.
 
-### `interview-engine/apps/api/src/routes/vapi.routes.ts`
-
-Custom-LLM webhook for a real-time voice platform (Vapi, or any provider using the same OpenAI-chat-completions-compatible "Custom LLM" contract, e.g. ElevenLabs Conversational AI) to drive the existing adaptive interview director over plain HTTP + SSE, instead of the WebSocket `candidate_transcript`/`ai_response` path. `handleCandidateTranscript()` (`services/interview-conversation.service.ts`) itself is unchanged — this route is purely a protocol adapter.
-
-#### POST /api/vapi/llm (alias: POST /api/vapi/llm/chat/completions)
-
-- **Auth:** optional shared-secret gate. When `VAPI_WEBHOOK_SECRET` is non-empty, request header `x-vapi-webhook-secret` must match exactly; missing/wrong → **401** `{ "error": "Unauthorized" }`. When the env var is unset, the gate is skipped and a one-time warning is logged for zero-key local development.
-- **Path params:** none
-- **Query params:** none
-
-Request: `application/json`
-```
-{
-  messages: [{ role: string, content: string }, ...],  // required, min 1 item
-  model?: string,
-  stream?: boolean,
-  metadata?: { sessionId?: string },
-  call?: { metadata?: { sessionId?: string } }
-}
-```
-Validated with `zod`. The session id is read from `metadata.sessionId`, falling back to `call.metadata.sessionId` — **this field path is an unverified best guess** against the standard "set call metadata, get it echoed back on every Custom-LLM turn" convention; it has not yet been confirmed against a real Vapi request (only the response contract was confirmed precisely, via ElevenLabs' docs + the shared OpenAI-compatible convention both platforms use). If wrong, the full raw request body is logged at `warn` level (`[vapi.routes] no sessionId found in request`) so the real field is easy to spot on first live use. The candidate's answer text is the `content` of the last `role: "user"` message in `messages`.
-
-Response: `200 OK`, `Content-Type: text/event-stream` (unbuffered — written directly via `reply.raw`, not Fastify's normal JSON reply path).
-```
-data: {"id":"chatcmpl-<timestamp>","object":"chat.completion.chunk","choices":[{"delta":{"content":"<AI response text>"},"finish_reason":null}]}
-
-data: [DONE]
-
-```
-`handleCandidateTranscript()` returns its whole decision in one LLM call, not token-by-token, so exactly one content chunk is streamed before `[DONE]` — this is valid SSE framing for the consuming platform, not literal incremental generation.
-
-Errors (both `application/json`, non-streamed):
-- **400** `{ "error": "sessionId not found in request metadata" }` — neither `metadata.sessionId` nor `call.metadata.sessionId` was present.
-- **400** `{ "error": "No user message text found" }` — no `role: "user"` message, or its `content` is empty/whitespace-only.
-
-Status codes: 200 OK (SSE stream); 400 Bad Request (missing sessionId or empty user text); 401 Unauthorized (configured secret missing/wrong); 422 (zod validation failure on `messages` — Fastify's default schema-error response).
-
-Notes: Registered via `app.register(vapiRoutes, { prefix: '/api/vapi' })` in `server.ts`. No new persistent service. For opted-in jobs, the candidate room starts Vapi with call metadata `{ sessionId }`; the installed SDK contract confirms this override and custom-LLM `metadataSendMode: "variable"`, while the raw-body warning remains in place until the first real Vapi payload confirms the live field path.
-
-Both paths execute the identical handler. The `/chat/completions` alias exists because some OpenAI-compatible clients append that suffix to the configured base URL. Locally, Fastify logs are rendered with `pino-pretty`; production keeps newline-delimited JSON for Railway and other log aggregators. Authorization, cookie, and Vapi secret headers are redacted in both modes.
-
 ### `interview-engine/apps/api/src/server.ts`
 
 #### GET /health
@@ -3909,7 +3991,7 @@ Response:
 
 Status codes: 200 OK.
 
-Notes: No global prefix at the server level — `/health` is served at root. Per-module prefixes applied at registration: companyRoutes → /api/company, interviewRoutes → /api/interview, transcriptRoutes → /api/interviews, assistantRoutes → /api/assistant, internalRoutes → /internal, vapiRoutes → /api/vapi; registerWebsocket(app) adds WS routes. Server-level config: CORS { origin: true, credentials: true }; rate limit { max: 200, timeWindow: '1 minute' }; @fastify/multipart and @fastify/websocket registered. Listens on host 0.0.0.0, port from process.env.PORT or 4000. dotenv loads ../../../.env relative to the compiled server dir. There is NO root "/" route.
+Notes: No global prefix at the server level — `/health` is served at root. Per-module prefixes applied at registration: companyRoutes → /api/company, interviewRoutes → /api/interview, transcriptRoutes → /api/interviews, assistantRoutes → /api/assistant, internalRoutes → /internal; registerWebsocket(app) adds WS routes. Server-level config: CORS { origin: true, credentials: true }; rate limit { max: 200, timeWindow: '1 minute' }; @fastify/multipart and @fastify/websocket registered. Listens on host 0.0.0.0, port from process.env.PORT or 4000. dotenv loads ../../../.env relative to the compiled server dir. There is NO root "/" route.
 
 ---
 

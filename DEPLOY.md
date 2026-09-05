@@ -89,3 +89,9 @@ cross-site auth cookie (already configured `SameSite=None; Secure` via
 The reminder runner is packaged as a short-lived Docker target. Follow
 [`deploy/RAILWAY-REMINDERS.md`](deploy/RAILWAY-REMINDERS.md) to add the separate
 five-minute Railway cron service and configure the canonical Twilio templates.
+
+## Conversational voice interviews (LiveKit)
+
+Deploy the outbound voice worker and configure the existing engine by following
+[`deploy/RAILWAY-LIVEKIT.md`](deploy/RAILWAY-LIVEKIT.md). Opt a job in by
+enabling "Conversational AI voice interview" in its Interview Settings.

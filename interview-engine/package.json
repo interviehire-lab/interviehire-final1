@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm:dev -w apps/api\" \"npm:dev -w apps/web\"",
-    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/web",
+    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/web && npm run build -w apps/voice-agent",
+    "dev:voice-agent": "npm run dev -w apps/voice-agent",
     "lint": "npm run lint -w apps/web && npm run lint -w apps/api",
     "db:generate": "npm run db:generate -w apps/api",
     "db:migrate": "npm run db:migrate -w apps/api",

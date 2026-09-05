@@ -1,6 +1,5 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Vapi from '@vapi-ai/web';
 import { WS_URL, API_URL } from '@/lib/api';
 import { GazeCalibration } from '@/hooks/GazeCalibration';
 import { useProctoring, getBestViolationRecordingMimeType } from '@/hooks/useProctoring';
@@ -11,6 +10,7 @@ import { roomStyles } from './roomStyles';
 import { WaitingRoom } from './WaitingRoom';
 import { AIVisualAssistant, type AssistantMode } from './AIVisualAssistant';
 import { EARLY_ENTRY_MS } from '@interviehire/shared';
+import { useVoiceInterview, type VoiceActivity, type VoiceTranscript } from '@/hooks/useVoiceInterview';
 
 // How early a candidate may enter the room before their scheduled slot. The
 // lobby unlocks and the engine's /start accepts a start once inside this window.
@@ -21,29 +21,7 @@ const CONSENT_VERSION = '2026-07-01';
 // Where the candidate reads the full privacy policy (linked from the consent
 // gate). Override per-deployment; falls back to the marketing-site path.
 const PRIVACY_URL = process.env.NEXT_PUBLIC_PRIVACY_URL || 'https://www.interviehire.com/privacy';
-const VAPI_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY || '';
-const VAPI_ASSISTANT_ID = process.env.NEXT_PUBLIC_VAPI_ASSISTANT_ID || '';
 const CLOSING_LINE = "Thanks. That completes our interview. I'll end the session now, and your report will be prepared automatically.";
-
-function formatVapiError(value: unknown): string {
-  if (typeof value === 'string' && value.trim()) return value.trim();
-  if (value instanceof Error && value.message.trim()) return value.message.trim();
-  if (!value || typeof value !== 'object') return '';
-
-  const error = value as Record<string, unknown>;
-  // The Vapi SDK emits errors as { type, stage, error: { message, ... } }.
-  // Some failure paths instead place that nested object in `message`, so only
-  // interpolate a value after recursively reducing it to a real string.
-  for (const candidate of [error.error, error.message, error.detail, error.reason]) {
-    const detail = formatVapiError(candidate);
-    if (detail) return detail;
-  }
-
-  const context = [error.type, error.stage]
-    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .join(' · ');
-  return context;
-}
 
 // Whether this session already has a matching, still-current "granted" consent
 // stored locally. Only a matching-version grant counts; older wording or a
@@ -156,8 +134,11 @@ export default function Interview() {
   const [interviewSettings, setInterviewSettings] = useState<any>(null);
   const [interviewSettingsLoaded, setInterviewSettingsLoaded] = useState(false);
   // Deliberately opt-in: unlike mature proctoring, real-time voice is new,
-  // metered, and must be enabled explicitly per job.
+  // metered, and must be enabled explicitly per job. LiveKit is the only
+  // voice provider — no per-job choice needed.
   const conversationalInterviewEnabled = interviewSettings?.conversationalInterview === true;
+  const voiceProvider = conversationalInterviewEnabled ? 'livekit' : 'legacy';
+  const voiceInterviewEnabled = voiceProvider !== 'legacy';
   const [branding, setBranding] = useState<{ name?: string; primaryColor?: string; logoUrl?: string; whiteLabel?: boolean } | null>(null);
   const [startError, setStartError] = useState('');
   // Scheduled-slot barrier: when a session has a future scheduledAt, the room is
@@ -167,6 +148,7 @@ export default function Interview() {
   const [scheduledAtMs, setScheduledAtMs] = useState<number | null>(null);
   const [scheduleChecked, setScheduleChecked] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [deadlineNowMs, setDeadlineNowMs] = useState(() => Date.now());
 
   // Smooth over the conversational gap after an answer. The orb moves into a
   // thinking state briefly instead of appearing frozen while the next response
@@ -208,9 +190,7 @@ export default function Interview() {
   const [micDenied, setMicDenied] = useState(false);
   const [permissionsAcknowledged, setPermissionsAcknowledged] = useState(false);
 
-  const vapiRef = useRef<Vapi | null>(null);
-  const vapiCallActiveRef = useRef(false);
-  const seenVapiQuestionsRef = useRef<Set<number>>(new Set());
+  const seenVoiceQuestionsRef = useRef<Set<number>>(new Set());
   const questionsRef = useRef(questions);
   const endingRef = useRef(false);
   const endCallRef = useRef<() => Promise<void>>(async () => {});
@@ -279,72 +259,62 @@ export default function Interview() {
     questionsRef.current = questions;
   }, [questions]);
 
-  // Vapi owns the conversational audio loop only for opted-in jobs. The
-  // proctoring WebSocket remains connected independently below.
-  useEffect(() => {
-    if (!conversationalInterviewEnabled) return;
-    if (!VAPI_PUBLIC_KEY || !VAPI_ASSISTANT_ID) {
-      setStartError('Conversational voice is enabled, but the Vapi public key or assistant ID is missing.');
-      return;
+  function handleVoiceTranscript(message: VoiceTranscript) {
+    acceptExternalTranscript(message.role, message.text, message.isFinal);
+    if (message.role !== 'interviewer' || !message.isFinal) return;
+
+    setMessages((current) => [...current, { speaker: 'ai', text: message.text }]);
+    const normalized = message.text.replace(/\s+/g, ' ').trim().toLowerCase();
+    const matchedIndex = questionsRef.current.findIndex(
+      (item) => item.text.replace(/\s+/g, ' ').trim().toLowerCase() === normalized,
+    );
+    if (matchedIndex >= 0 && !seenVoiceQuestionsRef.current.has(matchedIndex)) {
+      seenVoiceQuestionsRef.current.add(matchedIndex);
+      setQuestionIndex(matchedIndex);
     }
+    if (normalized.includes(CLOSING_LINE.toLowerCase())) void endCallRef.current();
+  }
 
-    const vapi = new Vapi(VAPI_PUBLIC_KEY);
-    vapiRef.current = vapi;
+  function handleVoiceActivity(activity: VoiceActivity) {
+    if (assistantThinkTimerRef.current) clearTimeout(assistantThinkTimerRef.current);
+    setAssistantActivity(activity);
+  }
 
-    const onCallStart = () => {
-      vapiCallActiveRef.current = true;
-      setAssistantActivity('idle');
-    };
-    const onCallEnd = () => {
-      vapiCallActiveRef.current = false;
-      setAssistantActivity('idle');
-      void endCallRef.current();
-    };
-    const onSpeechStart = () => {
-      if (assistantThinkTimerRef.current) clearTimeout(assistantThinkTimerRef.current);
-      setAssistantActivity('speaking');
-    };
-    const onSpeechEnd = () => setAssistantActivity('idle');
-    const onMessage = (message: any) => {
-      if (message?.type !== 'transcript' && message?.type !== "transcript[transcriptType='final']") return;
-      const text = String(message.transcript || '').trim();
-      if (!text || (message.role !== 'user' && message.role !== 'assistant')) return;
-      const isFinal = message.transcriptType === 'final';
-      acceptExternalTranscript(message.role === 'user' ? 'candidate' : 'interviewer', text, isFinal);
-      if (message.role !== 'assistant' || !isFinal) return;
-
-      setMessages((current) => [...current, { speaker: 'ai', text }]);
-      const normalized = text.replace(/\s+/g, ' ').trim().toLowerCase();
-      const matchedIndex = questionsRef.current.findIndex(
-        (item) => item.text.replace(/\s+/g, ' ').trim().toLowerCase() === normalized,
-      );
-      if (matchedIndex >= 0 && !seenVapiQuestionsRef.current.has(matchedIndex)) {
-        seenVapiQuestionsRef.current.add(matchedIndex);
-        setQuestionIndex(matchedIndex);
-      }
-      if (normalized.includes(CLOSING_LINE.toLowerCase())) void endCallRef.current();
-    };
-    const onError = (error: any) => {
-      const detail = formatVapiError(error) || 'Unable to start the conversational voice call.';
-      console.error('[Vapi] call error', error);
+  const voice = useVoiceInterview({
+    provider: voiceProvider,
+    sessionId,
+    getInviteToken: () => inviteTokenRef.current,
+    onTranscript: handleVoiceTranscript,
+    onActivity: handleVoiceActivity,
+    onEnded: () => void endCallRef.current(),
+    onError: (detail, error) => {
+      console.error(`[${voiceProvider}] voice error`, error || detail);
       setStartError(`Voice interview error: ${detail}`);
       setAssistantActivity('idle');
-    };
+    },
+  });
 
-    vapi.on('call-start', onCallStart);
-    vapi.on('call-end', onCallEnd);
-    vapi.on('speech-start', onSpeechStart);
-    vapi.on('speech-end', onSpeechEnd);
-    vapi.on('message', onMessage);
-    vapi.on('error', onError);
+  const voiceDeadlineMs = useMemo(() => {
+    const explicit = voice.deadlineAt ? Date.parse(voice.deadlineAt) : NaN;
+    if (Number.isFinite(explicit)) return explicit;
+    const started = voice.startedAt ? Date.parse(voice.startedAt) : NaN;
+    return Number.isFinite(started) ? started + voice.hardLimitSeconds * 1000 : null;
+  }, [voice.deadlineAt, voice.hardLimitSeconds, voice.startedAt]);
 
-    return () => {
-      vapi.removeAllListeners();
-      if (vapiCallActiveRef.current) void vapi.stop().catch(() => {});
-      vapiCallActiveRef.current = false;
-      if (vapiRef.current === vapi) vapiRef.current = null;
+  // This countdown is candidate feedback and a last-resort client fallback. The
+  // engine and voice worker own the authoritative 30-minute deadline, so a page
+  // refresh or a suspended browser timer cannot extend the interview.
+  useEffect(() => {
+    if (voiceProvider !== 'livekit' || !voiceDeadlineMs || ended) return;
+    const tick = () => {
+      const now = Date.now();
+      setDeadlineNowMs(now);
+      if (now >= voiceDeadlineMs) void endCallRef.current();
     };
-  }, [conversationalInterviewEnabled, sessionId, acceptExternalTranscript]);
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [ended, voiceDeadlineMs, voiceProvider]);
 
   // Lobby heartbeat: drives the countdown and auto-unlocks the room the moment
   // the entry window opens. Only runs while genuinely waiting, so it stops once
@@ -543,14 +513,14 @@ export default function Interview() {
       const original = videoRef.current?.srcObject as MediaStream | null;
       const screenVideo = getScreenVideoStream?.() ?? null;
       const screenAudio = getScreenAudioStream?.() ?? null;
+      // Permission was granted in the explicit pre-interview gate. Keep this one
+      // stream for recording and LiveKit so starting voice does not create a
+      // competing microphone capture lifecycle.
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+      micStreamRef.current = micStream;
 
       let recordStream: MediaStream | null = null;
       if (screenVideo) {
-        // Mic permission was already granted earlier for STT, so this should not
-        // trigger a second browser prompt.
-        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
-        micStreamRef.current = micStream;
-
         const ctx = new AudioContext();
         const dest = ctx.createMediaStreamDestination();
         if (micStream) ctx.createMediaStreamSource(micStream).connect(dest);
@@ -560,8 +530,11 @@ export default function Interview() {
         recordStream = new MediaStream([...screenVideo.getVideoTracks(), ...dest.stream.getAudioTracks()]);
       } else if (original) {
         // Fallback: screen share unavailable for some reason — keep the old
-        // webcam-only behavior rather than not recording at all.
-        recordStream = original;
+        // webcam recording behavior and include the already-granted mic.
+        recordStream = new MediaStream([
+          ...original.getVideoTracks(),
+          ...(micStream?.getAudioTracks() || []),
+        ]);
       }
 
       if (!recordStream) {
@@ -638,20 +611,14 @@ export default function Interview() {
         if (!startRes.ok) {
           console.error(`Engine /start returned ${startRes.status}; proceeding into the interview anyway.`);
         }
-        startRecording();
-        if (conversationalInterviewEnabled) {
-          const vapi = vapiRef.current;
-          if (!vapi || !VAPI_ASSISTANT_ID) {
-            setStartError('Conversational voice could not start because Vapi is not configured.');
-            return;
-          }
+        await startRecording();
+        if (voiceInterviewEnabled) {
           const firstQuestion = String(startJson?.initialQuestion || questionsRef.current[0]?.text || '').trim();
           setAssistantActivity('thinking');
-          const call = await vapi.start(VAPI_ASSISTANT_ID, {
-            metadata: { sessionId },
-            variableValues: { firstQuestion },
+          await voice.start({
+            firstQuestion,
+            microphoneTrack: micStreamRef.current?.getAudioTracks()[0] || null,
           });
-          if (!call) throw new Error('Vapi did not create a call. Check the public key and assistant ID.');
         }
         // Transcript capture (markStart + browser STT + auto interviewer-audio
         // capture) is started in the calibration-gated effect below — NOT here —
@@ -660,39 +627,37 @@ export default function Interview() {
         // STT never started and the interview captured zero transcript events.
       } catch (err) {
         console.error('startSession failed', err);
-        if (conversationalInterviewEnabled) {
-          setStartError(`Voice interview could not start: ${err instanceof Error ? err.message : 'Unknown Vapi error'}`);
+        if (voiceInterviewEnabled) {
+          setStartError(`Voice interview could not start: ${err instanceof Error ? err.message : 'Unknown voice provider error'}`);
         }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calibration, socket, interviewSettingsLoaded, conversationalInterviewEnabled]);
+  }, [calibration, socket, interviewSettingsLoaded, voiceInterviewEnabled, voice]);
 
   // Start transcript capture as soon as calibration is done, independent of the
   // proctoring WebSocket. Flag-off candidate speech prefers server-side
   // Deepgram/Whisper with browser STT as a keyless/error fallback. Flag-on calls
-  // are transcribed and persisted by Vapi plus the server-side director.
+  // are transcribed and persisted by LiveKit's Deepgram STT plus the
+  // server-side director.
   useEffect(() => {
     if (!calibration || !interviewSettingsLoaded || captureStartedRef.current) return;
     captureStartedRef.current = true;
     transcript.markStart();
-    if (conversationalInterviewEnabled) return;
+    if (voiceInterviewEnabled) return;
     const micStream = videoRef.current?.srcObject as MediaStream | null;
     void transcript.startCandidateCaptureFromStream(micStream).then((result) => {
       if (!result.ok) transcript.startBrowserSTT();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calibration, interviewSettingsLoaded, conversationalInterviewEnabled]);
+  }, [calibration, interviewSettingsLoaded, voiceInterviewEnabled]);
 
   // End → stop candidate capture, finalize the .txt, complete the session, and
   // evaluate into the report. Fully automatic.
   async function endCall() {
     if (endingRef.current) return;
     endingRef.current = true;
-    if (vapiCallActiveRef.current && vapiRef.current) {
-      vapiCallActiveRef.current = false;
-      await vapiRef.current.stop().catch((error) => console.error('[Vapi] stop failed', error));
-    }
+    await voice.stop();
     // Mark this as a deliberate close BEFORE closing the socket so the reconnect
     // handler doesn't try to reopen it once the interview is over.
     isDeliberateCloseRef.current = true;
@@ -756,7 +721,7 @@ export default function Interview() {
     const stream = videoRef.current?.srcObject as MediaStream | null;
     const next = !micOn;
     stream?.getAudioTracks().forEach((t) => (t.enabled = next));
-    if (conversationalInterviewEnabled) vapiRef.current?.setMuted(!next);
+    if (voiceInterviewEnabled) voice.setMuted(!next);
     setMicOn(next);
   }
 
@@ -1005,7 +970,14 @@ export default function Interview() {
     ? { label: `Looking ${state.gazeDirection ?? 'away'}`, tone: 'warn' as const }
     : { label: 'Monitored', tone: 'ok' as const };
 
-  const clockSeconds = sessionStage === 'screening' ? Math.max(0, SCREENING_DURATION_SECONDS - elapsed) : elapsed;
+  const liveKitRemainingSeconds = voiceDeadlineMs == null
+    ? voice.hardLimitSeconds
+    : Math.max(0, Math.ceil((voiceDeadlineMs - deadlineNowMs) / 1000));
+  const clockSeconds = voiceProvider === 'livekit'
+    ? liveKitRemainingSeconds
+    : sessionStage === 'screening'
+      ? Math.max(0, SCREENING_DURATION_SECONDS - elapsed)
+      : elapsed;
   const mm = String(Math.floor(clockSeconds / 60)).padStart(2, '0');
   const ss = String(clockSeconds % 60).padStart(2, '0');
   const clock = `${mm}:${ss}`;
@@ -1387,9 +1359,14 @@ export default function Interview() {
           </div>
         )}
 
-        <main className={`content${conversationalInterviewEnabled ? ' content--conversational' : ''}`}>
+        <main className={`content${voiceInterviewEnabled ? ' content--conversational' : ''}`}>
           <section className="avatar-panel">
-            <AIVisualAssistant mode={assistantMode} voiceActive={voiceActive && micOn} />
+            <AIVisualAssistant
+              mode={assistantMode}
+              voiceActive={voiceActive && micOn}
+              useAura={voiceInterviewEnabled}
+              audioTrack={voice.agentAudioTrack}
+            />
             <div className="avatar-overlay" />
             <div className="identity">
               <div className="identity-icon">✦</div>
@@ -1440,7 +1417,7 @@ export default function Interview() {
             )}
           </section>
 
-          {!conversationalInterviewEnabled && (
+          {!voiceInterviewEnabled && (
             <aside className="right-stack">
               <section className="question-card">
                 <div className="question-top">
@@ -1477,7 +1454,7 @@ export default function Interview() {
           <div className="control-time">
             <i className="red-dot" />
             <span>{clock}</span>
-            <span className="elapsed-label">{sessionStage === 'screening' ? 'Remaining' : 'Elapsed'} · {recordingStatus}</span>
+            <span className="elapsed-label">{voiceProvider === 'livekit' || sessionStage === 'screening' ? 'Remaining' : 'Elapsed'} · {recordingStatus}</span>
             <button type="button" className="debug-toggle" onClick={() => setShowDebug((v) => !v)} title="Toggle proctoring debug (Ctrl+Shift+D or ` )">
               🐞 Debug
             </button>

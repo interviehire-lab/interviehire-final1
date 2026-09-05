@@ -6,6 +6,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/services.sh"
 stop_process dashboard
 stop_process candidate-web
 stop_process fastapi-backend
+stop_process voice-agent
 stop_process interview-api
 
 if [ "${1:-}" != "--keep-infra" ]; then

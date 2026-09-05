@@ -126,6 +126,7 @@ function initSourcing() {
           s[key] = !!document.getElementById(id)?.classList.contains('active');
         });
         s.accessControl = document.getElementById('iset-access')?.value || 'link';
+        s.hardDurationSeconds = 30 * 60;
         job.interviewSettings = s;
         saveStateToLocalStorage();
         scheduleJobSave(job);

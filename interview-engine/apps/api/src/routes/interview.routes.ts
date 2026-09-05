@@ -1,13 +1,19 @@
 import { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
+import { RoomAgentDispatch, RoomConfiguration } from '@livekit/protocol';
+import { AccessToken } from 'livekit-server-sdk';
 import { prisma } from '../lib/prisma.js';
 import { evaluateInterview, generatePdfReport, getCandidateFacingReport } from '../services/evaluation.service.js';
 import nodemailer from 'nodemailer';
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildVapiAssistantConfig } from '../services/vapi-config.service.js';
 import { processRecordingForSession, transcribeUploadedFile } from '../services/transcription.service.js';
 import { uploadRecordingToDrive } from '../services/drive-upload.service.js';
 import { handleCandidateTranscript } from '../services/interview-conversation.service.js';
+import {
+  deadlineFor,
+  hardLimitSeconds,
+} from '../services/interview-policy.js';
 import { ensureTranscriptMeta, finalizeTranscript } from '../services/transcript.service.js';
 import { saveTranscriptFile, flagcheckTranscriptFile, transcriptFilePath, FLAGCHECK_DISCLAIMER } from '../services/flagcheckTranscription.service.js';
 import { EARLY_ENTRY_MS } from '@interviehire/shared';
@@ -210,9 +216,12 @@ const juniorSdeQuestions = [
   },
 ];
 
-export async function interviewRoutes(app: FastifyInstance) {
-  app.get('/demo-session', async () => {
-    const company = await prisma.company.upsert({
+// Shared by GET /demo-session and POST /voice-test-session — both just need a
+// real, working company/role/questions/candidate to seed a session against;
+// find-or-create so repeated calls (across restarts, or from either route)
+// converge on the same demo data instead of piling up duplicates.
+async function getOrCreateDemoSession() {
+  const company = await prisma.company.upsert({
       where: { slug: 'demo-junior-sde' },
       update: {
         name: 'IntervieHire Demo Engineering',
@@ -304,7 +313,32 @@ export async function interviewRoutes(app: FastifyInstance) {
       });
     }
 
+  return { company, role, candidate, session };
+}
+
+export async function interviewRoutes(app: FastifyInstance) {
+  app.get('/demo-session', async () => {
+    const { company, role, candidate, session } = await getOrCreateDemoSession();
     return { sessionId: session.id, companyId: company.id, roleId: role.id, candidateId: candidate.id };
+  });
+
+  // POST /voice-test-session — a lightweight harness for manually testing the
+  // real-time voice pipeline (director + LiveKit + AgentAudioVisualizerAura)
+  // without going through the full candidate-room consent/permission/proctoring
+  // flow. Reuses the exact same demo company/role/questions as /demo-session,
+  // with `settings.conversationalInterview` forced to true — /sessions/:id/livekit-token
+  // 409s otherwise. Public, no auth: same trust level as /demo-session itself
+  // (no real candidate data touched).
+  app.post('/voice-test-session', async (_req: any, reply) => {
+    const { session } = await getOrCreateDemoSession();
+    const settings = (session.settings && typeof session.settings === 'object')
+      ? session.settings as Record<string, unknown>
+      : {};
+    const updated = await prisma.interviewSession.update({
+      where: { id: session.id },
+      data: { settings: { ...settings, conversationalInterview: true } },
+    });
+    return reply.send({ sessionId: updated.id });
   });
 
   // ── Candidate consent audit log ("security log") ───────────────────────────
@@ -427,11 +461,84 @@ export async function interviewRoutes(app: FastifyInstance) {
     // questions (captured via STT), and the backend-driven room records its own
     // interviewer turns client-side — seeding here would inject a phantom line.
     await ensureTranscriptMeta(req.params.id);
-    return { session: updated, initialQuestion: firstQuestion };
+    const settings = (updated.settings && typeof updated.settings === 'object')
+      ? updated.settings as Record<string, unknown>
+      : {};
+    const startedAt = updated.startedAt ?? new Date();
+    return {
+      session: updated,
+      initialQuestion: firstQuestion,
+      startedAt: startedAt.toISOString(),
+      deadlineAt: deadlineFor(startedAt, settings).toISOString(),
+      hardLimitSeconds: hardLimitSeconds(settings),
+    };
   });
-  app.get('/sessions/:id/vapi-config', async (req:any) => {
-    await prisma.interviewSession.findUniqueOrThrow({ where: { id: req.params.id }, select: { id: true } });
-    return buildVapiAssistantConfig();
+  app.post('/sessions/:id/livekit-token', async (req:any, reply:any) => {
+    if (await blockedByInviteToken(req, reply)) return reply;
+
+    const livekitUrl = process.env.LIVEKIT_URL?.trim();
+    const apiKey = process.env.LIVEKIT_API_KEY?.trim();
+    const apiSecret = process.env.LIVEKIT_API_SECRET?.trim();
+    if (!livekitUrl || !apiKey || !apiSecret) {
+      return reply.code(503).send({ error: 'LiveKit is not configured on the interview engine.', code: 'LIVEKIT_NOT_CONFIGURED' });
+    }
+
+    const session = await prisma.interviewSession.findUnique({
+      where: { id: req.params.id },
+      include: {
+        candidate: { select: { id: true, fullName: true } },
+        jobRole: { include: { questions: { where: { isActive: true }, orderBy: { createdAt: 'asc' } } } },
+      },
+    });
+    if (!session) return reply.code(404).send({ error: 'Interview session not found', code: 'SESSION_NOT_FOUND' });
+    if (session.status !== 'IN_PROGRESS' || !session.startedAt) {
+      return reply.code(409).send({ error: 'Start the interview session before requesting a LiveKit token.', code: 'SESSION_NOT_STARTED' });
+    }
+
+    const settings = (session.settings && typeof session.settings === 'object')
+      ? session.settings as Record<string, unknown>
+      : {};
+    if (settings.conversationalInterview !== true) {
+      return reply.code(409).send({ error: 'This interview is not configured for conversational voice.', code: 'LIVEKIT_NOT_ENABLED' });
+    }
+
+    const roomName = `interview-${session.id}`;
+    const deadlineAt = deadlineFor(session.startedAt, settings);
+    const participantIdentity = `candidate-${session.candidate.id}-${randomUUID().slice(0, 8)}`;
+    const agentName = process.env.LIVEKIT_AGENT_NAME?.trim() || 'interviehire-interviewer';
+    const metadata = JSON.stringify({
+      sessionId: session.id,
+      startedAt: session.startedAt.toISOString(),
+      deadlineAt: deadlineAt.toISOString(),
+    });
+    const accessToken = new AccessToken(apiKey, apiSecret, {
+      identity: participantIdentity,
+      name: session.candidate.fullName,
+      ttl: hardLimitSeconds(settings) + 5 * 60,
+      metadata: JSON.stringify({ sessionId: session.id }),
+    });
+    accessToken.addGrant({
+      room: roomName,
+      roomJoin: true,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true,
+    });
+    accessToken.roomConfig = new RoomConfiguration({
+      maxParticipants: 2,
+      departureTimeout: 30,
+      agents: [new RoomAgentDispatch({ agentName, metadata })],
+    });
+
+    return {
+      url: livekitUrl,
+      token: await accessToken.toJwt(),
+      roomName,
+      participantIdentity,
+      startedAt: session.startedAt.toISOString(),
+      deadlineAt: deadlineAt.toISOString(),
+      hardLimitSeconds: hardLimitSeconds(settings),
+    };
   });
   app.post('/sessions/:id/complete', async (req:any, reply:any) => {
     if (await blockedByInviteToken(req, reply)) return reply;

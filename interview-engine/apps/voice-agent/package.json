@@ -1,0 +1,32 @@
+{
+  "name": "@interviehire/voice-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "tsx src/agent.ts dev",
+    "build": "tsc",
+    "start": "node dist/agent.js start",
+    "download-files": "livekit-agents download-files",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@livekit/agents": "1.8.0",
+    "@livekit/agents-plugin-cartesia": "1.8.0",
+    "@livekit/agents-plugin-deepgram": "1.8.0",
+    "@livekit/agents-plugin-silero": "1.8.0",
+    "@livekit/rtc-node": "0.13.34",
+    "dotenv": "17.4.2",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.4"
+  }
+}

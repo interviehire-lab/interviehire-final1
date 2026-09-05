@@ -8,12 +8,13 @@ TAIL_LINES="${TAIL_LINES:-200}"
 if [ "$#" -gt 0 ]; then
   services=("$@")
 else
-  services=(interview-api fastapi-backend candidate-web dashboard)
+  services=(interview-api voice-agent fastapi-backend candidate-web dashboard)
 fi
 
 color_for_service() {
   case "$1" in
     interview-api) printf '\033[1;36m' ;;
+    voice-agent) printf '\033[1;33m' ;;
     fastapi-backend) printf '\033[1;35m' ;;
     candidate-web) printf '\033[1;32m' ;;
     dashboard) printf '\033[1;34m' ;;

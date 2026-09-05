@@ -11,7 +11,6 @@ import { companyRoutes } from './routes/company.routes.js';
 import { interviewRoutes } from './routes/interview.routes.js';
 import { transcriptRoutes } from './routes/transcript.routes.js';
 import { internalRoutes } from './routes/internal.routes.js';
-import { vapiRoutes } from './routes/vapi.routes.js';
 import { registerWebsocket } from './websocket/gateway.js';
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -33,7 +32,6 @@ const app = Fastify({
       paths: [
         'req.headers.authorization',
         'req.headers.cookie',
-        'req.headers["x-vapi-webhook-secret"]',
       ],
       censor: '[Redacted]',
     },
@@ -62,7 +60,6 @@ await app.register(interviewRoutes, { prefix: '/api/interview' });
 await app.register(transcriptRoutes, { prefix: '/api/interviews' });
 await app.register(assistantRoutes, { prefix: '/api/assistant' });
 await app.register(internalRoutes, { prefix: '/internal' });
-await app.register(vapiRoutes, { prefix: '/api/vapi' });
 await registerWebsocket(app);
 
 const port = Number(process.env.PORT || 4000);

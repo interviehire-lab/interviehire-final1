@@ -21,6 +21,7 @@ export DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
 export CANDIDATE_PORT="${CANDIDATE_PORT:-3001}"
 export ENGINE_API_PORT="${ENGINE_API_PORT:-4000}"
 export BACKEND_PORT="${BACKEND_PORT:-8000}"
+export VOICE_AGENT_PORT="${VOICE_AGENT_PORT:-8081}"
 
 assert_process_port_available interview-api "$ENGINE_API_PORT"
 assert_process_port_available fastapi-backend "$BACKEND_PORT"
@@ -36,6 +37,17 @@ info "Applying interview-engine database migrations..."
 start_process interview-api "$REPO_ROOT/interview-engine" \
   env FORCE_COLOR=1 DATABASE_URL="$DATABASE_URL" REDIS_URL="$REDIS_URL" PORT="$ENGINE_API_PORT" \
   npm run dev -w apps/api
+
+if [ -n "${LIVEKIT_URL:-}" ] && [ -n "${LIVEKIT_API_KEY:-}" ] && [ -n "${LIVEKIT_API_SECRET:-}" ] \
+  && [ -n "${DEEPGRAM_API_KEY:-}" ] && [ -n "${CARTESIA_API_KEY:-}" ]; then
+  assert_process_port_available voice-agent "$VOICE_AGENT_PORT"
+  start_process voice-agent "$REPO_ROOT/interview-engine" \
+    env FORCE_COLOR=1 PORT="$VOICE_AGENT_PORT" ENGINE_INTERNAL_URL="http://127.0.0.1:$ENGINE_API_PORT" \
+    INTERNAL_SERVICE_SECRET="${INTERNAL_SERVICE_SECRET:-local-development-internal-secret}" \
+    npm run dev -w apps/voice-agent
+else
+  warn "LiveKit voice agent skipped. Add LiveKit, Deepgram, and Cartesia keys to interview-engine/.env to enable it."
+fi
 
 start_process fastapi-backend "$REPO_ROOT/backend" \
   env FORCE_COLOR=1 DATABASE_URL="$DATABASE_URL" SECRET_KEY="${BACKEND_SECRET_KEY:-local-development-secret-change-me}" \

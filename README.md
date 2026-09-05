@@ -8,6 +8,7 @@ This repo stitches three pieces into one working MVP:
 |-----------|-----|------|
 | **Recruiter dashboard** | [`dashboard/`](dashboard/) | The product surface — job pipelines, the **Interview Blueprint Studio** (authors questions + graded rubrics), and **Deep Analysis** (post-interview candidate intelligence). Leads the contract. |
 | **AI interview engine** | [`interview-engine/`](interview-engine/) | Fastify API (`:4000`) + candidate interview room (Next.js) + the **Aviral evaluation engine** (`apps/api/src/aviral-eval/`). Runs the interview and scores it with DeepSeek. |
+| **LiveKit voice agent** | [`interview-engine/apps/voice-agent/`](interview-engine/apps/voice-agent/) | Outbound Railway worker that joins candidate rooms, uses Deepgram + Cartesia, and asks only engine-authorized questions. Optional per job (`conversationalInterview` setting). |
 | **Backend** | [`backend/`](backend/) | FastAPI (`:8000`) over Supabase Postgres — jobs, applicants, auth, and the bridge that feeds blueprints to the engine and serves reports back. |
 
 ## How it fits together
@@ -64,6 +65,11 @@ To build and run every service in Docker, including the dashboard and FastAPI:
 ```
 
 The complete container topology is defined in the root [`compose.yml`](compose.yml).
+
+The LiveKit worker is opt-in in both modes. Add `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `DEEPGRAM_API_KEY`, and
+`CARTESIA_API_KEY` to `interview-engine/.env`; the start scripts then include it
+automatically. Without those keys, the rest of the stack starts normally.
 
 Ports can be overridden for either mode, for example:
 

@@ -51,6 +51,12 @@ export async function parseApiResponse<T>(res: Response): Promise<T> {
 }
 
 export async function api<T>(path:string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers:{'Content-Type':'application/json', ...(init?.headers||{})}, cache:'no-store' });
+  // Only set Content-Type: application/json when there's actually a body —
+  // Fastify's default JSON body parser rejects a request that carries this
+  // header but no body ("Body cannot be empty when content-type is set to
+  // 'application/json'"), which a bodyless POST (e.g. an action route with no
+  // payload) would otherwise trip.
+  const headers = init?.body ? { 'Content-Type': 'application/json', ...(init?.headers || {}) } : init?.headers;
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers, cache:'no-store' });
   return parseApiResponse<T>(res);
 }
