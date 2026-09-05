@@ -1793,6 +1793,10 @@ export function useProctoring(sessionId: string, socket?: WebSocket | null, cali
   const screenShareGrantedRef = useRef(false);
   const screenShareRequestInFlightRef = useRef(false);
   const fullscreenExitReasonRef = useRef<string | null>(null);
+  // Synchronous lifecycle guard for global gesture handlers. React state updates
+  // after endProctoringSession are asynchronous, so the ref prevents even a click
+  // in that short window from being mistaken for pre-interview setup.
+  const proctoringSessionEndedRef = useRef(false);
   const faceLandmarkerRef = useRef<FaceLandmarker | null>(null);
   const objectDetectorRef = useRef<ObjectDetector | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -2066,6 +2070,7 @@ export function useProctoring(sessionId: string, socket?: WebSocket | null, cali
     prevFaceCountRef.current = 1;
     setEvents([]);
     setFinalProctoringScore(null);
+    proctoringSessionEndedRef.current = false;
     setProctoringSessionEnded(false);
     missingSince.current = null;
     multiFaceSince.current = null;
@@ -2175,6 +2180,7 @@ export function useProctoring(sessionId: string, socket?: WebSocket | null, cali
     const endedAt = Date.now();
 
     setFinalProctoringScore(score);
+    proctoringSessionEndedRef.current = true;
     setProctoringSessionEnded(true);
     stopLiveProctoringResources();
 
@@ -2705,7 +2711,7 @@ export function useProctoring(sessionId: string, socket?: WebSocket | null, cali
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     // Consent gate: do not attach fullscreen / screen-share gesture listeners
     // until the candidate has given informed consent. Re-runs when consent flips.
-    if (!proctoringEnabled) return;
+    if (!proctoringEnabled || proctoringSessionEnded) return;
 
     // Fullscreen (re)entered: close any open exit incident with FULLSCREEN_RESTORED (and stop
     // its clip), else just note FULLSCREEN_ENTERED, and mark readiness.
@@ -2851,6 +2857,8 @@ export function useProctoring(sessionId: string, socket?: WebSocket | null, cali
     // combined setup here used to reopen getDisplayMedia() after every exit when
     // the share state was stale for even one render.
     const requestOnUserGesture = () => {
+      if (proctoringSessionEndedRef.current) return;
+
       const fullscreenMissing = !getFullscreenElement();
 
       if (fullscreenRequestInFlightRef.current || screenShareRequestInFlightRef.current) return;
@@ -2887,7 +2895,7 @@ export function useProctoring(sessionId: string, socket?: WebSocket | null, cali
       screenShareRequestInFlightRef.current = false;
       screenShareGrantedRef.current = false;
     };
-  }, [emit, proctoringEnabled, violationScreenRecorder.startViolationRecording, violationScreenRecorder.stopViolationRecording]);
+  }, [emit, proctoringEnabled, proctoringSessionEnded, violationScreenRecorder.startViolationRecording, violationScreenRecorder.stopViolationRecording]);
 
   // Main detection loop. Acquires the camera, loads the MediaPipe FaceLandmarker +
   // ObjectDetector, then polls a tick() every LIVE_INTERVAL_MS that runs both models on the
