@@ -18,12 +18,15 @@ export ENGINE_API_PORT="${ENGINE_API_PORT:-4000}"
 export BACKEND_PORT="${BACKEND_PORT:-8000}"
 export ENGINE_PUBLIC_URL="${ENGINE_PUBLIC_URL:-http://localhost:$ENGINE_API_PORT}"
 export ENGINE_WS_PUBLIC_URL="${ENGINE_WS_PUBLIC_URL:-ws://localhost:$ENGINE_API_PORT/ws}"
+export VOICE_AGENT_PORT="${VOICE_AGENT_PORT:-8081}"
 
 info "Building and starting all containers..."
+voice_agent_started=0
 if [ -n "${LIVEKIT_URL:-}" ] && [ -n "${LIVEKIT_API_KEY:-}" ] && [ -n "${LIVEKIT_API_SECRET:-}" ] \
   && [ -n "${DEEPGRAM_API_KEY:-}" ] && [ -n "${CARTESIA_API_KEY:-}" ]; then
   compose --profile livekit up --build -d
   info "LiveKit voice agent enabled."
+  voice_agent_started=1
 else
   compose up --build -d
   warn "LiveKit voice agent skipped. Add LiveKit, Deepgram, and Cartesia keys to interview-engine/.env to enable it."
@@ -31,6 +34,13 @@ fi
 
 failed=0
 wait_for_url "Interview API" "http://127.0.0.1:$ENGINE_API_PORT/health" 120 || failed=1
+if [ "$voice_agent_started" -eq 1 ]; then
+  # The LiveKit agents worker's own HTTP server serves its health check at
+  # "/" (200 healthy / 503 unhealthy), not "/health" — see @livekit/agents'
+  # http_server.js. It also needs to register with LiveKit Cloud before it
+  # reports healthy, so give it more time than the plain HTTP services below.
+  wait_for_url "Voice agent" "http://127.0.0.1:$VOICE_AGENT_PORT/" 90 || failed=1
+fi
 wait_for_url "FastAPI backend" "http://127.0.0.1:$BACKEND_PORT/" 120 || failed=1
 wait_for_url "Candidate web" "http://127.0.0.1:$CANDIDATE_PORT/" 120 || failed=1
 wait_for_url "Dashboard" "http://127.0.0.1:$DASHBOARD_PORT/" 120 || failed=1

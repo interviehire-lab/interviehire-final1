@@ -180,13 +180,13 @@ export const roomStyles = `
   }
 
   /* LiveKit AgentAudioVisualizerAura, live-voice modes only (see useAura on
-     AIVisualAssistant). Sized to roughly match .ai-stage's footprint above so
-     switching a job between voiceProvider values doesn't visibly reflow the
-     room; the component's own "xl" size variant is overridden to fill this
-     wrapper instead of its fixed 448px default (see className on the JSX). */
+     AIVisualAssistant). Close to .ai-stage's own footprint above so switching
+     a job between voice modes doesn't visibly reflow the room; the
+     component's own "xl" size variant is overridden to fill this wrapper
+     instead of its fixed 448px default (see className on the JSX). */
   .ai-aura-stage {
     position: relative; z-index: 1;
-    width: clamp(220px, 32vw, 420px); aspect-ratio: 1;
+    width: clamp(170px, 22vw, 280px); aspect-ratio: 1;
     display: grid; place-items: center;
     overflow: hidden;
   }

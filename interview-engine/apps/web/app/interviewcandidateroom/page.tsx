@@ -221,10 +221,15 @@ export default function Interview() {
     if (hasStoredConsent(sessionId)) setConsentGiven(true);
   }, [sessionId]);
 
-  // Load per-job interview settings + company branding for a real session. Best
-  // effort: on any failure we stay permissive so the interview still runs.
+  // Load per-job interview settings + company branding + the dynamic question
+  // list for a real session — all three come from the same GET /sessions/:id
+  // response, so one fetch covers what used to be two separate effects
+  // independently hitting the identical endpoint (visible in the engine log
+  // as the same GET firing twice per page load). Best effort: on any failure
+  // we stay permissive so the interview still runs.
   useEffect(() => {
     if (!sessionId || sessionId === 'demo-session') {
+      setQuestions(QUESTIONS);
       setInterviewSettingsLoaded(true);
       return;
     }
@@ -243,8 +248,20 @@ export default function Interview() {
         // Arm the scheduled-slot lobby if a future slot exists.
         const at = s?.scheduledAt ? new Date(s.scheduledAt).getTime() : NaN;
         if (Number.isFinite(at)) setScheduledAtMs(at);
-      } catch {
-        /* permissive on error */
+        if (s?.jobRole?.questions) {
+          const activeQuestions = s.jobRole.questions
+            .filter((q: any) => q.isActive !== false)
+            .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          if (activeQuestions.length > 0) {
+            setQuestions(activeQuestions.map((q: any) => ({
+              text: q.text,
+              tag: q.topicCategories?.[0] || 'Technical',
+              hint: q.difficulty ? `${q.difficulty} difficulty. Take your time to answer.` : 'Think structured and explain with examples.',
+            })));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load session data:', err);
       } finally {
         if (alive) {
           setScheduleChecked(true);
@@ -331,42 +348,6 @@ export default function Interview() {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [lobbyLocked]);
-
-  // --- Dynamic questions loading from session ---
-  useEffect(() => {
-    if (sessionId === 'demo-session') {
-      setQuestions(QUESTIONS);
-      return;
-    }
-    let alive = true;
-    async function fetchSessionQuestions() {
-      try {
-        const tokenQS = inviteTokenRef.current ? `?token=${encodeURIComponent(inviteTokenRef.current)}` : '';
-        const res = await fetch(`${API_URL}/api/interview/sessions/${sessionId}${tokenQS}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (alive && data?.jobRole?.questions) {
-          const activeQuestions = data.jobRole.questions
-            .filter((q: any) => q.isActive !== false)
-            .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-          if (activeQuestions.length > 0) {
-            const mapped = activeQuestions.map((q: any) => ({
-              text: q.text,
-              tag: q.topicCategories?.[0] || 'Technical',
-              hint: q.difficulty ? `${q.difficulty} difficulty. Take your time to answer.` : 'Think structured and explain with examples.',
-            }));
-            setQuestions(mapped);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load dynamic session questions:', err);
-      }
-    }
-    fetchSessionQuestions();
-    return () => {
-      alive = false;
-    };
-  }, [sessionId]);
 
   // --- WebSocket + demo session bootstrap (unchanged proctoring contract) ---
   // Reconnects with backoff (1s, doubling to a 10s cap) on an unexpected drop —
@@ -981,11 +962,19 @@ export default function Interview() {
   const mm = String(Math.floor(clockSeconds / 60)).padStart(2, '0');
   const ss = String(clockSeconds % 60).padStart(2, '0');
   const clock = `${mm}:${ss}`;
+  // The LiveKit worker joins the room as a separate async dispatch, well
+  // after room.connect() itself resolves — voice.connected being true (or
+  // assistantActivity swinging to 'idle' once the mic publishes) does NOT
+  // mean the interviewer is actually there yet. Hold the visual in
+  // 'connecting' (a proper waiting room, not a flash of whatever room-level
+  // state happened to be true) until the worker's own readiness signal
+  // (voice.agentConnected) arrives.
+  const awaitingAgent = voiceInterviewEnabled && !ended && !voice.agentConnected;
   const assistantMode: AssistantMode = reportBusy
     ? 'thinking'
     : ended
       ? 'complete'
-      : wsReconnecting || socket?.readyState !== 1
+      : awaitingAgent || wsReconnecting || socket?.readyState !== 1
         ? 'connecting'
         : assistantActivity === 'speaking'
           ? 'speaking'

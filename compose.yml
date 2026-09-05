@@ -58,6 +58,12 @@ services:
       - INTERVIEW_HARD_LIMIT_SECONDS=1800
       - INTERVIEW_CLOSING_RESERVE_SECONDS=45
       - PORT=8081
+    # Local-dev-only, bound to the host loopback so scripts/start-containers.sh
+    # can poll the worker's own health check (GET / — 200 once registered with
+    # LiveKit Cloud). Production (Railway) never publishes this port — the
+    # worker there is outbound-only, per deploy/RAILWAY-LIVEKIT.md.
+    ports:
+      - "127.0.0.1:${VOICE_AGENT_PORT:-8081}:8081"
     depends_on:
       api:
         condition: service_healthy

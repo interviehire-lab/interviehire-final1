@@ -68,6 +68,8 @@ export function useVoiceInterview({
   const activeRef = useRef(false);
   const deliberateStopRef = useRef(false);
   const endedDeliveredRef = useRef(false);
+  const agentConnectedRef = useRef(false);
+  const agentJoinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [connected, setConnected] = useState(false);
   const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
@@ -77,6 +79,14 @@ export function useVoiceInterview({
   // per-frame waveform (via @livekit/components-react's own AnalyserNode-based
   // useTrackVolume, smoothed there) instead of anything we compute ourselves.
   const [agentAudioTrack, setAgentAudioTrack] = useState<RemoteAudioTrack | null>(null);
+  // Room-level `connected` only means the BROWSER reached LiveKit Cloud — the
+  // voice-agent worker is dispatched to the room as a separate async process
+  // and can take a few seconds to actually join, initialize VAD, and connect
+  // to Deepgram/Cartesia. agentConnected tracks the worker's own explicit
+  // `{type:'session', state:'started'}` data message (interview-session.ts's
+  // `publish()`, sent once it has genuinely joined and started its timers) —
+  // the real "ready" signal, not just room connectivity.
+  const [agentConnected, setAgentConnected] = useState(false);
 
   callbacksRef.current = { onTranscript, onActivity, onEnded, onError };
 
@@ -85,6 +95,25 @@ export function useVoiceInterview({
     endedDeliveredRef.current = true;
     callbacksRef.current.onEnded(reason);
   }, []);
+
+  const clearAgentJoinTimeout = useCallback(() => {
+    if (agentJoinTimeoutRef.current != null) {
+      clearTimeout(agentJoinTimeoutRef.current);
+      agentJoinTimeoutRef.current = null;
+    }
+  }, []);
+
+  const markAgentConnected = useCallback(() => {
+    clearAgentJoinTimeout();
+    agentConnectedRef.current = true;
+    setAgentConnected(true);
+  }, [clearAgentJoinTimeout]);
+
+  const markAgentDisconnected = useCallback(() => {
+    clearAgentJoinTimeout();
+    agentConnectedRef.current = false;
+    setAgentConnected(false);
+  }, [clearAgentJoinTimeout]);
 
   const detachRemoteAudio = useCallback((track?: RemoteTrack) => {
     if (track?.kind === Track.Kind.Audio) {
@@ -103,6 +132,7 @@ export function useVoiceInterview({
     activeRef.current = false;
     setConnected(false);
     setAgentAudioTrack(null);
+    markAgentDisconnected();
 
     const room = roomRef.current;
     roomRef.current = null;
@@ -119,7 +149,7 @@ export function useVoiceInterview({
       await room.disconnect();
     }
     callbacksRef.current.onActivity('idle');
-  }, [detachRemoteAudio]);
+  }, [detachRemoteAudio, markAgentDisconnected]);
 
   const start = useCallback(async ({ firstQuestion: _firstQuestion, microphoneTrack }: StartOptions) => {
     if (provider === 'legacy') return;
@@ -130,6 +160,7 @@ export function useVoiceInterview({
     setDeadlineAt(null);
     setStartedAt(null);
     setAgentAudioTrack(null);
+    markAgentDisconnected();
 
     if (!microphoneTrack || microphoneTrack.readyState !== 'live') {
       throw new Error('The granted microphone stream is unavailable. Recheck microphone permission and try again.');
@@ -192,12 +223,15 @@ export function useVoiceInterview({
         }
       } else if (message.type === 'interview-ended') {
         emitEnded(typeof message.reason === 'string' ? message.reason : 'director-completed');
+      } else if (message.type === 'session' && message.state === 'started') {
+        markAgentConnected();
       }
     });
     room.on(RoomEvent.Disconnected, () => {
       activeRef.current = false;
       setConnected(false);
       setAgentAudioTrack(null);
+      markAgentDisconnected();
       detachRemoteAudio();
       callbacksRef.current.onActivity('idle');
       if (!deliberateStopRef.current) emitEnded('room-disconnected');
@@ -217,7 +251,16 @@ export function useVoiceInterview({
     activeRef.current = true;
     setConnected(true);
     callbacksRef.current.onActivity('idle');
-  }, [detachRemoteAudio, emitEnded, getInviteToken, provider, sessionId]);
+
+    // Safety net: if the worker never dispatches/joins (LiveKit region issue,
+    // agent crash, a payload the worker rejects), don't leave the candidate
+    // staring at "connecting" forever with no way to know something's wrong.
+    clearAgentJoinTimeout();
+    agentJoinTimeoutRef.current = setTimeout(() => {
+      if (agentConnectedRef.current || deliberateStopRef.current) return;
+      callbacksRef.current.onError("Couldn't connect you with your interviewer. Please refresh and try again.");
+    }, 20_000);
+  }, [clearAgentJoinTimeout, detachRemoteAudio, emitEnded, getInviteToken, provider, sessionId]);
 
   const setMuted = useCallback((muted: boolean) => {
     const publication = publishedMicRef.current?.publication;
@@ -239,5 +282,6 @@ export function useVoiceInterview({
     deadlineAt,
     hardLimitSeconds,
     agentAudioTrack,
+    agentConnected,
   };
 }

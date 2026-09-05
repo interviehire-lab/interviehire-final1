@@ -38,6 +38,7 @@ start_process interview-api "$REPO_ROOT/interview-engine" \
   env FORCE_COLOR=1 DATABASE_URL="$DATABASE_URL" REDIS_URL="$REDIS_URL" PORT="$ENGINE_API_PORT" \
   npm run dev -w apps/api
 
+voice_agent_started=0
 if [ -n "${LIVEKIT_URL:-}" ] && [ -n "${LIVEKIT_API_KEY:-}" ] && [ -n "${LIVEKIT_API_SECRET:-}" ] \
   && [ -n "${DEEPGRAM_API_KEY:-}" ] && [ -n "${CARTESIA_API_KEY:-}" ]; then
   assert_process_port_available voice-agent "$VOICE_AGENT_PORT"
@@ -45,6 +46,7 @@ if [ -n "${LIVEKIT_URL:-}" ] && [ -n "${LIVEKIT_API_KEY:-}" ] && [ -n "${LIVEKIT
     env FORCE_COLOR=1 PORT="$VOICE_AGENT_PORT" ENGINE_INTERNAL_URL="http://127.0.0.1:$ENGINE_API_PORT" \
     INTERNAL_SERVICE_SECRET="${INTERNAL_SERVICE_SECRET:-local-development-internal-secret}" \
     npm run dev -w apps/voice-agent
+  voice_agent_started=1
 else
   warn "LiveKit voice agent skipped. Add LiveKit, Deepgram, and Cartesia keys to interview-engine/.env to enable it."
 fi
@@ -66,6 +68,13 @@ start_process dashboard "$REPO_ROOT/dashboard" \
 
 failed=0
 wait_for_url "Interview API" "http://127.0.0.1:$ENGINE_API_PORT/health" 90 || failed=1
+if [ "$voice_agent_started" -eq 1 ]; then
+  # The LiveKit agents worker's own HTTP server serves its health check at
+  # "/" (200 healthy / 503 unhealthy), not "/health" — see @livekit/agents'
+  # http_server.js. It also needs to register with LiveKit Cloud before it
+  # reports healthy, so give it more time than the plain HTTP services below.
+  wait_for_url "Voice agent" "http://127.0.0.1:$VOICE_AGENT_PORT/" 60 || failed=1
+fi
 wait_for_url "FastAPI backend" "http://127.0.0.1:$BACKEND_PORT/" 90 || failed=1
 wait_for_url "Candidate web" "http://127.0.0.1:$CANDIDATE_PORT/" 120 || failed=1
 wait_for_url "Dashboard" "http://127.0.0.1:$DASHBOARD_PORT/" 120 || failed=1
