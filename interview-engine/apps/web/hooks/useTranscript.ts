@@ -53,6 +53,10 @@ export function useTranscript(sessionId: string) {
   const recognitionRef = useRef<any>(null);
   const candidateRecorderRef = useRef<MediaRecorder | null>(null);
   const candidateStreamRef = useRef<MediaStream | null>(null);
+  // When the caller supplies a webcam-only stream, this hook acquires and owns
+  // a microphone stream itself. Keeping ownership explicit lets recording code
+  // share external tracks without this hook stopping them on teardown.
+  const candidateOwnedMicRef = useRef<MediaStream | null>(null);
   const candidateStartMsRef = useRef<number>(0);
   const candidateSegTimerRef = useRef<any>(null);
   const candidateActiveRef = useRef<boolean>(false);
@@ -394,19 +398,45 @@ export function useTranscript(sessionId: string) {
   // ── Candidate microphone capture with server-side ASR ──
   // Prefer Deepgram/Whisper when configured. Browser SpeechRecognition remains
   // an automatic fallback for local/keyless development and provider failures.
+  const releaseOwnedCandidateMic = useCallback(() => {
+    candidateOwnedMicRef.current?.getTracks().forEach((track) => track.stop());
+    candidateOwnedMicRef.current = null;
+  }, []);
+
   const startCandidateCaptureFromStream = useCallback(async (
     stream: MediaStream | null,
   ): Promise<{ ok: boolean; reason?: string; provider?: string }> => {
-    const audioTracks = stream?.getAudioTracks() ?? [];
-    if (!audioTracks.length || typeof MediaRecorder === 'undefined') {
-      return { ok: false, reason: 'No microphone audio stream is available.' };
+    if (typeof MediaRecorder === 'undefined') {
+      return { ok: false, reason: 'Audio recording is unavailable in this browser.' };
     }
 
     try {
+      // Check provider availability before prompting for a fresh microphone
+      // stream. This also makes the selected provider observable in API logs.
       const statusRes = await fetch(`${API_URL}/api/interviews/${sessionId}/transcript/audio/status`);
       const status = await statusRes.json().catch(() => ({}));
       if (!statusRes.ok || !status?.available) {
         return { ok: false, reason: 'Server transcription is not configured.' };
+      }
+
+      let audioTracks = stream?.getAudioTracks().filter((track) => track.readyState === 'live') ?? [];
+      if (!audioTracks.length) {
+        // The proctoring webcam stream is deliberately video-only. Previously
+        // this returned before the status request, so Deepgram was never called.
+        // Acquire the already-consented microphone here for server ASR.
+        if (!navigator.mediaDevices?.getUserMedia) {
+          return { ok: false, reason: 'Microphone capture is unavailable in this browser.' };
+        }
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        });
+        candidateOwnedMicRef.current = micStream;
+        audioTracks = micStream.getAudioTracks();
+      }
+      if (!audioTracks.length) {
+        releaseOwnedCandidateMic();
+        return { ok: false, reason: 'No microphone audio stream is available.' };
       }
 
       candidateStreamRef.current = new MediaStream(audioTracks);
@@ -422,6 +452,7 @@ export function useTranscript(sessionId: string) {
         let recorder: MediaRecorder;
         try { recorder = createAudioRecorder(audioStream); } catch {
           candidateActiveRef.current = false;
+          releaseOwnedCandidateMic();
           setSttStatus('error');
           setSttError('Microphone recording could not start.');
           startBrowserSTT();
@@ -437,6 +468,7 @@ export function useTranscript(sessionId: string) {
             if (result?.transcript) setLiveCaption(String(result.transcript));
             if (result?.ok === false && candidateActiveRef.current) {
               candidateActiveRef.current = false;
+              releaseOwnedCandidateMic();
               setSttStatus('error');
               setSttError(result.error || 'Server transcription failed; using browser fallback.');
               startBrowserSTT();
@@ -458,9 +490,10 @@ export function useTranscript(sessionId: string) {
       recordSegment(candidateStreamRef.current);
       return { ok: true, provider: String(status.provider || 'server') };
     } catch {
+      releaseOwnedCandidateMic();
       return { ok: false, reason: 'Could not reach the server transcription service.' };
     }
-  }, [nowMs, sessionId, startBrowserSTT, uploadAudioSegment]);
+  }, [nowMs, releaseOwnedCandidateMic, sessionId, startBrowserSTT, uploadAudioSegment]);
 
   const stopCandidateCapture = useCallback(async (): Promise<void> => {
     candidateActiveRef.current = false;
@@ -488,14 +521,16 @@ export function useTranscript(sessionId: string) {
     }
     await Promise.allSettled([...candidateUploadsRef.current]);
     candidateStreamRef.current = null;
-  }, [uploadAudioSegment]);
+    releaseOwnedCandidateMic();
+  }, [releaseOwnedCandidateMic, uploadAudioSegment]);
 
   useEffect(() => () => {
     avatarStreamRef.current?.getTracks().forEach((t) => t.stop());
     candidateActiveRef.current = false;
     if (candidateSegTimerRef.current) clearTimeout(candidateSegTimerRef.current);
     try { candidateRecorderRef.current?.stop(); } catch { /* noop */ }
-  }, []);
+    releaseOwnedCandidateMic();
+  }, [releaseOwnedCandidateMic]);
 
   return {
     aiToneAssessment,
