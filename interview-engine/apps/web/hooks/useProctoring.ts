@@ -2697,9 +2697,10 @@ export function useProctoring(sessionId: string, socket?: WebSocket | null, cali
   }, [emit, violationScreenRecorder.startViolationRecording, violationScreenRecorder.stopViolationRecording]);
 
   // Fullscreen watcher + first-gesture permission bootstrap. Tracks enter/exit across
-  // vendor-prefixed events, counts each exit as a session-control violation and records a
-  // clip, and — because browsers only grant fullscreen/getDisplayMedia from a real user
-  // gesture — runs the full share+fullscreen flow on the first pointerdown/keydown.
+  // vendor-prefixed events and counts each exit as a session-control violation. Before
+  // the interview, a user gesture may run the combined share+fullscreen setup. Once the
+  // session has started, gestures restore fullscreen only and never reopen the screen
+  // picker; screen sharing is an independent, long-lived permission.
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     // Consent gate: do not attach fullscreen / screen-share gesture listeners
@@ -2845,14 +2846,24 @@ export function useProctoring(sessionId: string, socket?: WebSocket | null, cali
       fullscreenPromptRequired: !Boolean(getFullscreenElement()) && isFullscreenSupported(),
     }));
 
-    // Do not call getDisplayMedia() automatically here: browsers only show the
-    // screen-share prompt from a real user gesture. The first click/key press
-    // runs the full pre-interview permission flow instead of fullscreen alone.
+    // Fullscreen requests need a user gesture. During an active interview, keep
+    // fullscreen recovery completely separate from screen sharing: invoking the
+    // combined setup here used to reopen getDisplayMedia() after every exit when
+    // the share state was stale for even one render.
     const requestOnUserGesture = () => {
-      const screenShareMissing = !screenShareGrantedRef.current && !violationScreenRecorder.hasScreenSharePermission;
       const fullscreenMissing = !getFullscreenElement();
 
-      if ((screenShareMissing || fullscreenMissing) && !fullscreenRequestInFlightRef.current && !screenShareRequestInFlightRef.current) {
+      if (fullscreenRequestInFlightRef.current || screenShareRequestInFlightRef.current) return;
+
+      if (sessionStartedRef.current) {
+        if (fullscreenMissing) {
+          void requestExamFullscreen('user_interaction_restore');
+        }
+        return;
+      }
+
+      const screenShareMissing = !screenShareGrantedRef.current && !violationScreenRecorder.hasScreenSharePermission;
+      if (screenShareMissing || fullscreenMissing) {
         void enterFullscreenBeforeInterview('user_interaction');
       }
     };
