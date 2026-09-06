@@ -1,7 +1,7 @@
 import { document, window } from './runtime';
 import { escapeHTML } from './escape';
 import { showPremiumToast } from './sourcing';
-import { apiPatchJobApplicationQuestions, apiUpdateOrganisation } from './api';
+import { apiUpdateOrganisation } from './api';
 
 // Reusable form-builder for the public apply page's custom questions. Used in two
 // places with different save targets:
@@ -236,25 +236,6 @@ export function mountApplicationQuestionsEditor(container: any, opts: any): void
   };
 
   draw();
-}
-
-// ── Job-detail Overview: per-job override ──────────────────────────────────────
-export function renderJobApplicationQuestions(job: any): void {
-  const container = document.getElementById('jd-apply-questions');
-  if (!container || !job) return;
-  // Mount once per job open so an in-progress edit survives the later applicant
-  // hydrate re-render (which calls renderJobDetailPanes again).
-  if (container.dataset.jobId === String(job.id) && container.childElementCount > 0) return;
-  container.dataset.jobId = String(job.id);
-  mountApplicationQuestionsEditor(container, {
-    questions: job.applicationQuestions || [],
-    heading: 'Application questions (this job)',
-    hint: 'Extra questions asked on this job’s apply page, in addition to the resume. Leave empty to use your company default. These override the company default for this job only.',
-    onSave: async (questions: any[]) => {
-      await apiPatchJobApplicationQuestions(job.id, questions);
-      job.applicationQuestions = questions;  // keep local job in sync
-    },
-  });
 }
 
 // ── Career settings: company-wide default ─────────────────────────────────────

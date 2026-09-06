@@ -12,6 +12,7 @@ import { uploadRecordingToDrive } from '../services/drive-upload.service.js';
 import { handleCandidateTranscript } from '../services/interview-conversation.service.js';
 import {
   deadlineFor,
+  hasResumeForRequirement,
   hardLimitSeconds,
 } from '../services/interview-policy.js';
 import { ensureTranscriptMeta, finalizeTranscript } from '../services/transcript.service.js';
@@ -431,7 +432,7 @@ export async function interviewRoutes(app: FastifyInstance) {
     if (session.scheduledAt && Date.now() < new Date(session.scheduledAt).getTime() - EARLY_ENTRY_MS) {
       return reply.code(403).send({ error: 'This interview has not opened yet. Please return at your scheduled time.', code: 'TOO_EARLY' });
     }
-    if (s.requireCv === true && !session.candidate?.resumeText) {
+    if (s.requireCv === true && !hasResumeForRequirement(session.candidate?.resumeText, s)) {
       return reply.code(400).send({ error: 'A CV/resume is required before starting this interview.', code: 'CV_REQUIRED' });
     }
     // accessControl: 'link' (default) = anyone with the link. 'scheduled' requires a

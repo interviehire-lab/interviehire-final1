@@ -331,6 +331,77 @@ body.light-theme .code-review-pane .review-comment {
   border-color: var(--color-orange);
 }
 
+/* Soft delete — hides the candidate but retains every field (see jobs.py
+   /applicants/{id}/remove). Distinct danger color from Reject so the two
+   actions read as clearly different in intent. */
+.btn-stage-delete,
+.btn-tbl-delete {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--spring-fast);
+  font-family: inherit;
+}
+
+.btn-stage-delete:hover,
+.btn-tbl-delete:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: #f87171;
+}
+
+/* Hold — amber, matching the existing .ra-stage-tag.on-hold badge color. This
+   button had no base styling anywhere before (only a padding/font-size
+   override scoped to the Resume Analysis table), so it rendered as a bare
+   unstyled <button> on every other surface it appears on. */
+.btn-stage-hold {
+  background: transparent;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--spring-fast);
+  font-family: inherit;
+}
+
+.btn-stage-hold:hover {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: #fbbf24;
+}
+
+/* Unhold ("Resume review") and Restore (un-reject) — both undo actions, same
+   green as .ra-stage-tag.advanced. Unhold previously only had this styling
+   scoped to .ra-action-btns (Resume Analysis table); Restore had none at
+   all, since it's a new class. */
+.btn-stage-unhold,
+.btn-stage-unreject,
+.btn-tbl-unreject {
+  background: transparent;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--spring-fast);
+  font-family: inherit;
+}
+
+.btn-stage-unhold:hover,
+.btn-stage-unreject:hover,
+.btn-tbl-unreject:hover {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: #34d399;
+}
+
 .btn-stage-advance {
   background: var(--glass-bg-hover);
   border: 1px solid var(--glass-border-gold);

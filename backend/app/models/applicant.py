@@ -101,6 +101,11 @@ class Applicant(Base):
     anonymised_at = Column(DateTime(timezone=True), nullable=True)
     erasure_request_id = Column(UUID(as_uuid=True), nullable=True)
 
+    # Recruiter "delete" from the pipeline — hides the candidate everywhere but
+    # retains every field (resume_text, scores, reports) for training-data reuse.
+    # Distinct from anonymised_at above (DSAR erasure, which scrubs PII/free-text).
+    removed_at = Column(DateTime(timezone=True), nullable=True)
+
     # Direct-apply consent — set when a candidate applies through the public career
     # page / direct link (they hand us PII first-hand, so we are the data controller
     # at that step). NULL for applicants added by a recruiter (bulk/ATS/scheduled).

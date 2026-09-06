@@ -26,7 +26,9 @@ def get_job_leaderboard(
     # job isn't in the caller's active org.
     _verify_job_access(job_id, current_user, active_org_id, db)
 
-    applicants = db.query(Applicant).filter(Applicant.job_id == job_id).all()
+    applicants = db.query(Applicant).filter(
+        Applicant.job_id == job_id, Applicant.removed_at.is_(None)
+    ).all()
     
     leaderboard = []
     for app in applicants:

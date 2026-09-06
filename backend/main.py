@@ -73,6 +73,9 @@ def init_db():
         # are created by create_all (models registered in app/models/__init__.py).
         conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS anonymised_at TIMESTAMP;"))
         conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS erasure_request_id UUID;"))
+        # Recruiter "delete" from the pipeline — soft delete, no data scrubbed (see
+        # Applicant.removed_at). Distinct from anonymised_at above.
+        conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS removed_at TIMESTAMP;"))
         conn.execute(text('ALTER TABLE "ConsentLog" ADD COLUMN IF NOT EXISTS "erasedForRequestId" VARCHAR;'))
         # Direct-apply consent: candidate applied via the public career page / direct
         # link and agreed to the privacy policy (they hand us PII first-hand).

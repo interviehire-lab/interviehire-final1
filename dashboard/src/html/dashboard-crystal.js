@@ -1017,11 +1017,6 @@ export const html = `
 
                 </div>
 
-                <!-- Apply link / share panel (filled by renderApplyShare) -->
-                <div class="card-glass" id="jd-apply-share" style="margin-top:16px;"></div>
-
-                <!-- Per-job application questions editor (filled by renderJobApplicationQuestions) -->
-                <div class="card-glass" id="jd-apply-questions" style="margin-top:16px;"></div>
               </div><!-- /overview -->
 
               <!-- Stage panes -->

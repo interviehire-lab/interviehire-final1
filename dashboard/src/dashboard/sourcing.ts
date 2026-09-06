@@ -9,7 +9,7 @@ import { isGarbageText, resumeIdentityCache, resumeTextCache, runBulkResumeAnaly
 import { soundEngine } from './sound';
 import { AppState, defaultInterviewSettings } from './state';
 import { pushUrl } from './url-sync';
-import { isApiMode, apiAddApplicant, apiUpdateApplicant, scheduleJobSave } from './api';
+import { isApiMode, apiAddApplicant, apiUploadResumes, apiUpdateApplicant, scheduleJobSave } from './api';
 import { saveStateToLocalStorage } from './ai-api';
 
 // ============================================================
@@ -759,6 +759,7 @@ function simulateResumesParsing(files) {
 
   Array.from(files).forEach((file: any, idx) => {
     const item = {
+      file,
       name: file.name,
       size: (file.size / 1024).toFixed(1) + ' KB',
       progress: 0,
@@ -880,14 +881,19 @@ async function importResumesCandidates() {
   if (!activeJob) return;
 
   const importedCandIds = [];
+  const resumeFiles = [];
   uploadedFiles.forEach(file => {
     const fallbackName = extractCandidateNameFromFilename(file.name);
     const identity = file.identity || extractResumeIdentity(file.textContent, fallbackName, file.name);
     const name = identity.name || fallbackName;
     const email = identity.email || createPlaceholderEmail(name);
     const phone = identity.phone || '';
-    const candId = addCandidateToAppState(name, email, phone, activeJob, file.textContent, currentTargetStage);
+    // Uploading a resume is intake, never an implicit stage decision. Even when
+    // the recruiter opened Sourcing from Screening/Functional, the candidate
+    // must remain in Resume Analysis until explicitly advanced.
+    const candId = addCandidateToAppState(name, email, phone, activeJob, file.textContent, 'resume');
     importedCandIds.push(candId);
+    resumeFiles.push(file.file);
   });
 
   const localIds = [...importedCandIds];
@@ -916,7 +922,7 @@ async function importResumesCandidates() {
 
   // Persist first so the candidates survive the hydrate (no manual refresh), then
   // analyse against their real backend ids (the resume caches were re-keyed).
-  const backendIds = await persistImportedCandidates(importedCandIds, activeJob);
+  const backendIds = await persistImportedCandidates(importedCandIds, activeJob, resumeFiles);
   navigateToJobDetail(AppState.activeJobId);
 
   if (currentSourcingMode === 'analyse' && !currentTargetStage) {
@@ -1271,8 +1277,57 @@ function addCandidateToAppState(name, email, phone, job, resumeText?, targetStag
 // jobId === job.id, which the next hydrate then wipes — so rather than leave an
 // invisible ghost (silent loss), we drop the failed rows and tell the recruiter
 // exactly who failed and why, so they can fix and re-import.
-async function persistImportedCandidates(localIds, job) {
+async function persistImportedCandidates(localIds, job, resumeFiles = []) {
   if (!isApiMode() || !job || !job._backend) return localIds;
+
+  // Resume intake must send the original File objects to the backend and always
+  // enter Resume Analysis. The old
+  // path parsed them in the browser, then called the JSON-only applicant route;
+  // scheduling therefore produced a real candidate with no persisted CV and
+  // the interview engine correctly (but confusingly) rejected it as CV_REQUIRED.
+  if (resumeFiles.length > 0) {
+    const localIdSet = new Set(localIds);
+    try {
+      const uploaded = await apiUploadResumes(job.id, resumeFiles, null);
+      const backendIds = new Set(uploaded.map((candidate) => candidate.id));
+
+      // Replace the temporary CAN-* rows with the authoritative backend rows.
+      // Also remove an older hydrated copy when the uploader matched an existing
+      // applicant by email/name rather than inserting a duplicate.
+      AppState.candidates = AppState.candidates.filter(
+        (candidate) => !localIdSet.has(candidate.id) && !backendIds.has(candidate.id),
+      );
+      uploaded.forEach((candidate, index) => {
+        candidate.jobApplied = job.roleName;
+        candidate.jobId = job.id;
+        candidate._backend = true;
+        AppState.candidates.push(candidate);
+
+        const localId = localIds[index];
+        if (localId && resumeTextCache[localId] != null) {
+          resumeTextCache[candidate.id] = resumeTextCache[localId];
+        }
+        if (localId && resumeIdentityCache[localId] != null) {
+          resumeIdentityCache[candidate.id] = resumeIdentityCache[localId];
+        }
+      });
+      localIds.forEach((id) => {
+        delete resumeTextCache[id];
+        delete resumeIdentityCache[id];
+      });
+      return uploaded.map((candidate) => candidate.id);
+    } catch (error) {
+      AppState.candidates = AppState.candidates.filter((candidate) => !localIdSet.has(candidate.id));
+      localIds.forEach((id) => {
+        delete resumeTextCache[id];
+        delete resumeIdentityCache[id];
+      });
+      const message = error instanceof Error ? error.message : String(error);
+      showPremiumToast(`Resume upload failed; no candidate was scheduled (${message}). Please retry.`, 'error');
+      return [];
+    }
+  }
+
   const ids = [];
   const failed = [];
   for (const localId of localIds) {

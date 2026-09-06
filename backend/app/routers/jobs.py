@@ -75,7 +75,7 @@ def _build_job_out(job: Job, db: Session) -> dict:
     """Helper to build JobOut with pipeline counts."""
     applicants = [
         a for a in db.query(Applicant).filter(Applicant.job_id == job.id).all()
-        if not _is_test_applicant(a)
+        if not _is_test_applicant(a) and a.removed_at is None
     ]
     import json
     tags = []
@@ -1619,29 +1619,42 @@ def _persist_interview_report(db: Session, applicant, session, ev: dict) -> bool
     return False
 
 
-def _reconcile_functional_from_sessions(db: Session, applicants: list) -> None:
+def _reconcile_stage_from_sessions(db: Session, applicants: list) -> None:
     """Reflect completed AI interviews in the recruiter view: an EVALUATED
     InterviewSession (written by the interview engine into the shared DB) marks
     the applicant completed, copies its score, derives the proctoring/cheat flag,
     and durably persists the InterviewReport — so the dashboard's Deep Analysis
     and Interview Analysis tab see real, saved results fully autonomously (no
-    manual step, no dependency on the completion webhook)."""
+    manual step, no dependency on the completion webhook).
+
+    Screening and functional interviews share ONE session row per applicant
+    (InterviewSession.id == str(applicant.id)), so which pair of columns this
+    writes to (functional_status/functional_score vs screening_status/
+    screening_score) depends on session_stage(session) — get this wrong and a
+    candidate who only ever did a screening interview appears to silently
+    "advance" to functional the moment this reconcile pass next runs (was a
+    real bug: this function used to write functional_* unconditionally)."""
     from app.models.ai_integration import InterviewSession, SessionStatus
     from app.models.applicant import InterviewStatus, CheatProbability
+    from app.utils.ai_sync import session_stage
     changed = False
     for a in applicants:
         session = db.query(InterviewSession).filter(InterviewSession.id == str(a.id)).first()
         if not session:
             continue
+        is_functional = session_stage(session) == 'functional'
+        status_attr = 'functional_status' if is_functional else 'screening_status'
+        score_attr = 'functional_score' if is_functional else 'screening_score'
         if session.status == SessionStatus.EVALUATED:
             ev = session.evaluation or {}
             score = ev.get("overallScore")
-            if a.functional_status != InterviewStatus.completed:
-                a.functional_status = InterviewStatus.completed
+            if getattr(a, status_attr) != InterviewStatus.completed:
+                setattr(a, status_attr, InterviewStatus.completed)
                 changed = True
-            if score is not None and a.functional_score != float(score):
-                a.functional_score = float(score)
-                a.overall_interview_score = float(score)
+            if score is not None and getattr(a, score_attr) != float(score):
+                setattr(a, score_attr, float(score))
+                if is_functional:
+                    a.overall_interview_score = float(score)
                 changed = True
             if session.reportUrl and a.report_url != session.reportUrl:
                 a.report_url = session.reportUrl
@@ -1663,8 +1676,8 @@ def _reconcile_functional_from_sessions(db: Session, applicants: list) -> None:
                     changed = True
             except Exception:
                 pass
-        elif session.status == SessionStatus.IN_PROGRESS and a.functional_status is None:
-            a.functional_status = InterviewStatus.scheduled
+        elif session.status == SessionStatus.IN_PROGRESS and getattr(a, status_attr) is None:
+            setattr(a, status_attr, InterviewStatus.scheduled)
             changed = True
     if changed:
         try:
@@ -1685,9 +1698,9 @@ def get_responses(
 
     applicants = [
         a for a in db.query(Applicant).filter(Applicant.job_id == job_id).all()
-        if not _is_test_applicant(a)
+        if not _is_test_applicant(a) and a.removed_at is None
     ]
-    _reconcile_functional_from_sessions(db, applicants)
+    _reconcile_stage_from_sessions(db, applicants)
 
     if tab == "overview":
         return _build_funnel(applicants)
@@ -1718,9 +1731,9 @@ def get_interview_analysis(
     job = _verify_job_access(job_id, current_user, active_org_id, db)
     applicants = [
         a for a in db.query(Applicant).filter(Applicant.job_id == job_id).all()
-        if not _is_test_applicant(a)
+        if not _is_test_applicant(a) and a.removed_at is None
     ]
-    _reconcile_functional_from_sessions(db, applicants)
+    _reconcile_stage_from_sessions(db, applicants)
 
     out = []
     for a in applicants:
@@ -1937,6 +1950,9 @@ def upload_resumes(
     db: Session = Depends(get_db)
 ):
     job = _verify_job_access(job_id, current_user, active_org_id, db)
+    # Resume upload is intake only. The legacy `source` query parameter remains
+    # accepted for client compatibility, but it must never make a stage decision;
+    # recruiters advance candidates explicitly after reviewing the resume.
         
     resume_dir = "uploads/resumes"
     _ensure_upload_dir(resume_dir)
@@ -2008,23 +2024,21 @@ def upload_resumes(
         parsed_name = parsed_info.get("name")
         parsed_email = parsed_info.get("email")
         parsed_phone = parsed_info.get("phone")
-        resume_text = extract_text_from_file(file_path)  # store the real text for analysis
-        if resume_text and len(resume_text.strip()) < 50:
-            resume_text = None  # extraction likely failed (scanned/garbled) — don't poison analysis with junk
-        
         # Look for an existing candidate in this job pipeline with a matching email or name
         existing_applicant = None
         # Only check by email if it's a real email (not a dummy one ending in @candidate.io)
         if parsed_email and not parsed_email.lower().endswith("@candidate.io"):
             existing_applicant = db.query(Applicant).filter(
                 Applicant.job_id == job_id,
+                Applicant.removed_at.is_(None),
                 func.lower(Applicant.email) == parsed_email.lower()
             ).first()
-            
+
         # Only check by name if name is provided, not "Candidate", and not empty
         if not existing_applicant and parsed_name and parsed_name.lower() != "candidate":
             existing_applicant = db.query(Applicant).filter(
                 Applicant.job_id == job_id,
+                Applicant.removed_at.is_(None),
                 func.lower(Applicant.name) == parsed_name.lower()
             ).first()
             
@@ -2034,17 +2048,6 @@ def upload_resumes(
             if resume_text:
                 existing_applicant.resume_text = resume_text
             
-            # Preserve the source: do not overwrite existing source if already set
-            if not existing_applicant.source and source:
-                existing_applicant.source = source
-                
-            # If the source is scheduled, ensure screening_status is set
-            if existing_applicant.source == ApplicantSource.scheduled and not existing_applicant.screening_status:
-                existing_applicant.screening_status = InterviewStatus.pending
-            # If the source is functional, ensure functional_status is set
-            if existing_applicant.source in (ApplicantSource.functional, ApplicantSource.exit) and not existing_applicant.functional_status:
-                existing_applicant.functional_status = InterviewStatus.pending
-                
             # Update candidate details if they were defaults or unset
             if parsed_email and ("@candidate.io" in existing_applicant.email or not existing_applicant.email):
                 existing_applicant.email = parsed_email
@@ -2063,17 +2066,13 @@ def upload_resumes(
                 name=parsed_name or "Candidate",
                 email=email_val,
                 phone=parsed_phone or "+1 555-0199",
-                source=source or ApplicantSource.bulk_upload,
+                source=ApplicantSource.bulk_upload,
                 entry_method="bulk_upload",
                 resume_url=file_path,
                 resume_text=resume_text or None,
                 job_id=job_id,
                 resume_analysed=False
             )
-            if applicant.source == ApplicantSource.scheduled:
-                applicant.screening_status = InterviewStatus.pending
-            elif applicant.source in (ApplicantSource.functional, ApplicantSource.exit):
-                applicant.functional_status = InterviewStatus.pending
             db.add(applicant)
             created_applicants.append(applicant)
         
@@ -2096,6 +2095,72 @@ def upload_resumes(
         
     return created_applicants
 
+
+@router.post("/applicants/{applicant_id}/resume", response_model=ApplicantOut)
+def upload_applicant_resume(
+    applicant_id: UUID,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    active_org_id: Optional[UUID] = Depends(get_active_org_id),
+    db: Session = Depends(get_db),
+):
+    """Attach a resume to one exact applicant and refresh the engine copy.
+
+    This endpoint avoids identity-based matching for an existing row. It is used
+    by the Resume Analysis table's per-candidate Upload button, where the target
+    applicant is already known and must remain the session owner.
+    """
+    applicant = _verify_applicant_access(applicant_id, current_user, active_org_id, db)
+    filename = os.path.basename(file.filename or "")
+    extension = os.path.splitext(filename)[1].lower()
+    if extension not in (".pdf", ".docx", ".txt"):
+        raise HTTPException(status_code=400, detail="Resume must be a PDF, DOCX, or TXT file.")
+
+    content = file.file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Resume must be 10 MB or smaller.")
+    if not content:
+        raise HTTPException(status_code=400, detail="Resume file is empty.")
+
+    resume_dir = "uploads/resumes"
+    _ensure_upload_dir(resume_dir)
+    stored_name = f"{applicant.id}-{filename}"
+    file_path = _safe_upload_path(resume_dir, stored_name)
+    if not file_path:
+        raise HTTPException(status_code=400, detail="Invalid resume filename.")
+    with open(file_path, "wb") as buffer:
+        buffer.write(content)
+
+    from app.utils.resume_parser import extract_text_from_file
+    try:
+        resume_text = (extract_text_from_file(file_path) or "").strip()
+    except Exception as parse_err:
+        logger.warning("Resume text extraction failed for applicant %s: %s", applicant.id, parse_err)
+        resume_text = ""
+    if resume_text and len(resume_text) < 50:
+        resume_text = ""
+
+    applicant.resume_url = file_path
+    if resume_text:
+        applicant.resume_text = resume_text
+
+    # If scheduling already provisioned the engine session, update it in place;
+    # rerunning the full sync here would reset an in-progress interview.
+    from app.models.ai_integration import Candidate as EngineCandidate, InterviewSession as EngineSession
+    engine_session = db.query(EngineSession).filter(EngineSession.id == str(applicant.id)).first()
+    if engine_session:
+        settings_json = dict(engine_session.settings or {})
+        settings_json["resumeUploaded"] = True
+        engine_session.settings = settings_json
+        engine_candidate = db.query(EngineCandidate).filter(
+            EngineCandidate.id == engine_session.candidateId,
+        ).first()
+        if engine_candidate and resume_text:
+            engine_candidate.resumeText = resume_text
+
+    db.commit()
+    db.refresh(applicant)
+    return applicant
 
 @router.get("/applicants/{applicant_id}/application")
 def get_applicant_application(
@@ -2129,8 +2194,10 @@ def update_applicant(
     db: Session = Depends(get_db)
 ):
     applicant = _verify_applicant_access(applicant_id, current_user, active_org_id, db)
+    old_decision = applicant.decision
     has_screening_update = 'screening_status' in data.model_dump(exclude_unset=True)
     has_functional_update = 'functional_status' in data.model_dump(exclude_unset=True)
+    has_decision_update = 'decision' in data.model_dump(exclude_unset=True)
 
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(applicant, key, value)
@@ -2156,8 +2223,13 @@ def update_applicant(
         except Exception as revoke_err:
             logger.error(f"Failed to auto-revoke invites for rejected applicant {applicant.id}: {revoke_err}")
 
-    # 1. Always regenerate a fresh token on every advance so a new interview link is generated
-    if (has_screening_update and applicant.screening_status) or (has_functional_update and applicant.functional_status):
+    # 1. Always regenerate a fresh token on every advance so a new interview link is generated.
+    # Also regenerate on un-reject: rejection revokes the old token above, and
+    # screening_status/functional_status are never cleared on reject (see the
+    # stage-bucketing logic in _build_job_out/_build_funnel), so a restored
+    # candidate needs a fresh token even though neither status field itself changed.
+    un_rejected = has_decision_update and old_decision == "rejected" and applicant.decision != "rejected"
+    if (has_screening_update and applicant.screening_status) or (has_functional_update and applicant.functional_status) or un_rejected:
         import uuid
         applicant.scheduling_token = str(uuid.uuid4())  # always fresh — allows re-testing
         db.commit()
@@ -2400,6 +2472,87 @@ def delete_applicant(
     return {"message": "Applicant data anonymised (records retained as a non-identifying stub)"}
 
 
+def _revoke_applicant_invites(db: Session, applicant: Applicant) -> None:
+    """Expire pending/started invites and rotate the engine session's inviteToken so
+    any already-issued interview link stops working immediately, without touching
+    the session/transcript itself. Same mechanism `update_applicant` already runs
+    when a candidate is rejected (jobs.py ~2193) — shared here for `/remove`."""
+    import uuid as _uuid
+    from app.models.interview_invite import InterviewInvite, InviteStatus
+    db.query(InterviewInvite).filter(
+        InterviewInvite.applicant_id == applicant.id,
+        InterviewInvite.status.in_([InviteStatus.pending, InviteStatus.started]),
+    ).update({InterviewInvite.status: InviteStatus.expired}, synchronize_session=False)
+    from app.models.ai_integration import InterviewSession as _EngineSession
+    sess = db.query(_EngineSession).filter(_EngineSession.id == str(applicant.id)).first()
+    if sess is not None and sess.inviteToken:
+        sess.inviteToken = _uuid.uuid4().hex
+    db.commit()
+
+
+@router.post("/applicants/{applicant_id}/remove")
+def remove_applicant(
+    applicant_id: UUID,
+    current_user: User = Depends(get_current_user),
+    active_org_id: Optional[UUID] = Depends(get_active_org_id),
+    db: Session = Depends(get_db)
+):
+    """Soft delete: hides the candidate from every recruiter-facing list/count/search
+    but does NOT scrub any field — resume text, scores, reports all stay intact so
+    the row remains usable as training data. Distinct from DELETE /applicants/{id}
+    above, which is a DSAR-grade anonymisation. Reversible via /restore."""
+    from datetime import datetime, timezone
+    from app.utils.audit import record_audit
+    from app.models.compliance_audit_log import AuditActorType
+
+    applicant = _verify_applicant_access(applicant_id, current_user, active_org_id, db)
+    job = db.query(Job).filter(Job.id == applicant.job_id).first()
+
+    applicant.removed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    try:
+        _revoke_applicant_invites(db, applicant)
+    except Exception as revoke_err:
+        logger.error(f"Failed to revoke invites for removed applicant {applicant.id}: {revoke_err}")
+
+    record_audit(
+        db, action="applicant.removed", actor_type=AuditActorType.recruiter,
+        actor_id=str(current_user.id), organisation_id=job.organisation_id if job else None,
+        entity_type="applicant", entity_id=str(applicant.id), subject_email=applicant.email,
+    )
+
+    return {"message": "Candidate removed.", "applicant_id": str(applicant.id)}
+
+
+@router.post("/applicants/{applicant_id}/restore")
+def restore_applicant(
+    applicant_id: UUID,
+    current_user: User = Depends(get_current_user),
+    active_org_id: Optional[UUID] = Depends(get_active_org_id),
+    db: Session = Depends(get_db)
+):
+    """Undo a /remove — clears removed_at so the candidate reappears everywhere.
+    Does not restore any previously-revoked invite link; a fresh one is issued
+    the next time the candidate is (re)advanced through a stage."""
+    from app.utils.audit import record_audit
+    from app.models.compliance_audit_log import AuditActorType
+
+    applicant = _verify_applicant_access(applicant_id, current_user, active_org_id, db)
+    job = db.query(Job).filter(Job.id == applicant.job_id).first()
+
+    applicant.removed_at = None
+    db.commit()
+
+    record_audit(
+        db, action="applicant.restored", actor_type=AuditActorType.recruiter,
+        actor_id=str(current_user.id), organisation_id=job.organisation_id if job else None,
+        entity_type="applicant", entity_id=str(applicant.id), subject_email=applicant.email,
+    )
+
+    return {"message": "Candidate restored.", "applicant_id": str(applicant.id)}
+
+
 @router.get("/applicants/{applicant_id}/resume-text")
 def get_applicant_resume_text(
     applicant_id: UUID,
@@ -2550,17 +2703,28 @@ def interview_completed_webhook(
         proctoring_flag = "medium"
         
     from app.models.applicant import CheatProbability
+    from app.utils.ai_sync import session_stage
+    # Screening and functional interviews share one session row per applicant
+    # (InterviewSession.id == str(applicant.id)) — without this check, a
+    # completed SCREENING interview's own webhook call used to write straight
+    # into functional_score/functional_status, silently "advancing" a
+    # candidate who never had a functional interview at all.
+    is_functional = session_stage(session) == 'functional'
     # Update applicant slim storage fields
-    applicant.overall_interview_score = overall_score
     applicant.proctoring_severity_flag = proctoring_flag
-    applicant.functional_score = overall_score
     applicant.cheat_probability = (
         CheatProbability.high if proctoring_flag in ["critical", "high"]
         else CheatProbability.medium if proctoring_flag == "medium"
         else CheatProbability.low
     )
-    applicant.functional_status = InterviewStatus.completed
     applicant.report_url = session.reportUrl
+    if is_functional:
+        applicant.overall_interview_score = overall_score
+        applicant.functional_score = overall_score
+        applicant.functional_status = InterviewStatus.completed
+    else:
+        applicant.screening_score = overall_score
+        applicant.screening_status = InterviewStatus.completed
 
     # Mark this candidate's unique interview invite completed (single-use terminal
     # state) — same transaction as the applicant update below.
@@ -2651,4 +2815,3 @@ def interview_completed_webhook(
         pass
         
     return {"status": "synced", "applicant_id": str(applicant.id)}
-

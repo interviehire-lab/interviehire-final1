@@ -37,7 +37,7 @@ def get_platform_overview(
     org_count = db.query(func.count(Organisation.id)).scalar() or 0
     user_count = db.query(func.count(User.id)).scalar() or 0
     job_count = db.query(func.count(Job.id)).scalar() or 0
-    applicant_count = db.query(func.count(Applicant.id)).scalar() or 0
+    applicant_count = db.query(func.count(Applicant.id)).filter(Applicant.removed_at.is_(None)).scalar() or 0
     published_job_count = db.query(func.count(Job.id)).filter(Job.status == "published").scalar() or 0
 
     orgs = (
@@ -244,7 +244,7 @@ def list_platform_jobs(
     if job_ids:
         for job_id, count in (
             db.query(Applicant.job_id, func.count(Applicant.id))
-            .filter(Applicant.job_id.in_(job_ids))
+            .filter(Applicant.job_id.in_(job_ids), Applicant.removed_at.is_(None))
             .group_by(Applicant.job_id)
             .all()
         ):
@@ -286,13 +286,17 @@ def list_platform_interviews(
     pattern documented in CLAUDE.md."""
     limit = _clamp_limit(limit)
     total = db.query(func.count(Applicant.id)).filter(
-        (Applicant.screening_status.isnot(None)) | (Applicant.functional_status.isnot(None))
+        (Applicant.screening_status.isnot(None)) | (Applicant.functional_status.isnot(None)),
+        Applicant.removed_at.is_(None),
     ).scalar() or 0
     rows = (
         db.query(Applicant, Job.role_name, Job.organisation_id, Organisation.org_name)
         .join(Job, Job.id == Applicant.job_id)
         .outerjoin(Organisation, Organisation.id == Job.organisation_id)
-        .filter((Applicant.screening_status.isnot(None)) | (Applicant.functional_status.isnot(None)))
+        .filter(
+            (Applicant.screening_status.isnot(None)) | (Applicant.functional_status.isnot(None)),
+            Applicant.removed_at.is_(None),
+        )
         .order_by(Applicant.attempted_at.desc().nullslast())
         .limit(limit)
         .offset(offset)

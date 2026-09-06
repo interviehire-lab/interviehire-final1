@@ -63,6 +63,7 @@ def select_due(db: Session, stage_key: str, minutes_before: int, limit: int):
         .filter(scheduled_at <= window_end)
         .filter(reminder_sent_at.is_(None))
         .filter(status == InterviewStatus.scheduled)
+        .filter(Applicant.removed_at.is_(None))
         .order_by(scheduled_at.asc())
         .limit(limit)
         .all()

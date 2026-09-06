@@ -1193,8 +1193,10 @@ function renderScreeningConfig(job, panel) {
       return c.jobApplied === job.roleName || c.jobApplied === job.cardName;
     });
     const stageCandidates = jobCandidates.filter(c => c.status === 'Screening');
-    const interviewSlug = (job.roleName || 'role').toLowerCase().replace(/[^a-z0-9]+/g, '-') + job.id.slice(0, 6);
-    const interviewLink = `${ENGINE_WEB_URL}/interviewcandidateroom/${interviewSlug}`;
+    // No real link exists until "Try Now" actually creates a session (the
+    // candidate room only understands ?sessionId=..., never a path slug) — show
+    // a neutral placeholder rather than fabricating a URL that would 404.
+    const interviewLink = 'Click Try Now to generate a live session link…';
 
     bodyHtml = `
       <div class="jf-test-interview-container">
@@ -1551,9 +1553,10 @@ function renderScreeningConfig(job, panel) {
           showPremiumToast('Test interview launched in a new tab.', 'success');
         } catch (err) {
           console.error('Failed to create test session:', err);
-          const interviewSlug = (job.roleName || 'role').toLowerCase().replace(/[^a-z0-9]+/g, '-') + job.id.slice(0, 6);
-          const interviewLink = `${ENGINE_WEB_URL}/interviewcandidateroom/${interviewSlug}`;
-          window.open(interviewLink, '_blank');
+          // No legitimate fallback URL exists here — the candidate room only
+          // understands ?sessionId=..., never a self-invented slug (that used to
+          // open a 404). Surface the failure instead of opening a broken tab.
+          showPremiumToast((err && err.message) || 'Could not start the test interview.', 'error');
         } finally {
           tryBtn.disabled = false;
           tryBtn.innerHTML = originalText;
@@ -1720,8 +1723,10 @@ function renderFunctionalConfig(job, panel) {
       return c.jobApplied === job.roleName || c.jobApplied === job.cardName;
     });
     const stageCandidates = jobCandidates.filter(c => c.status === 'Functional');
-    const interviewSlug = (job.roleName || 'role').toLowerCase().replace(/[^a-z0-9]+/g, '-') + job.id.slice(0, 6);
-    const interviewLink = `${ENGINE_WEB_URL}/interviewcandidateroom/${interviewSlug}`;
+    // No real link exists until "Try Now" actually creates a session (the
+    // candidate room only understands ?sessionId=..., never a path slug) — show
+    // a neutral placeholder rather than fabricating a URL that would 404.
+    const interviewLink = 'Click Try Now to generate a live session link…';
 
     bodyHtml = `
       <div class="jf-test-interview-container">
@@ -2015,9 +2020,10 @@ function renderFunctionalConfig(job, panel) {
           showPremiumToast('Test interview launched in a new tab.', 'success');
         } catch (err) {
           console.error('Failed to create test session:', err);
-          const interviewSlug = (job.roleName || 'role').toLowerCase().replace(/[^a-z0-9]+/g, '-') + job.id.slice(0, 6);
-          const interviewLink = `${ENGINE_WEB_URL}/interviewcandidateroom/${interviewSlug}`;
-          window.open(interviewLink, '_blank');
+          // No legitimate fallback URL exists here — the candidate room only
+          // understands ?sessionId=..., never a self-invented slug (that used to
+          // open a 404). Surface the failure instead of opening a broken tab.
+          showPremiumToast((err && err.message) || 'Could not start the test interview.', 'error');
         } finally {
           tryBtn.disabled = false;
           tryBtn.innerHTML = originalText;

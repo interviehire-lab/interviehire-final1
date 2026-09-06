@@ -47,7 +47,7 @@ class InternalCandidateAdapter(SourceAdapter):
             return []
         from app.models.applicant import Applicant
         from app.models.job import Job
-        q = db.query(Applicant).join(Job, Applicant.job_id == Job.id)
+        q = db.query(Applicant).join(Job, Applicant.job_id == Job.id).filter(Applicant.removed_at.is_(None))
         if self.ctx.organisation_id:
             q = q.filter(Job.organisation_id == self.ctx.organisation_id)
         rows = q.limit(2000).all()
@@ -87,7 +87,9 @@ class ResumeDatabaseAdapter(SourceAdapter):
             return []
         from app.models.applicant import Applicant
         from app.models.job import Job
-        q = db.query(Applicant).join(Job, Applicant.job_id == Job.id).filter(Applicant.resume_text.isnot(None))
+        q = db.query(Applicant).join(Job, Applicant.job_id == Job.id).filter(
+            Applicant.resume_text.isnot(None), Applicant.removed_at.is_(None)
+        )
         if self.ctx.organisation_id:
             q = q.filter(Job.organisation_id == self.ctx.organisation_id)
         rows = q.limit(2000).all()

@@ -1,6 +1,11 @@
 # Normalize all text to LF in the repo; auto-detect binaries.
 * text=auto eol=lf
 
+# Legacy router is currently stored with CRLF. Preserve it until it can be
+# normalized in a dedicated formatting-only change, so functional patches stay
+# reviewable instead of rewriting the entire 2,600-line file.
+backend/app/routers/jobs.py -text whitespace=cr-at-eol
+
 # Explicit binary guards (never touch these).
 *.png  binary
 *.jpg  binary

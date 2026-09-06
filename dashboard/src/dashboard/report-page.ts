@@ -683,9 +683,10 @@ function renderRemarksPane(candidate, analysis) {
       ${!analysis && candidate.status === 'Resume' ? '<p class="rp-muted">Run resume analysis before advancing this candidate.</p>' : ''}
       <div class="rp-stage-actions">
         ${candidate.status !== 'Hired' && candidate.status !== 'Rejected' ? `<button class="rp-btn-reject" id="rp-btn-reject">Reject Candidate</button>` : ''}
+        ${candidate.status === 'Rejected' ? `<button class="btn-stage-unreject" id="rp-btn-unreject" data-candidate-id="${candidate.id}">Restore to Pipeline</button>` : ''}
         ${nextStage
           ? `<button class="rp-btn-advance" id="rp-btn-advance" ${canAdvance ? '' : 'disabled'}>${nextStage === 'Hired' ? 'Mark Hired' : `Advance to ${nextStage}`}</button>`
-          : `<span class="rp-muted">${candidate.status === 'Hired' ? 'Candidate hired 🎉' : 'No next stage available.'}</span>`}
+          : candidate.status === 'Rejected' ? '' : `<span class="rp-muted">${candidate.status === 'Hired' ? 'Candidate hired 🎉' : 'No next stage available.'}</span>`}
       </div>
     </div>
   `;
@@ -910,21 +911,34 @@ function bindReportPage(candidate, job, analysis, root, initialTab = 'overview')
   // Topbar actions
   root.querySelector('#rp-decision')?.addEventListener('change', async (e) => {
     const value = e.target.value || null; // null | shortlisted | on_hold | rejected | hired
-    candidate.decision = value;
-    saveStateToLocalStorage();
     const { showPremiumToast } = await import('./sourcing');
     if (value === 'rejected') {
       // Rejecting also moves the kanban card; updateCandidateStatus persists decision='rejected'.
       const { updateCandidateStatus } = await import('./job-detail-panes');
       updateCandidateStatus(candidate.id, 'Rejected');
       showPremiumToast(`${candidate.name} marked as Rejected.`, 'info');
-    } else {
-      if (candidate._backend && getDataSource() === 'api') {
-        apiUpdateApplicant(candidate.id, { decision: value }).catch((err) =>
-          console.warn('Decision saved locally but backend sync failed:', err));
-      }
-      showPremiumToast('Decision updated.', 'success');
+      return;
     }
+    if (candidate.status === 'Rejected') {
+      // Un-rejecting via this select — this used to only patch `decision`,
+      // leaving `status` stuck on 'Rejected' forever. Restore it to the real
+      // stage first (screening_status/functional_status were preserved), then
+      // apply whatever specific decision was picked, if any.
+      const { restoreCandidateFromRejection } = await import('./job-detail-panes');
+      restoreCandidateFromRejection(candidate.id);
+    }
+    candidate.decision = value;
+    saveStateToLocalStorage();
+    if (candidate._backend && getDataSource() === 'api') {
+      apiUpdateApplicant(candidate.id, { decision: value }).catch((err) =>
+        console.warn('Decision saved locally but backend sync failed:', err));
+    }
+    showPremiumToast('Decision updated.', 'success');
+  });
+  root.querySelector('#rp-btn-unreject')?.addEventListener('click', async () => {
+    const { restoreCandidateFromRejection } = await import('./job-detail-panes');
+    restoreCandidateFromRejection(candidate.id);
+    navigateToJobDetail(job.id);
   });
   root.querySelector('#rp-print')?.addEventListener('click', () => window.print());
   root.querySelector('#rp-dl-transcript')?.addEventListener('click', () => downloadInterviewTranscript(candidate.id, candidate.name));

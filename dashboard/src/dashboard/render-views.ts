@@ -2,7 +2,7 @@ import { document } from './runtime';
 import { escapeHTML } from './escape';
 import { drawFunnelSVG, drawScoreDistributionSVG } from './funnel-charts';
 import { navigateToJobDetail } from './job-detail';
-import { renderJobDetailPanes, updateCandidateStatus } from './job-detail-panes';
+import { renderJobDetailPanes, updateCandidateStatus, deleteCandidate, restoreCandidateFromRejection } from './job-detail-panes';
 import { openJobFlowView } from './job-flow';
 import { recalculateJobPipelines } from './kanban-swarm';
 import { openCandidateReport } from './report';
@@ -422,12 +422,14 @@ function renderAnalyticsTable() {
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
               </button>
               ${nextStage ? `<button class="btn-stage-advance btn-tbl-advance" data-candidate-id="${c.id}" data-next-stage="${nextStage}" title="Advance to ${nextStage}" style="padding:4px 8px;font-size:0.7rem;">Advance</button>` : ''}
+              ${c.status === 'Rejected' ? `<button class="btn-tbl-unreject" data-candidate-id="${c.id}" title="Restore to pipeline" style="padding:4px 8px;font-size:0.7rem;">Restore</button>` : ''}
               ${c.status !== 'Hired' && c.status !== 'Rejected' ? `<button class="btn-stage-reject btn-tbl-reject" data-candidate-id="${c.id}" title="Reject candidate" style="padding:4px 8px;font-size:0.7rem;">Reject</button>` : ''}
+              <button class="btn-tbl-delete" data-candidate-id="${c.id}" title="Delete candidate" style="padding:4px 8px;font-size:0.7rem;color:#f87171;">Delete</button>
             </div>
           </td>
         `;
       }
-      
+
       tr.innerHTML = cellsHtml;
       tbody.appendChild(tr);
     });
@@ -453,6 +455,20 @@ function renderAnalyticsTable() {
         const candId = btn.getAttribute('data-candidate-id');
         updateCandidateStatus(candId, 'Rejected');
         renderAnalyticsTable();
+      });
+    });
+
+    tbody.querySelectorAll('.btn-tbl-unreject').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const candId = btn.getAttribute('data-candidate-id');
+        restoreCandidateFromRejection(candId);
+      });
+    });
+
+    tbody.querySelectorAll('.btn-tbl-delete').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const candId = btn.getAttribute('data-candidate-id');
+        deleteCandidate(candId);
       });
     });
   }

@@ -336,6 +336,17 @@ export async function apiMoveApplicantStage(applicantId, targetStatus) {
   return apiUpdateApplicant(applicantId, patch);
 }
 
+// Soft delete: hides the candidate everywhere but keeps every field (resume
+// text, scores, reports) intact for training-data reuse. Distinct from the
+// backend's DSAR-style DELETE /applicants/{id}, which scrubs PII — this route
+// never touches any field but removed_at. Reversible via apiRestoreApplicant.
+export async function apiDeleteApplicant(applicantId) {
+  return request(`/jobs/applicants/${applicantId}/remove`, { method: 'POST' });
+}
+export async function apiRestoreApplicant(applicantId) {
+  return request(`/jobs/applicants/${applicantId}/restore`, { method: 'POST' });
+}
+
 // Fetch the real parsed resume text the backend has on file for this applicant.
 // Returns '' when the backend has nothing stored, so callers can fall back
 // cleanly instead of scoring fabricated text.
@@ -344,11 +355,10 @@ export async function apiGetResumeText(applicantId) {
   return (data && data.text) || '';
 }
 
-// Upload one or more resume files to a job's applicant pool.
-// `source` controls what stage new candidates land in:
-//   'scheduled'  → Recruiter Screening (screening_status = pending)
-//   'functional' → Functional Interview (functional_status = pending)
-//   (default)    → Resume Analysis (bulk_upload, no status set)
+// Upload one or more resume files to a job's applicant pool. Resume intake always
+// lands in Resume Analysis; stage movement is a separate recruiter decision.
+// `source` is retained only for compatibility with older callers and is ignored
+// by the backend for stage routing.
 // Uses raw fetch so FormData is sent as multipart/form-data — the JSON
 // `request()` helper would override Content-Type and break the upload.
 export async function apiUploadResumes(jobId, files, source = null) {
@@ -369,6 +379,31 @@ export async function apiUploadResumes(jobId, files, source = null) {
     throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
   return Array.isArray(data) ? data.map(mapApplicantOutToCandidate) : [];
+}
+
+// Attach a resume to an existing applicant. Unlike bulk intake, this route does
+// not guess identity from the document; the selected pipeline row is authoritative.
+export async function apiUploadApplicantResume(applicantId, file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/jobs/applicants/${applicantId}/resume`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    });
+  } catch (err) {
+    throw new Error(`Network error uploading resume: ${err.message}`);
+  }
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!res.ok) {
+    const message = (data && (data.detail || data.error || data.message)) || `${res.status} ${res.statusText}`;
+    throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
+  }
+  return mapApplicantOutToCandidate(data);
 }
 
 // ── Team ───────────────────────────────────────────────────────────────────

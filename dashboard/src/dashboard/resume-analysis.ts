@@ -8,7 +8,7 @@ import { computeWeightedScore, getScoringConfig, recommendationFromScore } from 
 import { soundEngine } from './sound';
 import { addCandidateToAppState, extractResumeIdentity, showPremiumToast } from './sourcing';
 import { AppState } from './state';
-import { getDataSource, apiUpdateApplicant, apiGetResumeText, apiAddApplicant } from './api';
+import { getDataSource, apiUpdateApplicant, apiGetResumeText, apiAddApplicant, apiUploadApplicantResume } from './api';
 
 // ==========================================
 // RESUME ANALYSIS (AI-powered, Lina)
@@ -131,11 +131,15 @@ function renderResumeStagePaneForJob(candidates, job, container) {
     return `<span class="ra-rec-badge ${cls}">${escapeHTML(rec)}</span>`;
   };
 
-  const pendingCount = candidates.filter(c => !resumeAnalysisCache[c.id]).length;
-  const analysedCount = candidates.length - pendingCount;
-
   const viewLabels = { all: 'All', advanced: 'Advanced', rejected: 'Rejected' };
   const curView = AppState.resumeStageView || 'all';
+  const visibleCandidates = curView === 'rejected'
+    ? candidates.filter(c => c.status === 'Rejected')
+    : curView === 'advanced'
+      ? candidates.filter(c => c.status !== 'Resume' && c.status !== 'Rejected')
+      : candidates;
+  const pendingCount = visibleCandidates.filter(c => !resumeAnalysisCache[c.id]).length;
+  const analysedCount = visibleCandidates.length - pendingCount;
   const emptyMsg = curView === 'advanced' ? 'No candidates have been advanced yet'
     : curView === 'rejected' ? 'No candidates have been rejected'
     : 'No candidates in resume analysis stage yet';
@@ -182,7 +186,7 @@ function renderResumeStagePaneForJob(candidates, job, container) {
             </tr>
           </thead>
           <tbody>
-            ${candidates.length === 0 ? `<tr><td colspan="7" class="ra-empty-row">${emptyMsg}</td></tr>` : candidates.map(c => {
+            ${visibleCandidates.length === 0 ? `<tr><td colspan="7" class="ra-empty-row">${emptyMsg}</td></tr>` : visibleCandidates.map(c => {
               const cached = resumeAnalysisCache[c.id];
               const score = cached ? cached.matchScore : 0;
               const matchClass = getMatchClass(score);
@@ -231,7 +235,8 @@ function renderResumeStagePaneForJob(candidates, job, container) {
                   <td>
                     <div class="ra-action-btns">
                       ${c.status === 'Rejected'
-                        ? `<span class="ra-stage-tag rejected">Rejected</span>`
+                        ? `<span class="ra-stage-tag rejected">Rejected</span>
+                           <button class="btn-stage-unreject" data-candidate-id="${c.id}" title="Restore to pipeline">Restore</button>`
                         : c.status === 'Resume' && c.decision === 'on_hold'
                           ? `<span class="ra-stage-tag on-hold">On Hold</span>
                              <button class="btn-stage-unhold" data-candidate-id="${c.id}" title="Resume reviewing this candidate">Resume review</button>`
@@ -240,6 +245,7 @@ function renderResumeStagePaneForJob(candidates, job, container) {
                                <button class="btn-stage-hold" data-candidate-id="${c.id}">Hold</button>
                                <button class="btn-stage-reject" data-candidate-id="${c.id}">Reject</button>`
                             : `<span class="ra-stage-tag advanced">Advanced</span>`}
+                      <button class="btn-stage-delete" data-candidate-id="${c.id}" title="Delete candidate">Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -249,7 +255,7 @@ function renderResumeStagePaneForJob(candidates, job, container) {
         </table>
       </div>
       <div class="stage-table-footer">
-        <span class="table-selection-info">${candidates.length} candidate${candidates.length !== 1 ? 's' : ''} in resume analysis</span>
+        <span class="table-selection-info">${visibleCandidates.length} candidate${visibleCandidates.length !== 1 ? 's' : ''} shown</span>
         <div class="table-pagination">
           <span>Page 1 of 1</span>
         </div>
@@ -377,6 +383,24 @@ function extractNameFromResumeText(text) {
   return extractResumeIdentity(text).name || null;
 }
 async function handleResumeFile(cid, file) {
+  const candidate = AppState.candidates.find((item) => item.id === cid);
+  if (candidate?._backend && getDataSource() === 'api') {
+    try {
+      const updated = await apiUploadApplicantResume(cid, file);
+      if (updated) Object.assign(candidate, updated);
+      const serverText = updated?.resumeText || '';
+      if (serverText && !isGarbageText(serverText)) {
+        cacheResumeTextAndIdentity(cid, serverText, file.name);
+      }
+      showPremiumToast(`${file.name} uploaded and saved to the candidate.`, 'success');
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showPremiumToast(`Could not save ${file.name}: ${message}`, 'error');
+      return;
+    }
+  }
+
   const isPdfOrDocx = /\.(pdf|docx?)$/i.test(file.name);
 
   if (isPdfOrDocx) {

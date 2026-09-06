@@ -49,6 +49,12 @@ def _is_valid_guidance(guidance) -> bool:
 
 
 def sync_applicant_to_ai(db: Session, applicant: Applicant) -> Optional[InterviewSession]:
+    # Captured up front, not re-read in the except block below: after a failed
+    # flush the session needs a rollback before any ORM attribute access works
+    # again, and applicant.id is a lazy-loaded attribute — referencing it in the
+    # f-string before rolling back used to raise a fresh PendingRollbackError
+    # that masked the real one and skipped the rollback/None-return entirely.
+    applicant_id_for_log = str(applicant.id)
     try:
         # Load relationships if not fully loaded
         job = db.query(Job).filter(Job.id == applicant.job_id).first()
@@ -72,10 +78,18 @@ def sync_applicant_to_ai(db: Session, applicant: Applicant) -> Optional[Intervie
         company_id = str(organisation.id)
         company = db.query(Company).filter(Company.id == company_id).first()
         if not company:
+            # Company.slug is UNIQUE database-wide, but it's derived only from the
+            # org's name/domain — two orgs with the same (or similarly-slugifying)
+            # name collide on INSERT with an IntegrityError. Disambiguate with a
+            # short id suffix whenever the plain slug is already taken by another org.
+            base_slug = organisation.domain or slugify(organisation.org_name) or f"org-{company_id[:8]}"
+            slug = base_slug
+            if db.query(Company).filter(Company.slug == slug, Company.id != company_id).first():
+                slug = f"{base_slug}-{company_id[:6]}"
             company = Company(
                 id=company_id,
                 name=organisation.org_name,
-                slug=organisation.domain or slugify(organisation.org_name),
+                slug=slug,
                 description=organisation.description or "No description provided",
                 logoUrl=organisation.logo_url,
                 primaryColor="#0f766e",
@@ -215,6 +229,12 @@ def sync_applicant_to_ai(db: Session, applicant: Applicant) -> Optional[Intervie
                 interview_settings = {}
         if not isinstance(interview_settings, dict):
             interview_settings = {}
+
+        # `requireCv` means a real file was supplied, not that every PDF parser
+        # successfully extracted text (scanned/image resumes are still valid
+        # uploads). Keep this fact on the engine session because Candidate has no
+        # resume URL column. resumeText remains the richer source for grounding.
+        interview_settings["resumeUploaded"] = bool(applicant.resume_url or resume_text)
 
         # Exit-interview jobs must tell the engine to switch from hire-scoring to
         # sentiment/theme grading. The engine reads session.settings.interviewType
@@ -471,9 +491,23 @@ def sync_applicant_to_ai(db: Session, applicant: Applicant) -> Optional[Intervie
             
         return session
     except Exception as e:
-        logger.exception(f"Error syncing applicant {applicant.id} to AI models: {e}")
         db.rollback()
+        logger.exception(f"Error syncing applicant {applicant_id_for_log} to AI models: {e}")
         return None
+
+
+def session_stage(session) -> str:
+    """Which pipeline stage this InterviewSession's settings say it's currently
+    for (tagged above by the is_screening_stage check). Screening and functional
+    interviews share one session row per applicant, so any code that reads a
+    completed/in-progress session back onto the Applicant must check this before
+    deciding whether to touch functional_status/functional_score or
+    screening_status/screening_score — writing to the wrong pair silently
+    "advances" a candidate who only ever did a screening interview. Defaults to
+    'functional' for legacy sessions created before this tag existed, preserving
+    prior behavior for those old rows rather than guessing."""
+    return (session.settings or {}).get('stage') or 'functional'
+
 
 def get_applicant_vetting(db: Session, applicant_id: str) -> Dict[str, Any]:
     # Query InterviewSession
@@ -705,4 +739,3 @@ def get_applicant_screening_report(db: Session, applicant: Applicant) -> Dict[st
         "dialogue": dialogue,
         "attemptedAt": applicant.attempted_at.isoformat() if applicant.attempted_at else None
     }
-

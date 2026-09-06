@@ -53,7 +53,7 @@ def get_usage_stats(
         query = query.filter(Applicant.created_at <= date_to)
 
     applicants = query.all()
-    applicants = [a for a in applicants if not _is_test_applicant(a)]
+    applicants = [a for a in applicants if not _is_test_applicant(a) and a.removed_at is None]
     total = len(applicants)
 
     # Reached-stage flags mirror the dashboard's stage derivation (api.js
@@ -200,11 +200,12 @@ def get_candidates_table(
         return []
 
     applicants = db.query(Applicant).filter(Applicant.job_id.in_(visible_job_ids)).all()
-    applicants = [a for a in applicants if not _is_test_applicant(a)]
+    applicants = [a for a in applicants if not _is_test_applicant(a) and a.removed_at is None]
 
     # Sync with InterviewSession
     from app.models.ai_integration import InterviewSession, SessionStatus, Severity
     from app.models.applicant import InterviewStatus, CheatProbability
+    from app.utils.ai_sync import session_stage
 
     session_ids = [str(a.id) for a in applicants]
     sessions = db.query(InterviewSession).filter(InterviewSession.id.in_(session_ids)).all()
@@ -214,14 +215,22 @@ def get_candidates_table(
         s = sessions_by_id.get(str(a.id))
         if s:
             updated = False
+            # Screening and functional interviews share one session row per
+            # applicant — without this check, a completed SCREENING session
+            # would silently set functional_status/functional_score instead
+            # (this was a real bug: this loop used to write functional_* for
+            # every session unconditionally).
+            is_functional = session_stage(s) == 'functional'
+            status_attr = 'functional_status' if is_functional else 'screening_status'
+            score_attr = 'functional_score' if is_functional else 'screening_score'
             # Sync status
             if s.status == SessionStatus.EVALUATED:
-                if a.functional_status != InterviewStatus.completed:
-                    a.functional_status = InterviewStatus.completed
+                if getattr(a, status_attr) != InterviewStatus.completed:
+                    setattr(a, status_attr, InterviewStatus.completed)
                     updated = True
             elif s.status == SessionStatus.IN_PROGRESS:
-                if a.functional_status != InterviewStatus.scheduled:
-                    a.functional_status = InterviewStatus.scheduled
+                if getattr(a, status_attr) != InterviewStatus.scheduled:
+                    setattr(a, status_attr, InterviewStatus.scheduled)
                     updated = True
 
             # Sync score
@@ -229,8 +238,8 @@ def get_candidates_table(
                 score = s.evaluation.get("overallScore")
                 if score is not None:
                     score = float(score)
-                    if a.functional_score != score:
-                        a.functional_score = score
+                    if getattr(a, score_attr) != score:
+                        setattr(a, score_attr, score)
                         updated = True
 
                 # Sync report URL

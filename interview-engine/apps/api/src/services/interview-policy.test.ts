@@ -5,12 +5,19 @@ import {
   SCREENING_HARD_LIMIT_SECONDS,
   deadlineFor,
   hardLimitSeconds,
+  hasResumeForRequirement,
   secondsRemaining,
   shouldForceClose,
   targetSeconds,
 } from './interview-policy.js';
 
 describe('interview timing policy', () => {
+  it('accepts either extracted text or a persisted upload marker as a resume', () => {
+    expect(hasResumeForRequirement('  Experienced engineer  ', {})).toBe(true);
+    expect(hasResumeForRequirement(null, { resumeUploaded: true })).toBe(true);
+    expect(hasResumeForRequirement('  ', { resumeUploaded: false })).toBe(false);
+  });
+
   const startedAt = new Date('2026-09-05T00:00:00.000Z');
 
   it('never permits a configured limit above 30 minutes', () => {

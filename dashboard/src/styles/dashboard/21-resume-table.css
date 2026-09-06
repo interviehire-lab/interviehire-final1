@@ -392,23 +392,12 @@
 }
 .ra-action-btns .btn-stage-reject,
 .ra-action-btns .btn-stage-advance,
-.ra-action-btns .btn-stage-hold {
+.ra-action-btns .btn-stage-hold,
+.ra-action-btns .btn-stage-delete,
+.ra-action-btns .btn-stage-unhold,
+.ra-action-btns .btn-stage-unreject {
   padding: 4px 8px;
   font-size: 0.72rem;
-}
-.ra-action-btns .btn-stage-unhold {
-  padding: 4px 8px;
-  font-size: 0.72rem;
-  background: none;
-  border: 1px solid var(--glass-border);
-  border-radius: 6px;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-family: inherit;
-}
-.ra-action-btns .btn-stage-unhold:hover {
-  color: var(--color-text-primary);
-  border-color: rgba(var(--color-gold-rgb), 0.4);
 }
 
 /* Inert status pill shown in the Actions column once a candidate has left the

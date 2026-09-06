@@ -13,6 +13,14 @@ export const FUNCTIONAL_HARD_LIMIT_SECONDS = 25 * 60;
 
 type SessionSettings = Record<string, unknown> | null | undefined;
 
+export function hasResumeForRequirement(
+  resumeText: string | null | undefined,
+  settings: SessionSettings,
+): boolean {
+  return (typeof resumeText === 'string' && resumeText.trim().length > 0)
+    || settings?.resumeUploaded === true;
+}
+
 function finitePositiveNumber(value: unknown): number | null {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;

@@ -13,8 +13,6 @@ import { stopActiveCardPlayer, toggleCardPlayer } from "./kanban-dnd";
 import { recalculateJobPipelines, renderKanbanBoard } from "./kanban-swarm";
 import { triggerExcelExport } from "./navigation";
 import { renderBlueprintStudio } from "./blueprint-studio";
-import { renderApplyShare } from "./apply-share-panel";
-import { renderJobApplicationQuestions } from "./application-questions-editor";
 import { renderInterviewAnalysisStage } from "./interview-analysis";
 import { renderTestInterviewPane } from "./test-interview";
 import {
@@ -49,6 +47,8 @@ import {
 	apiSendInterviewInvite,
 	apiListInterviewInvites,
 	apiBulkInterviewInvites,
+	apiDeleteApplicant,
+	apiRestoreApplicant,
 } from "./api";
 
 function renderJobDetailPanes(job) {
@@ -74,19 +74,14 @@ function renderJobDetailPanes(job) {
 		},
 	);
 
-	// Overview: per-job public apply link / QR / embed + custom-questions editor
-	// (each build→bind inside).
-	renderApplyShare(job);
-	renderJobApplicationQuestions(job);
-
 	// 1. Resume pane — criteria config + candidates table
 	const resumeList = document.getElementById("list-stage-resume");
 	if (resumeList) {
-		// Show every active candidate on the Resume Analysis page, not only Resume-stage
-		// ones: schedule-mode and advanced candidates (Screening/Functional/Hired) stay
-		// visible here with their report intact — only Rejected drops off. The per-row
-		// Advance button is gated separately (rendered only when status === 'Resume').
-		const resumeCands = jobCandidates.filter((c) => c.status !== "Rejected");
+		// Keep the full pipeline history visible here. The table's All / Advanced /
+		// Rejected selector decides which rows to display; removing rejected rows at
+		// this point made the Rejected view permanently empty. The per-row Advance
+		// button is gated separately (rendered only when status === 'Resume').
+		const resumeCands = jobCandidates;
 		const criteria = job.resumeCriteria || {
 			mustHave: [],
 			redFlags: [],
@@ -365,7 +360,18 @@ function renderJobDetailPanes(job) {
                     <td>${hasReport ? `<a href="#" class="report-link" data-cand-id="${c.id}">Report <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>` : "—"}</td>
                     <td><span class="source-badge">${sourceIcon} ${c.source || "—"}</span></td>
                     <td>${c.screeningStatus ? escapeHTML(c.screeningStatus) : "—"}</td>
-                    <td><button class="${actionClass}" data-candidate-id="${c.id}">${c.interviewStatus === "Slot Missed" ? '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> ' : '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg> '}${actionLabel}</button></td>
+                    <td>
+                      <button class="${actionClass}" data-candidate-id="${c.id}">${c.interviewStatus === "Slot Missed" ? '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> ' : '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg> '}${actionLabel}</button>
+                      ${c.decision === 'rejected'
+                        ? `<span class="ra-stage-tag rejected">Rejected</span>
+                           <button class="btn-stage-unreject" data-candidate-id="${c.id}" title="Restore to pipeline">Restore</button>`
+                        : c.decision === 'on_hold'
+                          ? `<span class="ra-stage-tag on-hold">On Hold</span>
+                             <button class="btn-stage-unhold" data-candidate-id="${c.id}" title="Resume reviewing this candidate">Resume review</button>`
+                          : `<button class="btn-stage-hold" data-candidate-id="${c.id}">Hold</button>
+                             <button class="btn-stage-reject" data-candidate-id="${c.id}">Reject</button>`}
+                      <button class="btn-stage-delete" data-candidate-id="${c.id}" title="Delete candidate">Delete</button>
+                    </td>
                   </tr>
                 `;
 								})
@@ -522,12 +528,16 @@ function renderJobDetailPanes(job) {
                     <td>${screeningBadge(c.recruiterScreening)}</td>
                     <td>${c.interviewStatus ? escapeHTML(c.interviewStatus) : "—"}</td>
                     <td>
-                      <select class="action-select-status" data-cand-id="${c.id}">
-                        <option value="">Select Sta...</option>
-                        <option value="advance">Advance</option>
-                        <option value="reject">Reject</option>
-                        <option value="hold">Hold</option>
-                      </select>
+                      ${c.decision === 'rejected'
+                        ? `<span class="ra-stage-tag rejected">Rejected</span>
+                           <button class="btn-stage-unreject" data-candidate-id="${c.id}" title="Restore to pipeline">Restore</button>`
+                        : c.decision === 'on_hold'
+                          ? `<span class="ra-stage-tag on-hold">On Hold</span>
+                             <button class="btn-stage-unhold" data-candidate-id="${c.id}" title="Resume reviewing this candidate">Resume review</button>`
+                          : `<button class="btn-stage-advance" data-candidate-id="${c.id}" data-next-stage="Hired">Advance</button>
+                             <button class="btn-stage-hold" data-candidate-id="${c.id}">Hold</button>
+                             <button class="btn-stage-reject" data-candidate-id="${c.id}">Reject</button>`}
+                      <button class="btn-stage-delete" data-candidate-id="${c.id}" title="Delete candidate">Delete</button>
                     </td>
                   </tr>
                 `;
@@ -603,6 +613,13 @@ function renderJobDetailPanes(job) {
 			});
 		});
 
+		pane.querySelectorAll(".btn-stage-delete").forEach((btn) => {
+			btn.addEventListener("click", () => {
+				const candId = btn.getAttribute("data-candidate-id");
+				deleteCandidate(candId);
+			});
+		});
+
 		pane.querySelectorAll(".btn-stage-advance").forEach((btn) => {
 			btn.addEventListener("click", () => {
 				const candId = btn.getAttribute("data-candidate-id");
@@ -620,6 +637,9 @@ function renderJobDetailPanes(job) {
 		});
 		pane.querySelectorAll(".btn-stage-unhold").forEach((btn) => {
 			btn.addEventListener("click", () => setCandidateHold(btn.getAttribute("data-candidate-id"), false));
+		});
+		pane.querySelectorAll(".btn-stage-unreject").forEach((btn) => {
+			btn.addEventListener("click", () => restoreCandidateFromRejection(btn.getAttribute("data-candidate-id")));
 		});
 
 		pane.querySelectorAll(".btn-player-play").forEach((btn) => {
@@ -760,11 +780,13 @@ function renderJobDetailPanes(job) {
             <button class="bulk-dd-item" data-action="reanalyse"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Reanalyse</button>
             <button class="bulk-dd-item" data-action="advance"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg> Advance</button>
             <button class="bulk-dd-item" data-action="reject"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> Reject</button>
+            <button class="bulk-dd-item" data-action="restore"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> Restore</button>
             <button class="bulk-dd-item" data-action="export"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Export</button>`;
 				} else {
 					dd.innerHTML = `
             <button class="bulk-dd-item" data-action="advance"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg> Advance</button>
             <button class="bulk-dd-item" data-action="reject"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> Reject</button>
+            <button class="bulk-dd-item" data-action="restore"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> Restore</button>
             <button class="bulk-dd-item" data-action="schedule"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg> Schedule</button>
             <button class="bulk-dd-item" data-action="reschedule"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> Reschedule</button>
             <button class="bulk-dd-item" data-action="export"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Export</button>`;
@@ -898,6 +920,10 @@ function renderJobDetailPanes(job) {
 						saveStateToLocalStorage();
 						refreshAfterStageChange();
 						showPremiumToast(`Rejected ${ids.length} candidate(s).`, "success");
+					} else if (action === "restore") {
+						ids.forEach((cid) => restoreCandidateFromRejection(cid));
+						dd.remove();
+						showPremiumToast(`Restored ${ids.length} candidate(s).`, "success");
 					} else if (action === "schedule" || action === "reschedule") {
 						openScheduleModal(
 							{ mode: action, name: label, count: ids.length },
@@ -1216,22 +1242,9 @@ function renderJobDetailPanes(job) {
 			});
 		});
 
-		pane.querySelectorAll(".action-select-status").forEach((sel) => {
-			sel.addEventListener("change", () => {
-				soundEngine.playClick();
-				const candId = sel.getAttribute("data-cand-id");
-				const newVal = sel.value;
-				if (candId && newVal) {
-					const cand = AppState.candidates.find((c) => c.id === candId);
-					if (cand) {
-						if (newVal === "advance") updateCandidateStatus(candId, "Hired");
-						else if (newVal === "reject")
-							updateCandidateStatus(candId, "Rejected");
-						else setCandidateHold(candId, true);
-					}
-				}
-			});
-		});
+		// Functional-stage candidate actions now use the same button row as every
+		// other stage table (see the .btn-stage-* delegation above) instead of a
+		// <select> — replaces the old .action-select-status change-listener.
 
 		pane.querySelectorAll(".stage-table-container").forEach((container) => {
 			const tbody = container.querySelector("tbody");
@@ -1299,26 +1312,16 @@ function renderJobDetailPanes(job) {
 	}
 	// Wire the Add-Applicants upload panels rendered into the Screening/Functional
 	// stage lists. buildAddApplicantsPanel injects the markup; without these bind
-	// calls the button, dropzone, file picker, and Import are inert. Source values:
-	// 'scheduled' → Recruiter Screening, 'functional' → Functional Interview.
+	// calls the button, dropzone, file picker, and Import are inert. A resume upload
+	// always enters Resume Analysis; only an explicit recruiter action advances it.
 	if (document.getElementById("list-stage-resume")) {
-		bindAddApplicantsPanel(job, "resume", null, "Resume Analysis");
+		bindAddApplicantsPanel(job, "resume");
 	}
 	if (document.getElementById("list-stage-screening")) {
-		bindAddApplicantsPanel(
-			job,
-			"screening",
-			"scheduled",
-			"Recruiter Screening",
-		);
+		bindAddApplicantsPanel(job, "screening");
 	}
 	if (document.getElementById("list-stage-functional")) {
-		bindAddApplicantsPanel(
-			job,
-			"functional",
-			"functional",
-			"Functional Interview",
-		);
+		bindAddApplicantsPanel(job, "functional");
 	}
 
 	renderBlueprintStudio(job);
@@ -1520,7 +1523,115 @@ function updateCandidateStatus(candId, newStatus) {
 	refreshAfterStageChange();
 }
 
-export { renderJobDetailPanes, updateCandidateStatus };
+// Soft delete — reversible on the backend (see apiDeleteApplicant/apiRestoreApplicant),
+// so this mirrors the job-delete pattern in mount.ts: optimistic removal + an Undo
+// toast, rather than a confirm dialog. Nothing is scrubbed server-side; the row is
+// just hidden until restored.
+function deleteCandidate(candId) {
+	const idx = AppState.candidates.findIndex((c) => c.id === candId);
+	if (idx === -1) return;
+	const candidate = AppState.candidates[idx];
+	const name = candidate.name;
+	const isBackend = candidate._backend && getDataSource() === "api";
+	const backendId = candidate.backendId || candId;
+
+	AppState.candidates.splice(idx, 1);
+	saveStateToLocalStorage();
+	refreshAfterStageChange();
+
+	const reinsert = () => {
+		AppState.candidates.splice(
+			Math.min(idx, AppState.candidates.length),
+			0,
+			candidate,
+		);
+		saveStateToLocalStorage();
+		refreshAfterStageChange();
+	};
+
+	if (isBackend) {
+		apiDeleteApplicant(backendId)
+			.then(() => {
+				showPremiumToast(`${name} deleted.`, "success", {
+					label: "Undo",
+					onClick: () => {
+						apiRestoreApplicant(backendId)
+							.then(() => {
+								reinsert();
+								showPremiumToast(`${name} restored.`, "success");
+							})
+							.catch((err) => {
+								showPremiumToast(
+									`Could not restore ${name}: ${(err && err.message) || "backend error"}`,
+									"error",
+								);
+							});
+					},
+				});
+			})
+			.catch((err) => {
+				reinsert();
+				showPremiumToast(
+					`Could not delete ${name}: ${(err && err.message) || "backend error"}`,
+					"error",
+				);
+			});
+	} else {
+		showPremiumToast(`${name} deleted.`, "success", {
+			label: "Undo",
+			onClick: reinsert,
+		});
+	}
+}
+
+// Un-reject. screening_status/functional_status are never cleared on reject
+// (see _build_job_out/_build_funnel in jobs.py — they just skip rejected/hired
+// candidates when bucketing into stages), so restoring is just: clear
+// `decision` and recompute the visible stage from those preserved fields.
+// The raw booleans aren't kept on the client Candidate (see
+// mapApplicantOutToCandidate in api.ts, which derives `status` once at fetch
+// time), so use their already-mapped label fields as a stand-in — non-null
+// `interviewStatus` means functional_status was set, same for `screeningStatus`
+// — same precedence api.ts itself uses. The backend response (below) then
+// overwrites this with the authoritative value once it arrives.
+function restoreCandidateFromRejection(candId) {
+	const candidate = AppState.candidates.find((c) => c.id === candId);
+	if (!candidate) return;
+
+	const status = candidate.interviewStatus
+		? "Functional"
+		: candidate.screeningStatus
+			? "Screening"
+			: "Resume";
+	candidate.decision = null;
+	candidate.status = status;
+	saveStateToLocalStorage();
+	showPremiumToast(`${candidate.name} restored to the pipeline.`, "success");
+
+	if (candidate._backend && getDataSource() === "api") {
+		apiUpdateApplicant(candidate.backendId || candId, { decision: null })
+			.then((updated) => {
+				if (updated) Object.assign(candidate, updated);
+				refreshAfterStageChange();
+			})
+			.catch((err) => {
+				showPremiumToast(
+					`Could not sync restore: ${(err && err.message) || "backend error"}`,
+					"error",
+				);
+			});
+	}
+
+	refreshAfterStageChange();
+}
+
+export {
+	renderJobDetailPanes,
+	updateCandidateStatus,
+	setCandidateHold,
+	deleteCandidate,
+	restoreCandidateFromRejection,
+};
 
 // ── Add Applicants panel: shared HTML builder ────────────────────────────────
 // Builds an inline upload panel header + collapsible dropzone for any stage.
@@ -1544,7 +1655,7 @@ function buildAddApplicantsPanel(paneKey, count) {
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
           <div>
             <h4 style="margin:0;font-size:0.9rem;font-weight:700;color:var(--color-text-primary);font-family:var(--font-display);">Upload Applicant Resumes</h4>
-            <p style="margin:4px 0 0;font-size:0.75rem;color:var(--color-text-muted);">Upload PDF, DOCX, or ZIP files — candidates land directly in ${label}</p>
+			<p style="margin:4px 0 0;font-size:0.75rem;color:var(--color-text-muted);">Upload PDF, DOCX, or ZIP files — candidates enter Resume Analysis for review</p>
           </div>
           <button id="btn-add-panel-close-${paneKey}" style="background:none;border:none;color:var(--color-text-faint);cursor:pointer;padding:4px;border-radius:6px;display:flex;align-items:center;">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -1560,7 +1671,7 @@ function buildAddApplicantsPanel(paneKey, count) {
           <div style="font-size:0.78rem;color:var(--color-text-muted);margin-bottom:8px;"><span id="files-count-${paneKey}">0</span> file(s) selected</div>
           <div id="files-list-${paneKey}" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;"></div>
           <div style="display:flex;gap:10px;margin-top:14px;">
-            <button id="btn-import-${paneKey}" disabled style="flex:1;padding:9px 16px;border-radius:9px;border:1px solid rgba(var(--color-gold-rgb),0.3);background:rgba(var(--color-gold-rgb),0.1);color:var(--color-gold);font-size:0.82rem;font-weight:600;cursor:pointer;font-family:var(--font-body);transition:all 0.2s ease;">Import to ${label}</button>
+			<button id="btn-import-${paneKey}" disabled style="flex:1;padding:9px 16px;border-radius:9px;border:1px solid rgba(var(--color-gold-rgb),0.3);background:rgba(var(--color-gold-rgb),0.1);color:var(--color-gold);font-size:0.82rem;font-weight:600;cursor:pointer;font-family:var(--font-body);transition:all 0.2s ease;">Import to Resume Analysis</button>
             <button id="btn-cancel-${paneKey}" style="padding:9px 16px;border-radius:9px;border:1px solid var(--glass-border);background:rgba(255,255,255,0.04);color:var(--color-text-muted);font-size:0.82rem;cursor:pointer;font-family:var(--font-body);transition:all 0.2s ease;">Cancel</button>
           </div>
         </div>
@@ -1570,9 +1681,7 @@ function buildAddApplicantsPanel(paneKey, count) {
 }
 
 // ── Add Applicants panel: event wiring ──────────────────────────────────────
-// `source` is the ApplicantSource enum value to send: 'scheduled'→Screening,
-// 'functional'→Functional. `targetStage` is the display name for toasts.
-function bindAddApplicantsPanel(job, paneKey, source, targetStage) {
+function bindAddApplicantsPanel(job, paneKey) {
 	let uploadedFiles = [];
 	let isImporting = false;
 
@@ -1662,7 +1771,7 @@ function bindAddApplicantsPanel(job, paneKey, source, targetStage) {
 			const newCands = await apiUploadResumes(
 				job.id,
 				uploadedFiles.map((f) => f.file),
-				source,
+				null,
 			);
 			// Merge new candidates into AppState without losing others
 			const others = (AppState.candidates || []).filter(
@@ -1672,7 +1781,14 @@ function bindAddApplicantsPanel(job, paneKey, source, targetStage) {
 				(c) => c.jobId === job.id,
 			);
 			const existingIds = new Set(existing.map((c) => c.id));
-			const merged = [...existing];
+			const returnedById = new Map(newCands.map((c) => [c.id, c]));
+			const merged = existing.map((candidate) => {
+				const refreshed = returnedById.get(candidate.id);
+				if (!refreshed) return candidate;
+				refreshed.jobApplied = job.roleName;
+				refreshed.jobId = job.id;
+				return refreshed;
+			});
 			newCands.forEach((nc) => {
 				nc.jobApplied = job.roleName;
 				nc.jobId = job.id;
@@ -1680,8 +1796,14 @@ function bindAddApplicantsPanel(job, paneKey, source, targetStage) {
 			});
 			AppState.candidates = [...others, ...merged];
 			soundEngine.playChime([392.0, 523.25, 659.25], 0.2, 0.08);
+			const addedCount = newCands.filter((candidate) => !existingIds.has(candidate.id)).length;
+			const updatedCount = newCands.length - addedCount;
+			const summary = [
+				addedCount ? `${addedCount} new` : "",
+				updatedCount ? `${updatedCount} existing resume${updatedCount === 1 ? "" : "s"} updated` : "",
+			].filter(Boolean).join(", ");
 			showPremiumToast(
-				`Imported ${newCands.length} candidate(s) into ${targetStage}.`,
+				`Resume import complete: ${summary || "no candidates changed"}.`,
 				"success",
 			);
 			uploadedFiles = [];
@@ -1694,7 +1816,7 @@ function bindAddApplicantsPanel(job, paneKey, source, targetStage) {
 			isImporting = false;
 			if (importBtn) {
 				importBtn.disabled = false;
-				importBtn.textContent = `Import to ${targetStage}`;
+				importBtn.textContent = "Import to Resume Analysis";
 			}
 		}
 	});

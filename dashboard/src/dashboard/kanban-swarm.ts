@@ -5,6 +5,7 @@ import { saveStateToLocalStorage } from './ai-api';
 import { soundEngine } from './sound';
 import { AppState } from './state';
 import { getDataSource, apiMoveApplicantStage } from './api';
+import { updateCandidateStatus, setCandidateHold, deleteCandidate, restoreCandidateFromRejection } from './job-detail-panes';
 
 // ==========================================
 // CREATIVE FEATURES ADDITIONAL LOGIC
@@ -75,14 +76,41 @@ function renderKanbanBoard() {
     });
     
     const isHired = stage === 'Hired';
-    
+
+    // Rejected/on-hold candidates never reach this loop's `cols[stage]` lookup
+    // (there's no "Rejected" column — see the `if (!cols[stage]) return;` guard
+    // above), so a card only ever needs Hold/Reject (active) or the matching
+    // undo action (rejected/on-hold), never both at once.
+    const kebabItems = c.decision === 'rejected'
+      ? `<button class="kebab-item" data-kanban-action="unreject" data-candidate-id="${c.id}">Restore to Pipeline</button>
+         <div class="kebab-divider"></div>
+         <button class="kebab-item kebab-item-danger" data-kanban-action="delete" data-candidate-id="${c.id}">Delete</button>`
+      : c.decision === 'on_hold'
+        ? `<button class="kebab-item" data-kanban-action="unhold" data-candidate-id="${c.id}">Resume review</button>
+           <div class="kebab-divider"></div>
+           <button class="kebab-item kebab-item-danger" data-kanban-action="delete" data-candidate-id="${c.id}">Delete</button>`
+        : isHired
+          ? `<button class="kebab-item kebab-item-danger" data-kanban-action="delete" data-candidate-id="${c.id}">Delete</button>`
+          : `<button class="kebab-item" data-kanban-action="hold" data-candidate-id="${c.id}">Hold</button>
+             <button class="kebab-item" data-kanban-action="reject" data-candidate-id="${c.id}">Reject</button>
+             <div class="kebab-divider"></div>
+             <button class="kebab-item kebab-item-danger" data-kanban-action="delete" data-candidate-id="${c.id}">Delete</button>`;
+
     card.innerHTML = `
-      <div class="kanban-card-title">${escapeHTML(c.name)}</div>
+      <div class="kanban-card-top">
+        <div class="kanban-card-title">${escapeHTML(c.name)}</div>
+        <div class="kanban-kebab-wrap">
+          <button class="btn-kanban-kebab" data-candidate-id="${c.id}" title="Candidate actions" aria-label="Candidate actions">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          </button>
+          <div class="job-kebab-dropdown kanban-kebab-dropdown">${kebabItems}</div>
+        </div>
+      </div>
       <div class="kanban-card-job">${escapeHTML(c.jobApplied)}</div>
       <div class="kanban-card-footer">
         <span class="kanban-card-score">${c.score}</span>
-        ${isHired 
-          ? `<span style="font-size: 0.72rem; color: var(--color-success); font-weight: 600;">✓ Hired</span>` 
+        ${isHired
+          ? `<span style="font-size: 0.72rem; color: var(--color-success); font-weight: 600;">✓ Hired</span>`
           : `<button class="btn-advance-kanban" data-candidate-id="${c.id}">Advance →</button>`
         }
       </div>
@@ -105,6 +133,52 @@ function renderKanbanBoard() {
       advanceCandidate(candId);
     });
   });
+
+  container.querySelectorAll('.btn-kanban-kebab').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const dropdown = btn.nextElementSibling;
+      const wasOpen = dropdown.classList.contains('open');
+      closeAllKanbanKebabs();
+      if (!wasOpen) {
+        dropdown.classList.add('open');
+        btn.closest('.kanban-card')?.classList.add('kebab-open');
+      }
+    });
+  });
+
+  container.querySelectorAll('.kanban-kebab-dropdown').forEach(dropdown => {
+    dropdown.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = e.target.closest('[data-kanban-action]');
+      if (!item) return;
+      const candId = item.getAttribute('data-candidate-id');
+      const action = item.getAttribute('data-kanban-action');
+      closeAllKanbanKebabs();
+      if (action === 'hold') setCandidateHold(candId, true);
+      else if (action === 'unhold') setCandidateHold(candId, false);
+      else if (action === 'reject') updateCandidateStatus(candId, 'Rejected');
+      else if (action === 'unreject') restoreCandidateFromRejection(candId);
+      else if (action === 'delete') deleteCandidate(candId);
+    });
+  });
+
+  bindKanbanKebabOutsideClick();
+}
+
+function closeAllKanbanKebabs() {
+  document.querySelectorAll('.kanban-kebab-dropdown.open').forEach(d => d.classList.remove('open'));
+  document.querySelectorAll('.kanban-card.kebab-open').forEach(c => c.classList.remove('kebab-open'));
+}
+
+// Same signal-scoped one-time-bind pattern as org-switcher.ts's outside-click
+// listener — survives remounts (renderKanbanBoard runs on every re-render)
+// without stacking a new document listener each time.
+let kanbanKebabDocListenerSignal = null;
+function bindKanbanKebabOutsideClick() {
+  if (kanbanKebabDocListenerSignal === signal) return;
+  kanbanKebabDocListenerSignal = signal;
+  document.addEventListener('click', closeAllKanbanKebabs);
 }
 
 async function syncStageToBackend(candidate, newStatus) {
