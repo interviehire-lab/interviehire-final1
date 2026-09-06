@@ -15,5 +15,7 @@ export async function seedScenario(url: string, scenario: { applicationId: strin
 }
 
 export async function resetInterviewDb(_url: string): Promise<void> {
-  throw new Error("Interview schema is not part of the foundation slice yet");
+  const sql = postgres(_url, { max: 1 });
+  try { await sql`TRUNCATE v2_interview_turns, v2_interview_outbox, v2_interview_sessions CASCADE`; }
+  finally { await sql.end(); }
 }

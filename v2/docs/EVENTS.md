@@ -15,3 +15,9 @@ safe replay. This is at-least-once publication, not an exactly-once claim.
 application reference, run ID, revision, tenant, and correlation identifiers; resume text
 stays in PostgreSQL and is loaded by the authorised worker. The run and candidate-facing
 async status persist `queued`, `running`, `ready`, or `failed` independently of Redis.
+
+`interview.completed.v1` is implemented at the Interview boundary. Completion status,
+completion transcript marker, and outbox record commit in one PostgreSQL transaction.
+Its payload contains only `interviewSessionId`, `applicationId`, and `interviewStage`;
+transcript content remains in Interview-owned storage. Duplicate completion calls do not
+create additional events.

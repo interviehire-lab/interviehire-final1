@@ -14,8 +14,10 @@
 | Interview bridge | Explicit application/session reference | legacy `backend/app/utils/ai_sync.py` relies on equal IDs | `v2_application_interview_refs` | MIGRATED | unequal-ID PostgreSQL test |
 | Scheduling | Core orchestration and atomic mapping/stage history | `backend/app/routers/jobs.py`, `backend/app/routers/invites.py` | `POST /v2/applications/:id/schedule` | MIGRATED | domain/API/PostgreSQL tests with unequal session ID |
 | Scheduling | Interview-owned session provisioning | legacy `backend/app/utils/ai_sync.py` and Engine session tables | `POST /internal/v2/sessions` + Core HTTP adapter | MIGRATED | domain/API/PostgreSQL/adapter tests |
-| Voice | LiveKit/Deepgram/Silero/Cartesia runtime | `interview-engine/apps/voice-agent` | preserved legacy runtime | PRESERVED | Contract suite pending |
-| Voice | Turn idempotency | `voice-agent/src/engine-client.ts` idempotency key | Interview API compatibility | PENDING MIGRATION | Characterisation located |
+| Voice | LiveKit/Deepgram/Silero/Cartesia runtime | `interview-engine/apps/voice-agent` | preserved legacy runtime using unchanged internal paths | PRESERVED | V2 API contract test; real provider smoke remains |
+| Voice | Start/timing/access policy | `interview-policy.ts`, public and internal start routes | V2 synchronous Interview service | MIGRATED | domain/API tests for 5/25-minute timing and access gates |
+| Voice | Turn idempotency | `voice-agent/src/engine-client.ts` idempotency key | V2 synchronous Interview service | MIGRATED | unit/API/PostgreSQL restart replay tests |
+| Voice | Durable completion | legacy complete routes and evaluation poller | Interview transaction + outbox | MIGRATED | PostgreSQL state/event/replay test |
 | Privacy | DSAR/export/retention | `backend/tests/test_data_rights.py`, `test_retention.py` | compatibility gateway | PENDING MIGRATION | Proxy smoke pending |
 | Talent | Search/dedupe/ranking/compliance | `backend/tests/test_talent_finder.py` | compatibility gateway | PENDING MIGRATION | Proxy smoke pending |
 | Evaluation | Structured/Aviral evaluator | `interview-engine/apps/api/src/aviral-eval` | `ai.interview` worker | PENDING MIGRATION | Legacy tests located |

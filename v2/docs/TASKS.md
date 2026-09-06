@@ -51,14 +51,21 @@ is tenant/idempotency scoped, and can be called through the Core adapter.
 Completed with fixed 5/25-minute stage caps, an Interview-owned PostgreSQL table,
 service-secret Elysia endpoint, and reference-only Core HTTP adapter.
 
-## DOING — Voice compatibility contracts
+## DONE — Voice compatibility contracts
 
 RED: start enforces timing/access gates and returns the legacy LiveKit timing shape;
 turns are synchronous and idempotent; completion is durable and emits one outbox event.
 
+Completed through domain/API/PostgreSQL tests. The preserved Node LiveKit agent can use
+the same three internal paths and payloads; no live turn enters BullMQ.
+
+## DOING — Completion and dual evaluation workers
+
+RED: the completion event fans out to holistic/report and structured/Aviral evaluation;
+both retry safely, persist independently, merge deterministically, and survive restart.
+
 ## TODO
 
-- Voice compatibility contracts
 - Completion and dual evaluation workers
 - Recruiter Web, Deep Analysis, deterministic demo seed, and Playwright golden path
 - Notification/automation slices and compatibility proxies
