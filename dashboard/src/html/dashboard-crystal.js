@@ -99,10 +99,10 @@ export const html = `
               </div>
               <ul class="sub-nav">
                 <li data-subtab="platform-overview">Overview</li>
-                <li data-subtab="platform-organisations">Organisations</li>
-                <li data-subtab="platform-users">Users</li>
-                <li data-subtab="platform-jobs">Jobs</li>
-                <li data-subtab="platform-interviews">Interviews</li>
+                <li data-subtab="platform-organisations">All Organisations</li>
+                <li data-subtab="platform-users">All Users</li>
+                <li data-subtab="platform-jobs">All Jobs</li>
+                <li data-subtab="platform-interviews">All Interviews</li>
                 <li data-subtab="platform-audit">Audit Log</li>
               </ul>
             </li>
