@@ -27,6 +27,12 @@ test("LiveKit compatibility routes retain synchronous start, turn, and complete 
   expect(await complete.json()).toMatchObject({ sessionId: "session_001", completionReason: "candidate_ended" });
 });
 
+test("evaluation read is service-secret and tenant scoped", async () => {
+  const app = createInterviewApp({ provisioning, internalSecret: "shared-secret", evaluationQueries: { find: async (tenantId, sessionId) => tenantId === "org_001" ? { sessionId, tenantId, applicationId: "app_001", interviewStage: "recruiter_screening", status: "evaluated", evaluation: { holistic: { score: 82 }, structured: { score: 79 } } } : undefined } });
+  const response = await app.handle(new Request("http://localhost/internal/v2/sessions/session_001/evaluation", { headers: { "x-internal-secret": "shared-secret", "x-tenant-id": "org_001", "x-correlation-id": "corr_eval" } }));
+  expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ sessionId: "session_001", applicationId: "app_001", status: "evaluated", correlationId: "corr_eval" });
+});
+
 test("internal provision route returns a distinct session reference", async () => {
   const app = createInterviewApp({ provisioning, internalSecret: "shared-secret" });
   const response = await app.handle(new Request("http://localhost/internal/v2/sessions", { method: "POST", headers: { "content-type": "application/json", "x-internal-secret": "shared-secret", "x-tenant-id": "org_001", "x-correlation-id": "corr", "idempotency-key": "key" }, body: JSON.stringify({ applicationId: "app_001", interviewStage: "recruiter_screening", scheduledAt: "2026-09-08T09:00:00.000Z", timeZone: "UTC" }) }));

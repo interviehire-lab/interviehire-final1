@@ -1,5 +1,5 @@
 {
   "name": "@interviehire/db-interview", "private": true, "type": "module",
-  "dependencies": { "@interviehire/domain-interview": "workspace:*", "drizzle-orm": "^0.44.5", "postgres": "^3.4.7" },
+  "dependencies": { "@interviehire/domain-interview": "workspace:*", "@interviehire/queue": "workspace:*", "@interviehire/worker": "workspace:*", "drizzle-orm": "^0.44.5", "postgres": "^3.4.7" },
   "exports": "./src/index.ts"
 }

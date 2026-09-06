@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { count, eq } from "drizzle-orm";
 import { createSessionProvisioningService } from "@interviehire/domain-interview";
-import { connectInterviewDatabase, DrizzleSessionRepository, interviewOutbox, interviewSessions, interviewTurns, migrateInterviewDatabase } from "@interviehire/db-interview";
+import { connectInterviewDatabase, DrizzleSessionRepository, interviewEvaluations, interviewOutbox, interviewSessions, interviewTurns, migrateInterviewDatabase } from "@interviehire/db-interview";
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error("TEST_DATABASE_URL is required");
 const connection = connectInterviewDatabase(url);
 
-beforeAll(async () => { await migrateInterviewDatabase(url); await connection.db.delete(interviewOutbox); await connection.db.delete(interviewTurns); await connection.db.delete(interviewSessions); });
+beforeAll(async () => { await migrateInterviewDatabase(url); await connection.db.delete(interviewEvaluations); await connection.db.delete(interviewOutbox); await connection.db.delete(interviewTurns); await connection.db.delete(interviewSessions); });
 afterAll(() => connection.client.end());
 
 test("session provisioning is durable, tenant-scoped, and idempotent", async () => {

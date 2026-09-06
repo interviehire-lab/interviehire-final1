@@ -2,7 +2,7 @@ import postgres from "postgres";
 export async function migrateInterviewDatabase(url: string): Promise<void> {
   const sql = postgres(url, { max: 1 });
   try {
-    for (const name of ["0001_interview_sessions.sql", "0002_voice_contract.sql"]) {
+    for (const name of ["0001_interview_sessions.sql", "0002_voice_contract.sql", "0003_evaluations.sql"]) {
       await sql.unsafe(await Bun.file(new URL(`../migrations/${name}`, import.meta.url)).text());
     }
   }

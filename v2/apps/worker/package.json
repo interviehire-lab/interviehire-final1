@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@interviehire/contracts": "workspace:*",
+    "@interviehire/domain-interview": "workspace:*",
     "bullmq": "^5.58.5",
     "effect": "^3.17.14"
   },

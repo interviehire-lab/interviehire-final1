@@ -21,3 +21,9 @@ completion transcript marker, and outbox record commit in one PostgreSQL transac
 Its payload contains only `interviewSessionId`, `applicationId`, and `interviewStage`;
 transcript content remains in Interview-owned storage. Duplicate completion calls do not
 create additional events.
+
+The Interview outbox dispatcher targets `ai.interview`. Its processor runs the
+`holistic` and `structured` evaluators as separately claimed durable records. A retry
+skips any evaluator already marked ready, so a transient failure in one provider does
+not repeat or erase the other's result. The session becomes `evaluated` only after both
+records are ready and their results have been merged.

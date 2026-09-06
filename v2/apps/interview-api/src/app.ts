@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { Effect } from "effect";
-import type { CompletionReason, SessionProvisioningService, VoiceService } from "@interviehire/domain-interview";
-export interface InterviewAppDependencies { readonly provisioning: SessionProvisioningService; readonly voice?: VoiceService; readonly internalSecret: string }
+import type { CompletionReason, InterviewEvaluationQueries, SessionProvisioningService, VoiceService } from "@interviehire/domain-interview";
+export interface InterviewAppDependencies { readonly provisioning: SessionProvisioningService; readonly voice?: VoiceService; readonly evaluationQueries?: InterviewEvaluationQueries; readonly internalSecret: string }
 export function createInterviewApp(dependencies: InterviewAppDependencies) {
   const authorized = (headers: Record<string, string | undefined>) => headers["x-internal-secret"] === dependencies.internalSecret;
   const unavailable = () => ({ ok: false as const, code: "SESSION_NOT_FOUND" as const, message: "Interview session not found." });
@@ -13,6 +13,12 @@ export function createInterviewApp(dependencies: InterviewAppDependencies) {
       set.status = result.ok ? 201 : 400;
       return { ...result, correlationId: headers["x-correlation-id"] };
     }, { body: t.Object({ applicationId: t.String({ minLength: 1 }), interviewStage: t.Union([t.Literal("recruiter_screening"), t.Literal("functional_interview")]), scheduledAt: t.String({ format: "date-time" }), timeZone: t.String({ minLength: 1 }) }), headers: t.Object({ "x-tenant-id": t.String({ minLength: 1 }), "x-correlation-id": t.String({ minLength: 1 }), "idempotency-key": t.String({ minLength: 1 }), "x-internal-secret": t.Optional(t.String()) }, { additionalProperties: true }) })
+    .get("/internal/v2/sessions/:id/evaluation", async ({ headers, params, set }) => {
+      if (!authorized(headers)) { set.status = 401; return { error: "unauthorized", code: "BAD_INTERNAL_SECRET" }; }
+      const result = await dependencies.evaluationQueries?.find(headers["x-tenant-id"], params.id);
+      if (!result) { set.status = 404; return { error: "Interview session not found.", code: "SESSION_NOT_FOUND" }; }
+      return { ...result, correlationId: headers["x-correlation-id"] };
+    }, { params: t.Object({ id: t.String({ minLength: 1 }) }), headers: t.Object({ "x-internal-secret": t.Optional(t.String()), "x-tenant-id": t.String({ minLength: 1 }), "x-correlation-id": t.String({ minLength: 1 }) }, { additionalProperties: true }) })
     .post("/internal/livekit/sessions/:id/start", async ({ body, headers, params, set }) => {
       if (!authorized(headers)) { set.status = 401; return { error: "unauthorized", code: "BAD_INTERNAL_SECRET" }; }
       const result = voice ? await voice.start(params.id, body) : unavailable();

@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-07** — **Added asynchronous dual interview evaluation and `GET /internal/v2/sessions/{id}/evaluation`.** `interview.completed.v1` is dispatched to `ai.interview`; the holistic/report and structured/Aviral provider ports persist separate run status/results, retry only incomplete work, and merge into the durable session report after both are ready. A resilient provider wrapper retains deterministic fallback behavior. The internal read is service-secret protected and tenant scoped.
 - **2026-09-07** — **Added V2-compatible synchronous LiveKit director routes: `POST /internal/livekit/sessions/{id}/start`, `/turn`, and `/complete`.** They preserve the existing Node voice agent's paths and response fields. Start applies invite, enablement, reattempt, CV, 10-minute early-entry, and 5-minute late-grace policy and issues the authoritative deadline. Turn processing stays synchronous and persists the candidate/AI pair under the voice agent's idempotency key. Completion atomically persists `completed` state and `interview.completed.v1` in the Interview outbox.
 - **2026-09-07** — **Added the V2 Interview API health and internal session-provisioning routes: `GET /health` and `POST /internal/v2/sessions`.** Provisioning is service-secret protected, tenant scoped, and idempotent. It creates an Interview-owned session ID distinct from the Core application ID and applies fixed stage limits: 300 seconds for recruiter screening and 1500 seconds for functional interviews. Core's scheduling port now forwards its idempotency key to this route.
 - **2026-09-07** — **Added the first IntervieHire V2 Core API surface under `v2/apps/core-api` (Bun + Elysia + Effect v3): `GET /health`, `GET /v2/jobs/{id}/board`, `GET /v2/applications/{id}`, `POST /v2/applications/{id}/transitions`, `POST /v2/applications/{id}/resume-analysis`, `GET /v2/async-jobs/{id}`, and `POST /v2/applications/{id}/schedule`.** V2 recruiter routes use explicit `x-tenant-id` and `x-correlation-id` headers; commands additionally require `idempotency-key`, and recruiter-authored transition/schedule commands require `x-actor-id`. Pipeline stages are strictly `resume_analysis | recruiter_screening | functional_interview`; hiring decisions are separate. Resume analysis responds 202 with a durable job reference and uses a source-domain transactional outbox. Scheduling delegates session creation through an Interview service port, then stores an explicit application/session mapping; IDs need not be equal. Full schemas and status codes are documented in the V2 section below.
@@ -295,6 +296,15 @@ director again. The route never publishes a live turn to BullMQ.
 Unknown reasons fall back to `candidate_ended`, matching legacy behavior. The first call
 atomically commits session completion, its transcript marker, and one reference-only
 `interview.completed.v1` outbox record; later calls replay.
+
+### GET /internal/v2/sessions/{id}/evaluation
+
+- **Required headers:** `x-internal-secret`, `x-tenant-id`, `x-correlation-id`
+- **200:** `{ "sessionId", "tenantId", "applicationId", "interviewStage", "status": "scheduled | in_progress | completed | evaluating | evaluated", "evaluation": "object | null", "correlationId" }`
+- **401:** `BAD_INTERNAL_SECRET`; **404:** `SESSION_NOT_FOUND`; **422:** invalid input.
+
+The read is scoped by both tenant and session ID. `evaluation` is populated only after
+the independently persisted holistic and structured evaluator results are both ready.
 
 ---
 

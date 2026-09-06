@@ -2,6 +2,8 @@ import { boolean, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, time
 import type { DirectorResponse, TranscriptEntry, VoiceSettings } from "@interviehire/domain-interview";
 export const interviewSessionStatus = pgEnum("v2_interview_session_status", ["scheduled", "in_progress", "completed", "evaluating", "evaluated"]);
 export const interviewSessionStage = pgEnum("v2_interview_session_stage", ["recruiter_screening", "functional_interview"]);
+export const interviewEvaluator = pgEnum("v2_interview_evaluator", ["holistic", "structured"]);
+export const interviewEvaluationStatus = pgEnum("v2_interview_evaluation_status", ["running", "ready", "failed"]);
 export const interviewSessions = pgTable("v2_interview_sessions", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), applicationId: text("application_id").notNull(),
   interviewStage: interviewSessionStage("interview_stage").notNull(), status: interviewSessionStatus("status").notNull().default("scheduled"),
@@ -13,6 +15,7 @@ export const interviewSessions = pgTable("v2_interview_sessions", {
   resumePresent: boolean("resume_present").notNull().default(false), settings: jsonb("settings").$type<VoiceSettings>().notNull().default({}),
   transcript: jsonb("transcript").$type<readonly TranscriptEntry[]>().notNull().default([]),
   startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }), completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
+  evaluation: jsonb("evaluation").$type<Readonly<Record<string, unknown>>>(),
 }, (table) => [uniqueIndex("v2_interview_session_idempotency_idx").on(table.tenantId, table.idempotencyKey), index("v2_interview_session_application_idx").on(table.tenantId, table.applicationId)]);
 
 export const interviewTurns = pgTable("v2_interview_turns", {
@@ -26,3 +29,10 @@ export const interviewOutbox = pgTable("v2_interview_outbox", {
   tenantId: text("tenant_id").notNull(), correlationId: text("correlation_id").notNull(), payload: jsonb("payload").$type<Readonly<Record<string, unknown>>>().notNull(),
   occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(), publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }), publishAttempts: integer("publish_attempts").notNull().default(0),
 }, (table) => [index("v2_interview_outbox_pending_idx").on(table.publishedAt, table.occurredAt)]);
+
+export const interviewEvaluations = pgTable("v2_interview_evaluations", {
+  sessionId: text("session_id").notNull().references(() => interviewSessions.id), evaluator: interviewEvaluator("evaluator").notNull(),
+  status: interviewEvaluationStatus("status").notNull(), attempt: integer("attempt").notNull().default(0),
+  result: jsonb("result").$type<Readonly<Record<string, unknown>>>(), errorCode: text("error_code"),
+  startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }).notNull(), completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
+}, (table) => [primaryKey({ columns: [table.sessionId, table.evaluator] })]);

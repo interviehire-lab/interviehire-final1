@@ -1,14 +1,14 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { count, eq } from "drizzle-orm";
 import { createVoiceService } from "@interviehire/domain-interview";
-import { connectInterviewDatabase, DrizzleVoiceRepository, interviewOutbox, interviewSessions, interviewTurns, migrateInterviewDatabase } from "@interviehire/db-interview";
+import { connectInterviewDatabase, DrizzleVoiceRepository, interviewEvaluations, interviewOutbox, interviewSessions, interviewTurns, migrateInterviewDatabase } from "@interviehire/db-interview";
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error("TEST_DATABASE_URL is required");
 const connection = connectInterviewDatabase(url);
 beforeAll(async () => {
   await migrateInterviewDatabase(url);
-  await connection.db.delete(interviewOutbox); await connection.db.delete(interviewTurns); await connection.db.delete(interviewSessions);
+  await connection.db.delete(interviewEvaluations); await connection.db.delete(interviewOutbox); await connection.db.delete(interviewTurns); await connection.db.delete(interviewSessions);
   await connection.db.insert(interviewSessions).values({ id: "session_voice", tenantId: "org_001", applicationId: "app_voice", interviewStage: "functional_interview", status: "scheduled", scheduledAt: "2026-09-07T08:00:00.000Z", timeZone: "UTC", hardLimitSeconds: 1500, correlationId: "corr_voice", idempotencyKey: "schedule_voice", createdAt: "2026-09-07T07:00:00.000Z", candidateName: "Asha", roleTitle: "Engineer", initialQuestion: "Introduce yourself.", resumePresent: true });
 });
 afterAll(() => connection.client.end());

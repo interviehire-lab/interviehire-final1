@@ -120,3 +120,9 @@ export interface ResumeAnalysisRequestedV1 {
 }
 
 export type HiringOutboxEvent = ApplicationStageChangedV1 | ResumeAnalysisRequestedV1;
+
+export interface InterviewCompletedV1 {
+  readonly eventId: string; readonly eventType: "interview.completed.v1"; readonly aggregateId: string;
+  readonly tenantId: string; readonly correlationId: string; readonly occurredAt: string;
+  readonly payload: { readonly resourceType: "interview_session"; readonly resourceId: string; readonly interviewSessionId: string; readonly applicationId: string; readonly interviewStage: "recruiter_screening" | "functional_interview" };
+}

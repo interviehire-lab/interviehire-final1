@@ -28,7 +28,7 @@ export class DrizzleVoiceRepository implements VoiceRepository {
       const [session] = await tx.select().from(interviewSessions).where(eq(interviewSessions.id, id)).for("update");
       if (!session || ["completed", "evaluating", "evaluated"].includes(session.status)) return;
       await tx.update(interviewSessions).set({ status: "completed", completedAt, transcript: sql`${interviewSessions.transcript} || ${JSON.stringify([{ type: "interview_completion", completionReason: reason, timestamp: completedAt }])}::jsonb` }).where(eq(interviewSessions.id, id));
-      await tx.insert(interviewOutbox).values({ eventId: `interview.completed:${id}`, eventType: "interview.completed.v1", aggregateId: id, tenantId: session.tenantId, correlationId: session.correlationId, payload: { interviewSessionId: id, applicationId: session.applicationId, interviewStage: session.interviewStage }, occurredAt: completedAt }).onConflictDoNothing();
+      await tx.insert(interviewOutbox).values({ eventId: `interview.completed:${id}`, eventType: "interview.completed.v1", aggregateId: id, tenantId: session.tenantId, correlationId: session.correlationId, payload: { resourceType: "interview_session", resourceId: id, interviewSessionId: id, applicationId: session.applicationId, interviewStage: session.interviewStage }, occurredAt: completedAt }).onConflictDoNothing();
     });
   }
 }

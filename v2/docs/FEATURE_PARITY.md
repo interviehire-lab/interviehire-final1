@@ -20,6 +20,7 @@
 | Voice | Durable completion | legacy complete routes and evaluation poller | Interview transaction + outbox | MIGRATED | PostgreSQL state/event/replay test |
 | Privacy | DSAR/export/retention | `backend/tests/test_data_rights.py`, `test_retention.py` | compatibility gateway | PENDING MIGRATION | Proxy smoke pending |
 | Talent | Search/dedupe/ranking/compliance | `backend/tests/test_talent_finder.py` | compatibility gateway | PENDING MIGRATION | Proxy smoke pending |
-| Evaluation | Structured/Aviral evaluator | `interview-engine/apps/api/src/aviral-eval` | `ai.interview` worker | PENDING MIGRATION | Legacy tests located |
-| Evaluation | Deterministic fallback | `interview-engine/apps/api/src/lib/openrouter.ts` | provider adapter | PENDING MIGRATION | Characterisation pending |
+| Evaluation | Holistic/report + structured/Aviral evaluators | poller, transcript routes, `aviral-eval` | `ai.interview` worker with independent durable results | MIGRATED | unit + real PostgreSQL/Redis retry/merge test |
+| Evaluation | Deterministic fallback | `interview-engine/apps/api/src/lib/openrouter.ts` | resilient evaluator adapter | MIGRATED | primary-failure fallback test |
+| Evaluation | Tenant-scoped durable report read | legacy report routes | `GET /internal/v2/sessions/:id/evaluation` | MIGRATED | in-process API contract test |
 | Automation | Reminders and retention | `backend/app/jobs/reminders.py`, `retention.py` | `automations` queue | PENDING MIGRATION | Legacy tests located |

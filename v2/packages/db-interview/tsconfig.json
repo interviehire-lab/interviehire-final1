@@ -1,4 +1,4 @@
 {
   "extends": "../../tsconfig.base.json", "compilerOptions": { "rootDir": "src", "outDir": "dist" },
-  "include": ["src/**/*.ts"], "references": [{ "path": "../domain-interview" }]
+  "include": ["src/**/*.ts"], "references": [{ "path": "../domain-interview" }, { "path": "../queue" }, { "path": "../../apps/worker" }]
 }

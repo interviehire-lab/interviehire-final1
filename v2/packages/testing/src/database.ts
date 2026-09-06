@@ -16,6 +16,6 @@ export async function seedScenario(url: string, scenario: { applicationId: strin
 
 export async function resetInterviewDb(_url: string): Promise<void> {
   const sql = postgres(_url, { max: 1 });
-  try { await sql`TRUNCATE v2_interview_turns, v2_interview_outbox, v2_interview_sessions CASCADE`; }
+  try { await sql`TRUNCATE v2_interview_evaluations, v2_interview_turns, v2_interview_outbox, v2_interview_sessions CASCADE`; }
   finally { await sql.end(); }
 }

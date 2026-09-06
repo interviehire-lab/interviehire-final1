@@ -59,13 +59,20 @@ turns are synchronous and idempotent; completion is durable and emits one outbox
 Completed through domain/API/PostgreSQL tests. The preserved Node LiveKit agent can use
 the same three internal paths and payloads; no live turn enters BullMQ.
 
-## DOING — Completion and dual evaluation workers
+## DONE — Completion and dual evaluation workers
 
 RED: the completion event fans out to holistic/report and structured/Aviral evaluation;
 both retry safely, persist independently, merge deterministically, and survive restart.
 
+Completed with independent PostgreSQL evaluation runs, a BullMQ processor, deterministic
+fallback adapter, tenant-scoped report read, and real Redis retry test.
+
+## DOING — Recruiter Deep Analysis and board actions
+
+RED: Core resolves explicit application/session mappings, exposes tenant-scoped Deep
+Analysis, and records hire/reject decisions without changing the three-stage board.
+
 ## TODO
 
-- Completion and dual evaluation workers
 - Recruiter Web, Deep Analysis, deterministic demo seed, and Playwright golden path
 - Notification/automation slices and compatibility proxies
