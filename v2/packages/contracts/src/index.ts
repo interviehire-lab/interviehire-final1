@@ -124,7 +124,12 @@ export interface ApplicationDecisionRecordedV1 {
   readonly tenantId: string; readonly correlationId: string; readonly occurredAt: string;
   readonly payload: { readonly resourceType: "application"; readonly resourceId: string; readonly decision: "hired" | "rejected"; readonly stage: ApplicationStage };
 }
-export type HiringOutboxEvent = ApplicationStageChangedV1 | ResumeAnalysisRequestedV1 | ApplicationDecisionRecordedV1;
+export interface NotificationRequestedV1 {
+  readonly eventId: string; readonly eventType: "notification.requested.v1"; readonly aggregateId: string;
+  readonly tenantId: string; readonly correlationId: string; readonly occurredAt: string;
+  readonly payload: { readonly resourceType: "application"; readonly resourceId: string; readonly channel: "email" | "whatsapp" | "robocall"; readonly template: "interview_scheduled" | "interview_reminder" | "application_decision"; readonly deliverAt?: string };
+}
+export type HiringOutboxEvent = ApplicationStageChangedV1 | ResumeAnalysisRequestedV1 | ApplicationDecisionRecordedV1 | NotificationRequestedV1;
 
 export interface InterviewCompletedV1 {
   readonly eventId: string; readonly eventType: "interview.completed.v1"; readonly aggregateId: string;

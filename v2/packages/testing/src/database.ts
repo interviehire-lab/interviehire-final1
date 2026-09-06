@@ -19,3 +19,5 @@ export async function resetInterviewDb(_url: string): Promise<void> {
   try { await sql`TRUNCATE v2_interview_evaluations, v2_interview_turns, v2_interview_outbox, v2_interview_sessions CASCADE`; }
   finally { await sql.end(); }
 }
+
+export async function resetOpsDb(url: string): Promise<void> { const sql = postgres(url, { max: 1 }); try { await sql`TRUNCATE v2_notification_deliveries`; } finally { await sql.end(); } }

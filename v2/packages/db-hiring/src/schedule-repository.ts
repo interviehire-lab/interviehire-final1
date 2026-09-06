@@ -76,6 +76,13 @@ export class DrizzleScheduleRepository implements ScheduleRepository {
           from: schedule.fromStage, to: schedule.toStage,
         },
       });
+      const reminderAt = new Date(Date.parse(schedule.scheduledAt) - 30 * 60 * 1000).toISOString();
+      for (const channel of schedule.deliveryMethods) {
+        await tx.insert(hiringOutbox).values([
+          { eventId: `notification:${schedule.tenantId}:${schedule.idempotencyKey}:${channel}:confirmation`, eventType: "notification.requested.v1", aggregateId: schedule.applicationId, tenantId: schedule.tenantId, correlationId: schedule.correlationId, occurredAt: schedule.createdAt, payload: { resourceType: "application", resourceId: schedule.applicationId, channel, template: "interview_scheduled" } },
+          { eventId: `notification:${schedule.tenantId}:${schedule.idempotencyKey}:${channel}:reminder`, eventType: "notification.requested.v1", aggregateId: schedule.applicationId, tenantId: schedule.tenantId, correlationId: schedule.correlationId, occurredAt: schedule.createdAt, payload: { resourceType: "application", resourceId: schedule.applicationId, channel, template: "interview_reminder", deliverAt: reminderAt } },
+        ]);
+      }
       await tx.insert(applicationStageHistory).values({
         id: `schedule-history:${schedule.tenantId}:${schedule.idempotencyKey}`,
         applicationId: schedule.applicationId,

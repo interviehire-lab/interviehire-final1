@@ -6,6 +6,7 @@
     "@interviehire/contracts": "workspace:*",
     "@interviehire/domain-hiring": "workspace:*",
     "@interviehire/queue": "workspace:*",
+    "@interviehire/worker": "workspace:*",
     "drizzle-orm": "^0.44.5",
     "postgres": "^3.4.7"
   },

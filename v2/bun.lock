@@ -7,6 +7,7 @@
       "devDependencies": {
         "@interviehire/db-hiring": "workspace:*",
         "@interviehire/db-interview": "workspace:*",
+        "@interviehire/db-ops": "workspace:*",
         "@interviehire/domain-hiring": "workspace:*",
         "@interviehire/domain-interview": "workspace:*",
         "@interviehire/queue": "workspace:*",
@@ -56,6 +57,7 @@
         "@interviehire/contracts": "workspace:*",
         "@interviehire/domain-hiring": "workspace:*",
         "@interviehire/queue": "workspace:*",
+        "@interviehire/worker": "workspace:*",
         "drizzle-orm": "^0.44.5",
         "postgres": "^3.4.7",
       },
@@ -72,6 +74,11 @@
     },
     "packages/db-ops": {
       "name": "@interviehire/db-ops",
+      "dependencies": {
+        "@interviehire/worker": "workspace:*",
+        "drizzle-orm": "^0.44.5",
+        "postgres": "^3.4.7",
+      },
     },
     "packages/domain-hiring": {
       "name": "@interviehire/domain-hiring",

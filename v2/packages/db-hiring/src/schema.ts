@@ -19,6 +19,8 @@ export const applications = pgTable("v2_applications", {
   tenantId: text("tenant_id").notNull(),
   jobId: text("job_id"),
   candidateName: text("candidate_name"),
+  candidateEmail: text("candidate_email"),
+  candidatePhone: text("candidate_phone"),
   source: text("source"),
   resumeText: text("resume_text"),
   asyncStatus: resumeAnalysisStatus("resume_analysis_status").notNull().default("not_requested"),

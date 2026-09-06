@@ -11,13 +11,14 @@
     "build": "bunx tsc -b",
     "infra:up": "docker compose -f compose.test.yml up -d --wait",
     "infra:down": "docker compose -f compose.test.yml down",
-    "db:migrate:test": "bun run packages/db-hiring/src/migrate.ts && bun run packages/db-interview/src/migrate.ts"
+    "db:migrate:test": "bun run packages/db-hiring/src/migrate.ts && bun run packages/db-interview/src/migrate.ts && bun run packages/db-ops/src/migrate.ts"
   },
   "devDependencies": {
     "@interviehire/db-hiring": "workspace:*",
     "@interviehire/domain-hiring": "workspace:*",
     "@interviehire/domain-interview": "workspace:*",
     "@interviehire/db-interview": "workspace:*",
+    "@interviehire/db-ops": "workspace:*",
     "@interviehire/queue": "workspace:*",
     "@interviehire/testing": "workspace:*",
     "@interviehire/worker": "workspace:*",

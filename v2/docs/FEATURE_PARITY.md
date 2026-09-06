@@ -25,4 +25,6 @@
 | Evaluation | Holistic/report + structured/Aviral evaluators | poller, transcript routes, `aviral-eval` | `ai.interview` worker with independent durable results | MIGRATED | unit + real PostgreSQL/Redis retry/merge test |
 | Evaluation | Deterministic fallback | `interview-engine/apps/api/src/lib/openrouter.ts` | resilient evaluator adapter | MIGRATED | primary-failure fallback test |
 | Evaluation | Tenant-scoped durable report read | legacy report routes | `GET /internal/v2/sessions/:id/evaluation` | MIGRATED | in-process API contract test |
-| Automation | Reminders and retention | `backend/app/jobs/reminders.py`, `retention.py` | `automations` queue | PENDING MIGRATION | Legacy tests located |
+| Notifications | Schedule confirmations and reminders | legacy email/Twilio scheduling paths, `reminders.py` | reference-only `notifications` jobs + Ops ledger | MIGRATED | unit/PostgreSQL idempotency and scheduling event tests |
+| Notifications | Application decision email | legacy recruiter/candidate mail paths | `notification.requested.v1` | MIGRATED | decision transaction test |
+| Automation | Retention | `backend/app/jobs/retention.py` | `automations` queue | PENDING MIGRATION | Legacy tests located |

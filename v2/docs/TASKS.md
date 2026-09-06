@@ -75,12 +75,20 @@ Analysis, and records hire/reject decisions without changing the three-stage boa
 Completed with explicit mapping resolution, tenant-scoped Interview adapter, and an
 audited/idempotent decision transaction with its source-domain outbox event.
 
-## DOING — Notifications and automations
+## DONE — Durable notifications and reminders
 
 RED: schedule and decision events create reference-only notification work; channel
 delivery and reminder scheduling are persistently idempotent with isolated failures.
 
+Completed with reference-only confirmation/reminder events, delayed-delivery metadata,
+tenant-scoped contact lookup, provider ports, and an Ops-owned attempt ledger.
+
+## DOING — Retention automation and compatibility proxies
+
+RED: a scheduled retention scan is safe under retries and secondary legacy surfaces are
+reachable through an explicit compatibility boundary without shared-schema writes.
+
 ## TODO
 
 - Recruiter Web, Deep Analysis, deterministic demo seed, and Playwright golden path
-- Notification/automation slices and compatibility proxies
+- Retention automation and compatibility proxies

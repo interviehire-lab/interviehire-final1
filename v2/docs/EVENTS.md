@@ -27,3 +27,10 @@ The Interview outbox dispatcher targets `ai.interview`. Its processor runs the
 skips any evaluator already marked ready, so a transient failure in one provider does
 not repeat or erase the other's result. The session becomes `evaluated` only after both
 records are ready and their results have been merged.
+
+`notification.requested.v1` is emitted in the same Hiring transaction as scheduling or
+decision state. Jobs include only an application reference, channel, template, and
+optional `deliverAt`; recipient email/phone is loaded from the tenant-scoped Hiring
+directory after dequeue. Scheduling emits one immediate confirmation and one reminder
+30 minutes before the slot for every selected channel. Ops persists delivery claims,
+attempts, provider IDs, and terminal sent state so duplicate queue delivery is harmless.

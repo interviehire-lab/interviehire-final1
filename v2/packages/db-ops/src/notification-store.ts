@@ -1,0 +1,7 @@
+import { eq, sql } from "drizzle-orm"; import type { NotificationChannel, NotificationDeliveryStore } from "@interviehire/worker"; import type { OpsDatabase } from "./database"; import { notificationDeliveries } from "./schema";
+export class DrizzleNotificationDeliveryStore implements NotificationDeliveryStore {
+  constructor(private readonly db: OpsDatabase) {}
+  async claim(deliveryId: string, tenantId: string, channel: NotificationChannel, startedAt: string) { return this.db.transaction(async (tx) => { const [row] = await tx.select().from(notificationDeliveries).where(eq(notificationDeliveries.id, deliveryId)).for("update"); if (row?.status === "sent") return { kind: "sent" as const }; if (row?.status === "running") return { kind: "busy" as const }; await tx.insert(notificationDeliveries).values({ id: deliveryId, tenantId, channel, status: "running", attempt: 1, startedAt }).onConflictDoUpdate({ target: notificationDeliveries.id, set: { status: "running", attempt: sql`${notificationDeliveries.attempt} + 1`, errorCode: null, startedAt } }); return { kind: "claimed" as const }; }); }
+  async complete(deliveryId: string, providerMessageId: string, completedAt: string) { await this.db.update(notificationDeliveries).set({ status: "sent", providerMessageId, completedAt }).where(eq(notificationDeliveries.id, deliveryId)); }
+  async fail(deliveryId: string, errorCode: string, failedAt: string) { await this.db.update(notificationDeliveries).set({ status: "failed", errorCode, completedAt: failedAt }).where(eq(notificationDeliveries.id, deliveryId)); }
+}

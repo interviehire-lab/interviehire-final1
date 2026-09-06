@@ -9,5 +9,5 @@ test("decision, audit, and outbox commit once without moving stage", async () =>
   const service = createDecisionService(new DrizzleDecisionRepository(connection.db), () => "2026-09-07T10:00:00.000Z"); const command = { tenantId: "org_1", applicationId: "app_decide", decision: "hired" as const, actorId: "recruiter_1", correlationId: "corr", idempotencyKey: "hire_1" };
   expect(await service.decide(command)).toMatchObject({ ok: true, replayed: false }); expect(await service.decide(command)).toMatchObject({ ok: true, replayed: true });
   const [application] = await connection.db.select().from(applications).where(eq(applications.id, "app_decide")); const [audits] = await connection.db.select({ value: count() }).from(applicationDecisionHistory); const [events] = await connection.db.select({ value: count() }).from(hiringOutbox);
-  expect(application).toMatchObject({ stage: "functional_interview", decision: "hired" }); expect(audits?.value).toBe(1); expect(events?.value).toBe(1);
+  expect(application).toMatchObject({ stage: "functional_interview", decision: "hired" }); expect(audits?.value).toBe(1); expect(events?.value).toBe(2);
 });

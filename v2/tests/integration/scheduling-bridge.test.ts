@@ -54,4 +54,7 @@ test("Core-owned schedule transaction stores mapping/history without writing Int
   });
   expect(mapping?.applicationId).not.toBe(mapping?.interviewSessionId);
   expect(historyCount?.value).toBe(1);
+  const notifications = (await connection.db.select().from(hiringOutbox)).filter((row) => row.eventType === "notification.requested.v1");
+  expect(notifications).toHaveLength(2);
+  expect(notifications.find((row) => row.payload.template === "interview_reminder")?.payload.deliverAt).toBe("2026-09-08T08:30:00.000Z");
 });

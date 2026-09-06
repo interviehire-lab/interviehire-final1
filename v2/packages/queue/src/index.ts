@@ -40,7 +40,7 @@ export interface OutboxPublisher {
   publish(event: OutboxRecord): Promise<void>;
 }
 
-export function createBullMqPublisher(queue: Queue<JobEnvelopeV1>): OutboxPublisher {
+export function createBullMqPublisher(queue: Queue<JobEnvelopeV1>, now: () => number = Date.now): OutboxPublisher {
   return {
     async publish(event) {
       const resourceType = event.payload.resourceType;
@@ -62,7 +62,7 @@ export function createBullMqPublisher(queue: Queue<JobEnvelopeV1>): OutboxPublis
             key !== "resourceType" && key !== "resourceId" && ["string", "number", "boolean"].includes(typeof value),
           )),
         },
-      }, { jobId: event.eventId });
+      }, { jobId: event.eventId, ...(typeof event.payload.deliverAt === "string" ? { delay: Math.max(0, Date.parse(event.payload.deliverAt) - now()) } : {}) });
     },
   };
 }

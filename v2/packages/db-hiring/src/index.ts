@@ -7,4 +7,5 @@ export * from "./resume-analysis-repository";
 export * from "./resume-analysis-worker-store";
 export * from "./schedule-repository";
 export * from "./decision-repository";
+export * from "./notification-directory";
 export * from "./schema";
