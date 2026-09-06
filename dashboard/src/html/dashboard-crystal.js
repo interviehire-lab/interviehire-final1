@@ -156,12 +156,6 @@ export const html = `
               <div class="bulk-actions-dropdown org-switcher-menu" id="org-switcher-menu" style="display:none;"></div>
             </div>
 
-            <!-- Super Admin link (same gate as the org switcher above; revealed by JS) -->
-            <a class="btn-org-switcher" id="link-super-admin" href="/admin" style="display:none; text-decoration:none;" title="Platform-wide overview">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v6c0 5 4 9 9 9s9-4 9-9V7z"/></svg>
-              <span>Super Admin</span>
-            </a>
-
             <!-- Theme Toggle Button -->
             <button class="btn-theme-toggle" id="btn-theme-toggle" aria-label="Toggle Theme">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="theme-icon-moon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>

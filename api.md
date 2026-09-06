@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-06** — **Removed GET /api/admin/overview and the whole `backend/app/routers/admin.py` router** (added earlier the same day, entry directly below) — the user asked for it to be pulled back out pending more design work before a superadmin dashboard ships for real. `main.py` no longer imports or mounts `admin`; the frontend's `/admin` page, `AdminShell.js`, and `apiGetAdminOverview()` are removed too, along with the header's "Super Admin" nav link and its `next.config.js` proxy-allowlist entry. The underlying `super_admin` role and the pre-existing `GET /api/auth/organisations` / `POST /api/auth/switch-context` endpoints (which predate this session) are untouched — only the new platform-overview endpoint added below is gone.
 - **2026-09-06** — **Documentation-only fix: `INTERVIEW_ROOM_URL`'s doc-comment in `backend/app/config.py` was stale.** The comment above the setting still described the link as built as `{INTERVIEW_ROOM_URL}/interview?sessionId=…`, left over from before the candidate-room path was renamed; the actual code (here and in `app/routers/public.py`'s reschedule/confirm link-building) has built it as `{INTERVIEW_ROOM_URL}/interviewcandidateroom?sessionId=…` for a while. Comment corrected to match; **no route path, default value, or response schema changed** — do not read this as a route rename.
 - **2026-09-06** — **New super_admin-only platform overview endpoint.** Added **GET /api/admin/overview** (new `backend/app/routers/admin.py`, mounted in `main.py` at prefix `/api/admin`) — no existing endpoint aggregated stats across every organisation (the regular dashboard, and even a super_admin's own view via `get_active_org_id`, is always scoped to one organisation at a time). Gated by the same `user_type != UserType.super_admin` → **403** check already used by `GET /api/auth/organisations`/`POST /api/auth/switch-context`. Returns platform-wide counts (organisations/users/jobs/published jobs/applicants), a per-organisation table (id/name/created_at/job_count), and the 10 most-recently-created users. Documented below under a new `backend/app/routers/admin.py` section.
 - **2026-09-06** — **`GET /api/auth/me` now reports whether the user has connected Google Drive.** `UserProfileOut` (`backend/app/routers/auth.py`) gains `google_drive_connected: bool` (default `False`), computed as `bool(current_user.google_refresh_token)` in `get_me()` — lets the dashboard show Drive-connection status (recordings are uploaded to the recruiter's own Drive) without a separate round-trip. Purely additive; no other field changed.
@@ -2937,55 +2938,6 @@ Return deployment-readiness booleans for Twilio senders, authentication, Content
 templates, configured variable orders, and reminder batch settings. Secret values
 are never returned. Requires the same `x-internal-secret` header as the reminder
 runner; returns 401 when absent or incorrect.
-
-### `backend/app/routers/admin.py`
-
-**(New 2026-09-06)** Super-admin-only, platform-wide (cross-organisation) aggregate views. Mounted in `main.py` at prefix `/api/admin`. No existing endpoint aggregates across every organisation — the regular dashboard (and even a super_admin's own view of it, via `get_active_org_id`) is always scoped to exactly one organisation at a time.
-
-#### GET /api/admin/overview
-
-Platform-wide counts, a per-organisation table, and the most recently created users — the one view a super_admin has that a regular recruiter's org-scoped dashboard doesn't.
-
-- **Auth:** JWT httpOnly cookie (required) + `user_type == UserType.super_admin`, else **403**. Same gate as `GET /api/auth/organisations` / `POST /api/auth/switch-context`.
-- **Path params:** none
-- **Query params:** none
-
-Request: none
-
-Response (no response_model — always returns a dict):
-```json
-{
-  "organisation_count": "int",
-  "user_count": "int",
-  "job_count": "int",
-  "published_job_count": "int — Job.status == \"published\"",
-  "applicant_count": "int",
-  "organisations": [
-    {
-      "id": "string (UUID)",
-      "name": "string | null — Organisation.org_name",
-      "created_at": "string (ISO 8601) | null",
-      "job_count": "int — distinct Job rows for this org (outer join, so 0 for an org with none)"
-    }
-  ],
-  "recent_users": [
-    {
-      "id": "string (UUID)",
-      "name": "string",
-      "email": "string",
-      "user_type": "super_admin | org_admin | member | null",
-      "created_at": "string (ISO 8601) | null"
-    }
-  ]
-}
-```
-`organisations` is ordered by `Organisation.created_at DESC` (all organisations, not paginated). `recent_users` is the 10 most recently created `User` rows platform-wide (`ORDER BY created_at DESC LIMIT 10`), not filtered to any organisation.
-
-Status codes: 200 OK; 401 Unauthorized (not logged in); 403 `{"detail": "Only Super Admins can access this."}` (logged in but not super_admin).
-
-Notes: See `backend/app/routers/admin.py:get_admin_overview`/`_require_super_admin`. All counts are plain `COUNT(*)`/`COUNT(DISTINCT ...)` aggregates — no caching, computed fresh per request.
-
----
 
 ## Interview Engine — Fastify
 
