@@ -8,7 +8,7 @@ RUN apt-get update -qq \
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
 COPY package.json ./
-RUN --mount=type=cache,id=voice-agent-pnpm-store,target=/root/.local/share/pnpm/store pnpm install --no-frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 RUN pnpm exec livekit-agents download-files
 
 COPY tsconfig.json ./
