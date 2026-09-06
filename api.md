@@ -6,6 +6,13 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-06** — **Documentation-only fix: `INTERVIEW_ROOM_URL`'s doc-comment in `backend/app/config.py` was stale.** The comment above the setting still described the link as built as `{INTERVIEW_ROOM_URL}/interview?sessionId=…`, left over from before the candidate-room path was renamed; the actual code (here and in `app/routers/public.py`'s reschedule/confirm link-building) has built it as `{INTERVIEW_ROOM_URL}/interviewcandidateroom?sessionId=…` for a while. Comment corrected to match; **no route path, default value, or response schema changed** — do not read this as a route rename.
+- **2026-09-06** — **New super_admin-only platform overview endpoint.** Added **GET /api/admin/overview** (new `backend/app/routers/admin.py`, mounted in `main.py` at prefix `/api/admin`) — no existing endpoint aggregated stats across every organisation (the regular dashboard, and even a super_admin's own view via `get_active_org_id`, is always scoped to one organisation at a time). Gated by the same `user_type != UserType.super_admin` → **403** check already used by `GET /api/auth/organisations`/`POST /api/auth/switch-context`. Returns platform-wide counts (organisations/users/jobs/published jobs/applicants), a per-organisation table (id/name/created_at/job_count), and the 10 most-recently-created users. Documented below under a new `backend/app/routers/admin.py` section.
+- **2026-09-06** — **`GET /api/auth/me` now reports whether the user has connected Google Drive.** `UserProfileOut` (`backend/app/routers/auth.py`) gains `google_drive_connected: bool` (default `False`), computed as `bool(current_user.google_refresh_token)` in `get_me()` — lets the dashboard show Drive-connection status (recordings are uploaded to the recruiter's own Drive) without a separate round-trip. Purely additive; no other field changed.
+- **2026-09-06** — **`POST /api/public/reschedule/{token}` now rejects reschedule dates more than 60 days out (previously unbounded).** `public_reschedule_interview` (`backend/app/routers/public.py`) already blocked a past `new_time` (small grace buffer for clock skew); there was no upper bound at all, so a stray or malicious far-future date (e.g. year 3000) was accepted outright. There's no recruiter-configured scheduling window in the data model to check against, so this is a fixed safety rail, not a business rule: **400** `"Please choose a time in the future."` when `new_time < now − 1min`, and new **400** `"Please choose a time within the next 60 days."` when `new_time > now + 60 days`. Request/response body shapes unchanged.
+- **2026-09-06** — **`GET /api/jobs/applicants/{applicant_id}/functional-report` now carries the recording + raw transcript, in both response branches.** `ai_sync.get_applicant_full_report()` (`backend/app/utils/ai_sync.py`) gains `recordingUrl` (from `InterviewSession.recordingDriveUrl`), `recordingDriveFileId` (from `InterviewSession.recordingDriveFileId`), and `transcript` (the raw `InterviewSession.transcript` JSON array, `[]` if not a list) — so Interview Analysis can render a real video/transcript panel without a separate endpoint, since both are already columns on the same `InterviewSession` row. Present in **both** branches: the not-yet-evaluated branch (`evaluated: false`, alongside `status`/`report: null`) and the evaluated branch (`evaluated: true`, alongside `status`/`report`/`reportUrl`).
+- **2026-09-06** — **`GET /api/jobs/{job_id}/interview-analysis` now includes recruiter-screening data per row.** `get_interview_analysis` (`backend/app/routers/jobs.py`) — Interview Analysis is meant to cover recruiter screening + functional (never resume), so each row in the response array gains `recruiter_screening` (`Applicant.recruiter_screening`, string fit-level like `"Good fit"`, nullable), `recruiter_screening_score` (`Applicant.recruiter_screening_score` if set, else falls back to `Applicant.screening_score`; float, nullable), and `screening_status` (`Applicant.screening_status.value` — `pending|scheduled|completed|slot_missed|incomplete` — or `null`).
+- **2026-09-06** — **Stage-aware hard time limits for recruiter-screening and functional-screening sessions.** `interview-engine/apps/api/src/services/interview-policy.ts` was rewritten: `hardLimitSeconds(settings)` (and the `deadlineFor()`/`secondsRemaining()`/`shouldForceClose()` functions built on it) now branch on `settings.stage` — `'screening'` → a fixed 5-minute cap (new `SCREENING_HARD_LIMIT_SECONDS = 5 * 60`), `'functional'` → a fixed 25-minute cap (new `FUNCTIONAL_HARD_LIMIT_SECONDS = 25 * 60`), and anything else (the general conversational interview) keeps the prior recruiter-configurable-up-to-30-minutes behavior. `settings.stage` is stamped by `backend/app/utils/ai_sync.py`; these two fixed caps are product limits for the two screening stages and are NOT overridable by a recruiter's `hardDurationSeconds`. Also added a new exported `targetSeconds(settings)` (screening/functional stages target their own hard limit itself, since every second of a fixed 5/25-minute screening counts; the general interview keeps its existing 25-minute target under a 30-minute cap) — used internally by the director's pacing prompt, not returned by any route directly. **No field added or removed** on either route below — `deadlineAt`/`hardLimitSeconds` in **POST /api/interview/sessions/:id/start** and **POST /api/interview/sessions/:id/livekit-token** keep their existing shape, but their VALUES now depend on the session's stage.
 - **2026-09-05** — **Removed the LiveKit blueprint-size cap too — same reasoning as the follow-up-cap removal directly below.** A recruiter hit the "at most 6 prepared questions" rejection while trying to start a real test interview and asked why, given follow-ups were already made unlimited in the entry below — the two caps existed for the same reason (guarantee every prepared question fits in 30 minutes under a *fixed* per-question time budget) and the same fix applies: now that the director paces itself against real time-remaining context, a fixed question-count/estimated-minutes ceiling is no longer needed either. `interview-policy.ts`'s `validateLiveKitQuestionPlan()` and `INTERVIEW_MAX_MAIN_QUESTIONS` are **removed**, along with every call site: **POST /api/interview/sessions/:id/start** and **POST /api/interview/sessions/:id/livekit-token** no longer return **409** `LIVEKIT_BLUEPRINT_TOO_LARGE` at all (their other status codes are unchanged); **POST /internal/livekit/sessions/:id/start**'s response **drops the `plan` field** (was `{ok, questionCount, estimatedMinutes}`) and no longer returns that 409 either. The absolute 30-minute hard deadline (`shouldForceClose`/`deadlineReached`) remains the only backstop — a long blueprint now simply risks not being fully covered if the director doesn't pace aggressively enough, rather than being blocked from starting at all.
 - **2026-09-05** — **Removed the hard follow-up caps — the director now paces itself using time/topic context instead of a fixed count.** Superseding the "at most 1 follow-up per question and 3 follow-ups total" limits introduced earlier the same day (kept below for history): live testing showed the fixed cap was too blunt — it could block a genuinely useful follow-up (or, per the interview-policy module's separate time-based gate, silently veto one) regardless of what the LLM director actually judged worthwhile. `interview-policy.ts`'s `mayAskFollowUp()` (the hard gate) and its backing constants `INTERVIEW_MAX_FOLLOWUPS_PER_QUESTION`/`INTERVIEW_MAX_FOLLOWUPS_TOTAL` are **removed** — `handleCandidateTranscript()`'s `wantsFollowUp` no longer consults a count/time gate at all, honoring the director's `{action:"followup"}` decision outright (the only remaining veto is the absolute 30-minute `deadlineReached` cutoff, unchanged). In exchange, `decideNextTurn()`'s DeepSeek prompt now receives real pacing context every turn — follow-ups already asked (this question + the whole interview), how many prepared questions remain, and time remaining before the hard cutoff (`interview-policy.ts`'s `secondsRemaining()`) — with explicit instructions to weigh a follow-up's value against that budget itself, rather than a code-level counter doing it. No response schema change — `POST /internal/livekit/sessions/:id/turn` and `handleCandidateTranscript()`'s return shape are unaffected; this is purely a director-prompt/decision-logic change.
 
@@ -230,14 +237,15 @@ Response:
   "status": "active | invited | inactive",
   "organisation_id": "UUID | null",
   "organisation_name": "string | null",
-  "onboarding_required": "boolean"
+  "onboarding_required": "boolean",
+  "google_drive_connected": "boolean"
 }
 ```
-response_model = `UserProfileOut` (Config.from_attributes=True). designation/organisation_id/organisation_name optional, default None.
+response_model = `UserProfileOut` (Config.from_attributes=True). designation/organisation_id/organisation_name optional, default None. `google_drive_connected` defaults False.
 
 Status codes: 200 OK; 401 Unauthorized — get_current_user failures.
 
-Notes: For super_admin, org_id resolved via get_active_org_id. **(2026-06-30)** Its super_admin fallback chain is now: `active_org_id` cookie → the user's stored internal `users.last_active_org_id` → the super_admin's own `organisation_id` → deterministic first org (`ORDER BY created_at ASC, id ASC`) — previously it was just cookie → arbitrary `.first()`. For non-super_admin with organisation_id set, organisation_name looked up from current_user.organisation_id. `onboarding_required` = (resolved org_id is None) AND (user_type != super_admin).
+Notes: For super_admin, org_id resolved via get_active_org_id. **(2026-06-30)** Its super_admin fallback chain is now: `active_org_id` cookie → the user's stored internal `users.last_active_org_id` → the super_admin's own `organisation_id` → deterministic first org (`ORDER BY created_at ASC, id ASC`) — previously it was just cookie → arbitrary `.first()`. For non-super_admin with organisation_id set, organisation_name looked up from current_user.organisation_id. `onboarding_required` = (resolved org_id is None) AND (user_type != super_admin). **(2026-09-06)** `google_drive_connected = bool(current_user.google_refresh_token)` — true once the user has completed the Google OAuth connect flow (recordings are uploaded to their own Drive); does not verify the token is still valid, only that one was ever stored.
 
 #### GET /api/auth/organisations
 
@@ -982,19 +990,33 @@ Get the full canonical CandidateReport (raw InterviewSession.evaluation) for Dee
 
 Request: none
 
-Response (from `ai_sync.get_applicant_full_report`, no response_model — always returns a dict, never raises):
+Response (from `ai_sync.get_applicant_full_report`, no response_model — always returns a dict, never raises). If no `InterviewSession` row exists at all for this applicant: `{"status": "not_scheduled", "evaluated": false, "report": null}` (no recording/transcript fields in this case). Otherwise, not-yet-evaluated branch (no `session.evaluation` yet):
 ```json
 {
-  "status": "string (session.status.value or \"not_scheduled\")",
-  "evaluated": "boolean (true if session.evaluation exists)",
-  "report": "object (raw session.evaluation — canonical CandidateReport from the engine) | null",
-  "reportUrl": "string | null"
+  "status": "string (session.status.value)",
+  "evaluated": false,
+  "report": null,
+  "recordingUrl": "string | null",           // InterviewSession.recordingDriveUrl
+  "recordingDriveFileId": "string | null",   // InterviewSession.recordingDriveFileId
+  "transcript": "array"                      // raw InterviewSession.transcript JSON (turns), [] if not a list
+}
+```
+Evaluated branch (`session.evaluation` present):
+```json
+{
+  "status": "string (session.status.value)",
+  "evaluated": true,
+  "report": "object (raw session.evaluation — canonical CandidateReport from the engine)",
+  "reportUrl": "string | null",
+  "recordingUrl": "string | null",           // InterviewSession.recordingDriveUrl
+  "recordingDriveFileId": "string | null",   // InterviewSession.recordingDriveFileId
+  "transcript": "array"                      // raw InterviewSession.transcript JSON (turns), [] if not a list
 }
 ```
 
 Status codes: 200 OK; 401 not authenticated; 403 'Access denied'; 404 'Applicant not found' / 'Job not found'.
 
-Notes: No response_model; delegates with str(applicant_id). `report` is `null` until the engine scores the interview (`evaluated=false`). The `report` payload is the canonical `CandidateReport` defined by the dashboard and is served VERBATIM (no reshaping) from `InterviewSession.evaluation`. See `app/utils/ai_sync.py:get_applicant_full_report`.
+Notes: No response_model; delegates with str(applicant_id). `report` is `null` until the engine scores the interview (`evaluated=false`). The `report` payload is the canonical `CandidateReport` defined by the dashboard and is served VERBATIM (no reshaping) from `InterviewSession.evaluation`. See `app/utils/ai_sync.py:get_applicant_full_report`. **(2026-09-06)** `recordingUrl`/`recordingDriveFileId`/`transcript` added to BOTH branches above — lets Interview Analysis render a real video/transcript panel straight from this one endpoint, since both the recording and the raw transcript already live as columns on the same `InterviewSession` row (no separate endpoint needed).
 
 **Exit-interview variant (2026-07-05 PIVOT — supersedes the earlier scored variant):** when the applicant belongs to a Job with `job_kind == "exit"`, `report` is a **VERBATIM, NO-SCORE transcript report** (exit interviews are recorded, not scored). It is NOT a `CandidateReport` and carries NO `overallScore`, `recommendation`, `skillScores`, `attritionSignal`, `topReasons`, `verbatimHighlights`, sentiment, or proctoring. Produced with no LLM by `interview-engine/apps/api/src/services/exit-report.service.ts:buildExitTranscriptReport`, stored in `InterviewSession.evaluation`, and served verbatim:
 ```json
@@ -1036,14 +1058,57 @@ Response (no response_model — always returns a dict; delegates to `ai_sync.get
   "evaluated": "boolean (true if the test session has an evaluation)",
   "status": "string (session.status.value, \"not_scheduled\", or \"none\" when exists=false)",
   "report": "object (raw session.evaluation — canonical CandidateReport) | null",
-  "reportUrl": "string | null"
+  "reportUrl": "string | null",
+  "recordingUrl": "string | null",           // InterviewSession.recordingDriveUrl — only present when exists=true
+  "recordingDriveFileId": "string | null",   // InterviewSession.recordingDriveFileId — only present when exists=true
+  "transcript": "array"                      // raw InterviewSession.transcript JSON — only present when exists=true
 }
 ```
-When no test applicant exists yet, returns exactly `{ "exists": false, "evaluated": false, "status": "none", "report": null }`. Otherwise the body is `{ "exists": true, ...get_applicant_full_report(...) }` (i.e. `exists` plus `status`/`evaluated`/`report`/`reportUrl`).
+When no test applicant exists yet, returns exactly `{ "exists": false, "evaluated": false, "status": "none", "report": null }` (no recording/transcript fields in this case). Otherwise the body is `{ "exists": true, ...get_applicant_full_report(...) }` — i.e. `exists` plus whatever `get_applicant_full_report` returns (`status`/`evaluated`/`report`/`reportUrl` plus, **(2026-09-06)**, `recordingUrl`/`recordingDriveFileId`/`transcript` — see that function's shape documented under **GET /api/jobs/applicants/{applicant_id}/functional-report** below).
 
 Status codes: 200 OK; 401 not authenticated; 403 'Access denied'; 404 'Job not found'.
 
-Notes: No response_model. `report` is served VERBATIM from `InterviewSession.evaluation`. If the job has `job_kind == "exit"`, `report` is the **VERBATIM, NO-SCORE exit transcript report** (`interviewType: "exit_interview"`, `scored: false`, with `exchanges`/`themes` and no scores) — same variant documented under **GET /api/jobs/applicants/{applicant_id}/functional-report** above (2026-07-05 pivot). See `backend/app/routers/jobs.py:get_test_report`.
+Notes: No response_model. `report` is served VERBATIM from `InterviewSession.evaluation`. If the job has `job_kind == "exit"`, `report` is the **VERBATIM, NO-SCORE exit transcript report** (`interviewType: "exit_interview"`, `scored: false`, with `exchanges`/`themes` and no scores) — same variant documented under **GET /api/jobs/applicants/{applicant_id}/functional-report** above (2026-07-05 pivot). See `backend/app/routers/jobs.py:get_test_report`. **(2026-09-06)** Since this route spreads `get_applicant_full_report(...)`'s result verbatim, it transitively gained `recordingUrl`/`recordingDriveFileId`/`transcript` when that function did (see changelog) — not a change to this route's own code, just a consequence of the shared helper.
+
+#### GET /api/jobs/{job_id}/interview-analysis
+
+Job-level Interview Analysis listing: every applicant whose AI interview has been EVALUATED, with a compact summary read from the stored evaluation. A reconcile pass (`_reconcile_functional_from_sessions`) first persists scores/proctoring/InterviewReport autonomously, so the list reflects a finished interview immediately — no manual transcript→LLM→upload step. The full report is fetched per-row on open via **GET /api/jobs/applicants/{applicant_id}/functional-report**.
+
+- **Auth:** JWT httpOnly cookie (required) + _verify_job_access.
+- **Path params:** `job_id`:UUID — the job id
+- **Query params:** none
+
+Request: none
+
+Response (no response_model — a JSON array, one object per evaluated applicant, most-recently-evaluated first):
+```json
+[
+  {
+    "applicant_id": "string (UUID)",
+    "name": "string",
+    "email": "string",
+    "status": "string — SessionStatus.value, always \"EVALUATED\" for rows in this list",
+    "overall_score": "number | null",
+    "recommendation": "string | null",
+    "summary": "string",
+    "question_count": "int — len(questionBreakdown)",
+    "proctoring_severity": "string | null — Applicant.proctoring_severity_flag",
+    "cheat_probability": "low | medium | high | null",
+    "violation_count": "int",
+    "has_structured": "boolean",
+    "report_url": "string | null",
+    "evaluated_at": "string (ISO 8601) | null — session.completedAt",
+    "source": "career_page | bulk_upload | direct_link | scheduled | ats | functional | null",
+    "recruiter_screening": "string | null — Applicant.recruiter_screening (fit-level label, e.g. \"Good fit\")",
+    "recruiter_screening_score": "number | null — Applicant.recruiter_screening_score, falling back to Applicant.screening_score if null",
+    "screening_status": "pending | scheduled | completed | slot_missed | incomplete | null"
+  }
+]
+```
+
+Status codes: 200 OK; 401 not authenticated; 403 'Access denied'; 404 'Job not found'.
+
+Notes: Only applicants with an `InterviewSession` whose `status == EVALUATED` and a non-empty `evaluation` are included (test applicants excluded via `_is_test_applicant`) — a job with no evaluated interviews yet returns `[]`. `overall_score`/`recommendation`/`summary` read from `evaluation.structured` first, falling back to top-level `evaluation` keys. Sorted by `evaluated_at` descending (empty string sorts last). See `backend/app/routers/jobs.py:get_interview_analysis`. **(2026-09-06)** `recruiter_screening`, `recruiter_screening_score`, `screening_status` added to each row — Interview Analysis is defined as recruiter screening + functional (never resume), so these merge the recruiter-screening half into the same list instead of requiring a separate fetch.
 
 #### POST /api/jobs/webhooks/interview-completed
 
@@ -1801,9 +1866,9 @@ Response:
 }
 ```
 
-Status codes: 200 OK; 404 "Invalid or expired scheduling token."; 400 "Invalid ISO datetime format."; 422 if request body missing the required "new_time" field; **429 Too Many Requests — "Too many requests. Please slow down and try again shortly." (2026-07-11; in-process rate limit ~30/60s per IP).**
+Status codes: 200 OK; 404 "Invalid or expired scheduling token."; 400 "Invalid ISO datetime format."; 400 **"Please choose a time in the future."** (`new_time < now − 1min`, grace buffer for clock skew); 400 **"Please choose a time within the next 60 days."** (`new_time > now + 60 days`) **(2026-09-06)**; 422 if request body missing the required "new_time" field; **429 Too Many Requests — "Too many requests. Please slow down and try again shortly." (2026-07-11; in-process rate limit ~30/60s per IP).**
 
-Notes: Mutates and commits the Applicant: functional stage sets functional_scheduled_at=parsed_time, functional_status=scheduled, sync_applicant_to_ai (non-fatal); screening stage sets screening_scheduled_at=parsed_time, screening_status=scheduled. Always increments calendar_sequence = (calendar_sequence or 0) + 1. If calendar_event_id exists, calls update_calendar_event (non-fatal). Resends send_ical_invitation_email (duration_minutes=30, sequence=calendar_sequence; non-fatal). Unlike /confirm, does NOT raise if no stage status is set. **(2026-09-05)** Immediately after the iCal email send, also fires a best-effort **WhatsApp confirmation** (`send_schedule_confirmation_whatsapp`, `app/utils/twilio_client.py`) in its own try/except — failure never affects the email or this response. No-ops when Twilio isn't configured or `applicant.phone` isn't a real number. **Request/response body UNCHANGED.**
+Notes: Mutates and commits the Applicant: functional stage sets functional_scheduled_at=parsed_time, functional_status=scheduled, sync_applicant_to_ai (non-fatal); screening stage sets screening_scheduled_at=parsed_time, screening_status=scheduled. Always increments calendar_sequence = (calendar_sequence or 0) + 1. If calendar_event_id exists, calls update_calendar_event (non-fatal). Resends send_ical_invitation_email (duration_minutes=30, sequence=calendar_sequence; non-fatal). Unlike /confirm, does NOT raise if no stage status is set. **(2026-09-05)** Immediately after the iCal email send, also fires a best-effort **WhatsApp confirmation** (`send_schedule_confirmation_whatsapp`, `app/utils/twilio_client.py`) in its own try/except — failure never affects the email or this response. No-ops when Twilio isn't configured or `applicant.phone` isn't a real number. **(2026-09-06)** Added an upper bound on `new_time`: previously only a past date was rejected, so a stray or malicious far-future date (e.g. year 3000) was accepted outright with no recruiter-configured scheduling window to check against; now rejects anything more than 60 days out (fixed safety rail, not a business rule), on top of the existing "must be in the future" check. **Request/response body shape UNCHANGED** (still `{"new_time": "..."}` in, `{"status","new_scheduled_time"}` out) — only the validation range changed.
 
 #### GET /api/public/careers/{subdomain}
 
@@ -2873,6 +2938,53 @@ templates, configured variable orders, and reminder batch settings. Secret value
 are never returned. Requires the same `x-internal-secret` header as the reminder
 runner; returns 401 when absent or incorrect.
 
+### `backend/app/routers/admin.py`
+
+**(New 2026-09-06)** Super-admin-only, platform-wide (cross-organisation) aggregate views. Mounted in `main.py` at prefix `/api/admin`. No existing endpoint aggregates across every organisation — the regular dashboard (and even a super_admin's own view of it, via `get_active_org_id`) is always scoped to exactly one organisation at a time.
+
+#### GET /api/admin/overview
+
+Platform-wide counts, a per-organisation table, and the most recently created users — the one view a super_admin has that a regular recruiter's org-scoped dashboard doesn't.
+
+- **Auth:** JWT httpOnly cookie (required) + `user_type == UserType.super_admin`, else **403**. Same gate as `GET /api/auth/organisations` / `POST /api/auth/switch-context`.
+- **Path params:** none
+- **Query params:** none
+
+Request: none
+
+Response (no response_model — always returns a dict):
+```json
+{
+  "organisation_count": "int",
+  "user_count": "int",
+  "job_count": "int",
+  "published_job_count": "int — Job.status == \"published\"",
+  "applicant_count": "int",
+  "organisations": [
+    {
+      "id": "string (UUID)",
+      "name": "string | null — Organisation.org_name",
+      "created_at": "string (ISO 8601) | null",
+      "job_count": "int — distinct Job rows for this org (outer join, so 0 for an org with none)"
+    }
+  ],
+  "recent_users": [
+    {
+      "id": "string (UUID)",
+      "name": "string",
+      "email": "string",
+      "user_type": "super_admin | org_admin | member | null",
+      "created_at": "string (ISO 8601) | null"
+    }
+  ]
+}
+```
+`organisations` is ordered by `Organisation.created_at DESC` (all organisations, not paginated). `recent_users` is the 10 most recently created `User` rows platform-wide (`ORDER BY created_at DESC LIMIT 10`), not filtered to any organisation.
+
+Status codes: 200 OK; 401 Unauthorized (not logged in); 403 `{"detail": "Only Super Admins can access this."}` (logged in but not super_admin).
+
+Notes: See `backend/app/routers/admin.py:get_admin_overview`/`_require_super_admin`. All counts are plain `COUNT(*)`/`COUNT(DISTINCT ...)` aggregates — no caching, computed fresh per request.
+
 ---
 
 ## Interview Engine — Fastify
@@ -3156,14 +3268,14 @@ Response:
   session: InterviewSession,   // full updated row (status='IN_PROGRESS', startedAt set, transcript updated)
   initialQuestion: string,     // first active question text, or fallback 'Tell me about your software engineering background.'
   startedAt: string,           // ISO 8601 — session.startedAt (set on this call if it was previously null)
-  deadlineAt: string,          // ISO 8601 — startedAt + hardLimitSeconds, from interview-policy.ts::deadlineFor
-  hardLimitSeconds: number     // effective hard cap for this session (min(settings.hardDurationSeconds, 1800)), from interview-policy.ts::hardLimitSeconds
+  deadlineAt: string,          // ISO 8601 — startedAt + hardLimitSeconds, from interview-policy.ts::deadlineFor (stage-aware, see 2026-09-06 note below)
+  hardLimitSeconds: number     // effective hard cap for this session, from interview-policy.ts::hardLimitSeconds (stage-aware, see 2026-09-06 note below)
 }
 ```
 
 Status codes: 200 OK; 403 `{ "error": "This interview link is invalid or has expired.", "code": "INVALID_TOKEN" }` when the session is token-bound and the `token` query param doesn't match; 403 recruiter-settings gates — `INTERVIEW_DISABLED` (settings.interviewEnabled === false), `NO_REATTEMPT` (settings.allowReattempt === false and status COMPLETED/EVALUATED), `LATE_ATTEMPT` (settings.allowLate === false and now > scheduledAt + 5min grace), `ACCESS_SCHEDULED_ONLY` / `ACCESS_INVITED_ONLY` (settings.accessControl), and `TOO_EARLY` `{ "error": "This interview has not opened yet. Please return at your scheduled time.", "code": "TOO_EARLY" }` (scheduledAt is set and now < scheduledAt − 10min early-entry window); 400 `CV_REQUIRED` (settings.requireCv === true and no candidate resume); 404/500 — uses findUniqueOrThrow, so unknown id throws (P2025) surfaced as 500-class; 429 rate limited.
 
-Notes: No Fastify schema. The token guard runs after the findUniqueOrThrow: only sessions with a non-null `inviteToken` enforce it, so token-free sessions are unaffected and the existing settings checks still apply. **Scheduled-slot barrier:** the `TOO_EARLY` guard is UNCONDITIONAL on any session that has a `scheduledAt` (not gated behind a setting) and rejects a start until the early-entry window opens (`scheduledAt − 10min`); `EARLY_ENTRY_MS` is a single shared constant exported from `@interviehire/shared` (`interview-engine/packages/shared/src/index.ts`), imported by both this route and the candidate room's `page.tsx` (which renders a countdown "waiting room" lobby until the same instant) — no more hand-kept-in-sync duplicate constants. Sessions with no `scheduledAt` (plain link / demo) are unaffected. firstQuestion = first isActive question (orderBy createdAt asc) of the jobRole, else fallback. Calls ensureTranscriptMeta(id). **2026-09-05 (LiveKit migration):** response gained `startedAt`/`deadlineAt`/`hardLimitSeconds` (previously only `session`/`initialQuestion`) so the candidate room's countdown and the LiveKit voice agent's timing both derive from the same server-issued values instead of recomputing locally; existing consumers reading only `session`/`initialQuestion` are unaffected by the additive fields.
+Notes: No Fastify schema. The token guard runs after the findUniqueOrThrow: only sessions with a non-null `inviteToken` enforce it, so token-free sessions are unaffected and the existing settings checks still apply. **Scheduled-slot barrier:** the `TOO_EARLY` guard is UNCONDITIONAL on any session that has a `scheduledAt` (not gated behind a setting) and rejects a start until the early-entry window opens (`scheduledAt − 10min`); `EARLY_ENTRY_MS` is a single shared constant exported from `@interviehire/shared` (`interview-engine/packages/shared/src/index.ts`), imported by both this route and the candidate room's `page.tsx` (which renders a countdown "waiting room" lobby until the same instant) — no more hand-kept-in-sync duplicate constants. Sessions with no `scheduledAt` (plain link / demo) are unaffected. firstQuestion = first isActive question (orderBy createdAt asc) of the jobRole, else fallback. Calls ensureTranscriptMeta(id). **2026-09-05 (LiveKit migration):** response gained `startedAt`/`deadlineAt`/`hardLimitSeconds` (previously only `session`/`initialQuestion`) so the candidate room's countdown and the LiveKit voice agent's timing both derive from the same server-issued values instead of recomputing locally; existing consumers reading only `session`/`initialQuestion` are unaffected by the additive fields. **2026-09-06 (stage-aware hard limits):** `deadlineAt`/`hardLimitSeconds`' VALUES now depend on `settings.stage` (stamped by `backend/app/utils/ai_sync.py`), per `interview-policy.ts::hardLimitSeconds`: `stage === 'screening'` → fixed 5 minutes (`SCREENING_HARD_LIMIT_SECONDS`); `stage === 'functional'` → fixed 25 minutes (`FUNCTIONAL_HARD_LIMIT_SECONDS`); any other/missing stage → unchanged generic behavior (`min(settings.hardDurationSeconds, 1800)`, i.e. recruiter-configurable up to a 30-minute ceiling). The two stage caps are fixed product limits, NOT overridable by `settings.hardDurationSeconds`. No field added or removed — same `deadlineAt`/`hardLimitSeconds` shape as before, just a different value depending on session stage.
 
 #### POST /api/interview/sessions/:id/livekit-token
 
@@ -3184,14 +3296,14 @@ Response:
   roomName: string,             // "interview-<sessionId>"
   participantIdentity: string,  // "candidate-<candidateId>-<8 hex chars>"
   startedAt: string,            // ISO 8601 — session.startedAt (must already be set — see 409 below)
-  deadlineAt: string,           // ISO 8601 — interview-policy.ts::deadlineFor(startedAt, settings)
-  hardLimitSeconds: number
+  deadlineAt: string,           // ISO 8601 — interview-policy.ts::deadlineFor(startedAt, settings) (stage-aware, see 2026-09-06 note below)
+  hardLimitSeconds: number      // stage-aware, see 2026-09-06 note below
 }
 ```
 
 Status codes: 200 OK; 403 (invite-token mismatch, same as `/start`); 404 `{"error":"Interview session not found","code":"SESSION_NOT_FOUND"}`; 409 `{"error":"Start the interview session before requesting a LiveKit token.","code":"SESSION_NOT_STARTED"}` (session isn't `IN_PROGRESS` yet or has no `startedAt` — call `/start` first); 409 `{"error":"This interview is not configured for conversational voice.","code":"LIVEKIT_NOT_ENABLED"}` (`settings.conversationalInterview !== true`); 503 `{"error":"LiveKit is not configured on the interview engine.","code":"LIVEKIT_NOT_CONFIGURED"}` when `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` aren't all set.
 
-Notes: Room name is deterministic per session (`interview-<sessionId>`) so the worker and the browser always converge on the same room without an extra coordination call. `roomConfig.agents` uses `RoomAgentDispatch({ agentName, metadata })` (`@livekit/protocol`) — LiveKit Cloud dispatches the named worker automatically on room creation; `metadata` (`{ sessionId, startedAt, deadlineAt }`) is what the worker's `agent.ts` reads via `ctx.job.metadata` to resolve its own timing without a second engine round-trip. The participant token's own `metadata` is intentionally narrower (`{ sessionId }` only). `departureTimeout: 30`, `maxParticipants: 2`.
+Notes: Room name is deterministic per session (`interview-<sessionId>`) so the worker and the browser always converge on the same room without an extra coordination call. `roomConfig.agents` uses `RoomAgentDispatch({ agentName, metadata })` (`@livekit/protocol`) — LiveKit Cloud dispatches the named worker automatically on room creation; `metadata` (`{ sessionId, startedAt, deadlineAt }`) is what the worker's `agent.ts` reads via `ctx.job.metadata` to resolve its own timing without a second engine round-trip. The participant token's own `metadata` is intentionally narrower (`{ sessionId }` only). `departureTimeout: 30`, `maxParticipants: 2`. **2026-09-06 (stage-aware hard limits):** same as `/start` above — `deadlineAt`/`hardLimitSeconds` (and therefore the token's `ttl = hardLimitSeconds + 5min` and the dispatched agent's `metadata.deadlineAt`) now derive from `settings.stage`: `'screening'` → fixed 5 minutes, `'functional'` → fixed 25 minutes, otherwise the unchanged recruiter-configurable-up-to-30-minutes behavior. No field added or removed.
 
 #### POST /api/interview/sessions/:id/complete
 
