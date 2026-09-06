@@ -81,7 +81,7 @@
   const _isLocal = /^(localhost|127\.|192\.168\.|10\.)/.test(location.hostname);
   const API = (qs.get('api') || (_isLocal
     ? location.protocol + '//' + location.hostname + ':8000/api'
-    : 'https://interviehire-backend-production-ca93.up.railway.app/api')).replace(/\/$/, '');
+    : 'https://backend-production-4daf.up.railway.app/api')).replace(/\/$/, '');
   const token = qs.get('token');
   const $ = (id) => document.getElementById(id);
   let CTX = {};
