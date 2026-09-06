@@ -136,6 +136,13 @@ class Settings(BaseSettings):
     # when unconfigured. See `app/jobs/reminders.py`.
     REMINDER_MINUTES_BEFORE: int = 30
     REMINDER_MAX_PER_RUN: int = 200
+    # How often the in-process scheduler runs the reminder job (see main.py's
+    # lifespan + app/jobs/reminders.py's _run_reminders_job) — distinct from
+    # REMINDER_MINUTES_BEFORE above, which is lead time before the interview,
+    # not how often this polls for candidates entering that window. The job
+    # was previously wired to no scheduler at all (code-complete, never
+    # invoked) — reminders silently never sent.
+    REMINDER_POLL_INTERVAL_MINUTES: int = 5
 
     class Config:
         env_file = ".env"

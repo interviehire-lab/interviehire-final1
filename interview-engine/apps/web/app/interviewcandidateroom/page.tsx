@@ -61,29 +61,6 @@ const DEFAULT_CALIBRATION: CalibrationResult = {
   headPitchDeg: 0,
 };
 
-const QUESTIONS: { text: string; tag: string; hint: string }[] = [
-  {
-    text: 'Tell me about a time you handled a difficult situation at work — what was the context, and how did you navigate it?',
-    tag: 'Behavioural',
-    hint: 'Take a breath. Aim for a 60–90 second answer.',
-  },
-  {
-    text: 'Walk me through a project you are most proud of. What was your specific contribution and the measurable outcome?',
-    tag: 'Experience',
-    hint: 'Use numbers where you can. Keep it focused on your role.',
-  },
-  {
-    text: 'Describe a disagreement you had with a teammate. How did you reach a resolution?',
-    tag: 'Teamwork',
-    hint: 'Show how you listen, not just how you argue.',
-  },
-  {
-    text: 'Where do you see the biggest opportunity for impact in this role within your first 90 days?',
-    tag: 'Strategy',
-    hint: 'Be specific and tie it back to the company.',
-  },
-];
-
 export default function Interview() {
   const [sessionId, setSessionId] = useState('demo-session');
   const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
@@ -91,9 +68,6 @@ export default function Interview() {
   const [messages, setMessages] = useState<any[]>([
     { speaker: 'ai', text: 'Welcome. I will ask a few structured questions. Please answer naturally with examples.' },
   ]);
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [questions, setQuestions] = useState<{ text: string; tag: string; hint: string }[]>(QUESTIONS);
-  const [elapsed, setElapsed] = useState(0);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   // Real-time "is the candidate actually speaking" signal for the self-view
@@ -118,30 +92,21 @@ export default function Interview() {
   const inviteTokenRef = useRef('');
   const sessionStartedRef = useRef(false);
   const captureStartedRef = useRef(false);
-  const [transcriptReady, setTranscriptReady] = useState(false);
-
-  // Post-interview report flow: legacy sessions use server ASR (with browser STT
-  // fallback); conversational sessions are persisted by the adaptive director.
-  // Both finalize and evaluate into the same report without a manual paste step.
+  // Report generation (LLM scoring + screening-outcome email) now runs entirely
+  // server-side via the evaluation poller (apps/api/src/jobs/evaluation-poller.ts)
+  // once POST /complete marks the session COMPLETED — the room no longer waits on
+  // or displays it. `ended` just gates the "Interview complete" screen + auto-close.
   const [ended, setEnded] = useState(false);
-  const [reportStatus, setReportStatus] = useState('');
-  const [reportBusy, setReportBusy] = useState(false);
-  const [report, setReport] = useState<any>(null);
-  // Recruiter-screening vs functional distinction: same room, same session mechanics,
-  // driven off the stage the backend stamped into InterviewSession.settings.
-  const [screeningOutcome, setScreeningOutcome] = useState<{ fits: boolean; link?: string; fitLabel?: string } | null>(null);
+  // Flips once the 5s auto-close timer has actually attempted window.close() —
+  // most browsers silently refuse to close a tab they didn't script-open, and
+  // there's no way to detect that in advance, so this drives a fallback message.
+  const [closeAttempted, setCloseAttempted] = useState(false);
   // One-shot guard for the server-anchored stage deadline (screening AND
   // functional, despite the name — kept to minimize diff churn).
   const screeningEndTriggeredRef = useRef(false);
   // Per-job interview settings + branding, synced from the recruiter dashboard.
   const [interviewSettings, setInterviewSettings] = useState<any>(null);
   const [interviewSettingsLoaded, setInterviewSettingsLoaded] = useState(false);
-  // Deliberately opt-in: unlike mature proctoring, real-time voice is new,
-  // metered, and must be enabled explicitly per job. LiveKit is the only
-  // voice provider — no per-job choice needed.
-  const conversationalInterviewEnabled = interviewSettings?.conversationalInterview === true;
-  const voiceProvider = conversationalInterviewEnabled ? 'livekit' : 'legacy';
-  const voiceInterviewEnabled = voiceProvider !== 'legacy';
   const [branding, setBranding] = useState<{ name?: string; primaryColor?: string; logoUrl?: string; whiteLabel?: boolean } | null>(null);
   const [startError, setStartError] = useState('');
   // Scheduled-slot barrier: when a session has a future scheduledAt, the room is
@@ -193,8 +158,6 @@ export default function Interview() {
   const [micDenied, setMicDenied] = useState(false);
   const [permissionsAcknowledged, setPermissionsAcknowledged] = useState(false);
 
-  const seenVoiceQuestionsRef = useRef<Set<number>>(new Set());
-  const questionsRef = useRef(questions);
   const endingRef = useRef(false);
   const endCallRef = useRef<() => Promise<void>>(async () => {});
 
@@ -224,15 +187,14 @@ export default function Interview() {
     if (hasStoredConsent(sessionId)) setConsentGiven(true);
   }, [sessionId]);
 
-  // Load per-job interview settings + company branding + the dynamic question
-  // list for a real session — all three come from the same GET /sessions/:id
-  // response, so one fetch covers what used to be two separate effects
-  // independently hitting the identical endpoint (visible in the engine log
-  // as the same GET firing twice per page load). Best effort: on any failure
-  // we stay permissive so the interview still runs.
+  // Load per-job interview settings + company branding for a real session —
+  // both come from the same GET /sessions/:id response, so one fetch covers
+  // what used to be two separate effects independently hitting the identical
+  // endpoint (visible in the engine log as the same GET firing twice per page
+  // load). Best effort: on any failure we stay permissive so the interview
+  // still runs.
   useEffect(() => {
     if (!sessionId || sessionId === 'demo-session') {
-      setQuestions(QUESTIONS);
       setInterviewSettingsLoaded(true);
       return;
     }
@@ -251,18 +213,6 @@ export default function Interview() {
         // Arm the scheduled-slot lobby if a future slot exists.
         const at = s?.scheduledAt ? new Date(s.scheduledAt).getTime() : NaN;
         if (Number.isFinite(at)) setScheduledAtMs(at);
-        if (s?.jobRole?.questions) {
-          const activeQuestions = s.jobRole.questions
-            .filter((q: any) => q.isActive !== false)
-            .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-          if (activeQuestions.length > 0) {
-            setQuestions(activeQuestions.map((q: any) => ({
-              text: q.text,
-              tag: q.topicCategories?.[0] || 'Technical',
-              hint: q.difficulty ? `${q.difficulty} difficulty. Take your time to answer.` : 'Think structured and explain with examples.',
-            })));
-          }
-        }
       } catch (err) {
         console.error('Failed to load session data:', err);
       } finally {
@@ -275,23 +225,12 @@ export default function Interview() {
     return () => { alive = false; };
   }, [sessionId]);
 
-  useEffect(() => {
-    questionsRef.current = questions;
-  }, [questions]);
-
   function handleVoiceTranscript(message: VoiceTranscript) {
     acceptExternalTranscript(message.role, message.text, message.isFinal);
     if (message.role !== 'interviewer' || !message.isFinal) return;
 
     setMessages((current) => [...current, { speaker: 'ai', text: message.text }]);
     const normalized = message.text.replace(/\s+/g, ' ').trim().toLowerCase();
-    const matchedIndex = questionsRef.current.findIndex(
-      (item) => item.text.replace(/\s+/g, ' ').trim().toLowerCase() === normalized,
-    );
-    if (matchedIndex >= 0 && !seenVoiceQuestionsRef.current.has(matchedIndex)) {
-      seenVoiceQuestionsRef.current.add(matchedIndex);
-      setQuestionIndex(matchedIndex);
-    }
     if (normalized.includes(CLOSING_LINE.toLowerCase())) void endCallRef.current();
   }
 
@@ -301,14 +240,13 @@ export default function Interview() {
   }
 
   const voice = useVoiceInterview({
-    provider: voiceProvider,
     sessionId,
     getInviteToken: () => inviteTokenRef.current,
     onTranscript: handleVoiceTranscript,
     onActivity: handleVoiceActivity,
     onEnded: () => void endCallRef.current(),
     onError: (detail, error) => {
-      console.error(`[${voiceProvider}] voice error`, error || detail);
+      console.error('[livekit] voice error', error || detail);
       setStartError(`Voice interview error: ${detail}`);
       setAssistantActivity('idle');
     },
@@ -325,7 +263,7 @@ export default function Interview() {
   // engine and voice worker own the authoritative 30-minute deadline, so a page
   // refresh or a suspended browser timer cannot extend the interview.
   useEffect(() => {
-    if (voiceProvider !== 'livekit' || !voiceDeadlineMs || ended) return;
+    if (!voiceDeadlineMs || ended) return;
     const tick = () => {
       const now = Date.now();
       setDeadlineNowMs(now);
@@ -334,7 +272,7 @@ export default function Interview() {
     tick();
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [ended, voiceDeadlineMs, voiceProvider]);
+  }, [ended, voiceDeadlineMs]);
 
   // Lobby heartbeat: drives the countdown and auto-unlocks the room the moment
   // the entry window opens. Only runs while genuinely waiting, so it stops once
@@ -477,15 +415,6 @@ export default function Interview() {
     return Number.isFinite(t) ? t : null;
   }, [stageDeadlineAt]);
 
-  // --- Elapsed timer (starts once calibration is done) ---
-  // Only drives the "Elapsed" display fallback for non-staged (demo/legacy)
-  // sessions now — staged sessions use the server-anchored countdown below.
-  useEffect(() => {
-    if (!calibration) return;
-    const t = setInterval(() => setElapsed((e) => e + 1), 1000);
-    return () => clearInterval(t);
-  }, [calibration]);
-
   // --- Recruiter-screening / functional: hard server-anchored cutoff, auto-ends
   // the call exactly once. Ticks the same deadlineNowMs clock as the LiveKit
   // deadline effect above so every countdown on screen stays in lockstep. ---
@@ -624,23 +553,18 @@ export default function Interview() {
         // Server-anchored deadline for recruiter-screening/functional sessions —
         // see the stageDeadlineAt declaration above for why this is reload-proof.
         if (typeof startJson?.deadlineAt === 'string') setStageDeadlineAt(startJson.deadlineAt);
-        if (voiceInterviewEnabled) {
-          await voice.connect();
-        }
+        await voice.connect();
       } catch (err) {
         console.error('early session start failed', err);
-        if (voiceInterviewEnabled) {
-          setStartError(`Voice interview could not start: ${err instanceof Error ? err.message : 'Unknown voice provider error'}`);
-        }
+        setStartError(`Voice interview could not start: ${err instanceof Error ? err.message : 'Unknown voice provider error'}`);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consentGiven, socket, interviewSettingsLoaded, voiceInterviewEnabled, voice]);
+  }, [consentGiven, socket, interviewSettingsLoaded, voice]);
 
   // --- Auto-start recording + publish the mic once calibrated + connected ---
   // The LiveKit room itself was already connected by the early effect above;
-  // this only publishes the candidate's mic track against it (and, on the
-  // legacy/non-voice path, is where proctoring + recording always started).
+  // this only publishes the candidate's mic track against it.
   useEffect(() => {
     if (!calibration || !interviewSettingsLoaded || sessionStartedRef.current) return;
     if (socket?.readyState !== WebSocket.OPEN) return;
@@ -655,44 +579,37 @@ export default function Interview() {
         // its integrity scoring — detection is gated until this is called.
         startProctoringSession();
         await startRecording();
-        if (voiceInterviewEnabled) {
-          setAssistantActivity('thinking');
-          await voice.publishMicrophone(micStreamRef.current?.getAudioTracks()[0] ?? null);
-        }
-        // Transcript capture (markStart + browser STT + auto interviewer-audio
-        // capture) is started in the calibration-gated effect below — NOT here —
-        // so it never depends on the proctoring WebSocket being OPEN. A flaky WS
-        // for a scheduled session used to block this whole effect, so candidate
+        setAssistantActivity('thinking');
+        await voice.publishMicrophone(micStreamRef.current?.getAudioTracks()[0] ?? null);
+        // Transcript capture (markStart + auto interviewer-audio capture) is
+        // started in the calibration-gated effect below — NOT here — so it
+        // never depends on the proctoring WebSocket being OPEN. A flaky WS for
+        // a scheduled session used to block this whole effect, so candidate
         // STT never started and the interview captured zero transcript events.
       } catch (err) {
         console.error('startSession failed', err);
-        if (voiceInterviewEnabled) {
-          setStartError(`Voice interview could not start: ${err instanceof Error ? err.message : 'Unknown voice provider error'}`);
-        }
+        setStartError(`Voice interview could not start: ${err instanceof Error ? err.message : 'Unknown voice provider error'}`);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calibration, socket, interviewSettingsLoaded, voiceInterviewEnabled, voice, startError]);
+  }, [calibration, socket, interviewSettingsLoaded, voice, startError]);
 
-  // Start transcript capture as soon as calibration is done, independent of the
-  // proctoring WebSocket. Flag-off candidate speech prefers server-side
-  // Deepgram/Whisper with browser STT as a keyless/error fallback. Flag-on calls
-  // are transcribed and persisted by LiveKit's Deepgram STT plus the
-  // server-side director.
+  // Start transcript capture as soon as calibration is done, independent of
+  // the proctoring WebSocket. Candidate speech is transcribed and persisted
+  // by LiveKit's Deepgram STT plus the server-side director.
   useEffect(() => {
     if (!calibration || !interviewSettingsLoaded || captureStartedRef.current) return;
     captureStartedRef.current = true;
     transcript.markStart();
-    if (voiceInterviewEnabled) return;
-    const micStream = videoRef.current?.srcObject as MediaStream | null;
-    void transcript.startCandidateCaptureFromStream(micStream).then((result) => {
-      if (!result.ok) transcript.startBrowserSTT();
-    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calibration, interviewSettingsLoaded, voiceInterviewEnabled]);
+  }, [calibration, interviewSettingsLoaded]);
 
-  // End → stop candidate capture, finalize the .txt, complete the session, and
-  // evaluate into the report. Fully automatic.
+  // End → stop candidate capture, finalize the .txt, and mark the session
+  // complete. Fully automatic. Report generation (LLM scoring + the
+  // screening-outcome email) is no longer awaited here — the evaluation
+  // poller picks up COMPLETED sessions server-side (see server.ts /
+  // jobs/evaluation-poller.ts), so it keeps running even after this tab
+  // closes itself a few seconds from now.
   async function endCall() {
     if (endingRef.current) return;
     endingRef.current = true;
@@ -707,60 +624,40 @@ export default function Interview() {
     wsRef.current?.close();
     setWsReconnecting(false);
     setEnded(true);
-    setReportBusy(true);
     try {
       stopRecordingCapture();
-      transcript.stopBrowserSTT();
       endProctoringSession();
 
-      setReportStatus('Transcribing interview audio…');
-      await transcript.stopCandidateCapture();
-
       await transcript.flush();
-
-      setReportStatus('Building transcript…');
-      const fin = await transcript.finalize();
-      if (fin?.status === 'finalized' || fin?.status === 'empty') setTranscriptReady(true);
+      await transcript.finalize();
 
       await fetch(`${API_URL}/api/interview/sessions/${sessionId}/complete${inviteTokenRef.current ? `?token=${encodeURIComponent(inviteTokenRef.current)}` : ''}`, { method: 'POST' });
-
-      setReportStatus('Generating report from transcript…');
-      const eRes = await fetch(`${API_URL}/api/interviews/${sessionId}/report`, { method: 'POST' });
-      const eJson = await eRes.json();
-      if (eRes.ok && eJson?.evaluation) {
-        setReport(eJson.evaluation);
-        setReportStatus(`Report generated (engine: ${eJson.engine}).`);
-
-        if (sessionStage === 'screening') {
-          setReportStatus('Checking fit for the next round…');
-          try {
-            const oRes = await fetch(`${API_URL}/api/interviews/${sessionId}/screening-outcome`, { method: 'POST' });
-            const oJson = await oRes.json();
-            if (oRes.ok) setScreeningOutcome(oJson);
-            // On failure we deliberately leave screeningOutcome null — the room falls
-            // back to showing the raw report card instead of trapping the candidate.
-          } catch {
-            /* best-effort — fall back to the raw report card */
-          }
-        }
-      } else {
-        setReportStatus(eJson?.error || 'Report generation failed.');
-      }
     } catch (err) {
       console.error('endCall failed', err);
-      setReportStatus(err instanceof Error ? err.message : 'Could not generate the report.');
-    } finally {
-      setReportBusy(false);
     }
   }
 
   endCallRef.current = endCall;
 
+  // Auto-close 5s after the "Interview complete" screen appears. Most browsers
+  // silently refuse to script-close a tab they didn't script-open (how a
+  // candidate normally arrives here, via a direct link) — there's no reliable
+  // way to detect that in advance, so closeAttempted just flips the on-screen
+  // message to "you may now close this tab" if the close call didn't work.
+  useEffect(() => {
+    if (!ended) return;
+    const t = setTimeout(() => {
+      setCloseAttempted(true);
+      try { window.close(); } catch { /* ignored — see comment above */ }
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [ended]);
+
   function toggleMic() {
     const stream = videoRef.current?.srcObject as MediaStream | null;
     const next = !micOn;
     stream?.getAudioTracks().forEach((t) => (t.enabled = next));
-    if (voiceInterviewEnabled) voice.setMuted(!next);
+    voice.setMuted(!next);
     setMicOn(next);
   }
 
@@ -1012,14 +909,7 @@ export default function Interview() {
   const liveKitRemainingSeconds = voiceDeadlineMs == null
     ? voice.hardLimitSeconds
     : Math.max(0, Math.ceil((voiceDeadlineMs - deadlineNowMs) / 1000));
-  const stageRemainingSeconds = stageDeadlineMs == null
-    ? null
-    : Math.max(0, Math.ceil((stageDeadlineMs - deadlineNowMs) / 1000));
-  const clockSeconds = voiceProvider === 'livekit'
-    ? liveKitRemainingSeconds
-    : isStagedSession && stageRemainingSeconds != null
-      ? stageRemainingSeconds
-      : elapsed;
+  const clockSeconds = liveKitRemainingSeconds;
   const mm = String(Math.floor(clockSeconds / 60)).padStart(2, '0');
   const ss = String(clockSeconds % 60).padStart(2, '0');
   const clock = `${mm}:${ss}`;
@@ -1030,12 +920,10 @@ export default function Interview() {
   // 'connecting' (a proper waiting room, not a flash of whatever room-level
   // state happened to be true) until the worker's own readiness signal
   // (voice.agentConnected) arrives.
-  const awaitingAgent = voiceInterviewEnabled && !ended && !voice.agentConnected;
-  const assistantMode: AssistantMode = reportBusy
-    ? 'thinking'
-    : ended
-      ? 'complete'
-      : awaitingAgent || wsReconnecting || socket?.readyState !== 1
+  const awaitingAgent = !ended && !voice.agentConnected;
+  const assistantMode: AssistantMode = ended
+    ? 'complete'
+    : awaitingAgent || wsReconnecting || socket?.readyState !== 1
         ? 'connecting'
         : assistantActivity === 'speaking'
           ? 'speaking'
@@ -1044,8 +932,6 @@ export default function Interview() {
             : calibration
               ? 'listening'
               : 'idle';
-  const qIdx = Math.min(questionIndex, Math.max(0, questions.length - 1));
-  const question = questions[qIdx] || { text: 'No questions loaded.', tag: 'Interview', hint: 'Please wait.' };
 
   const isMobileDevice = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
   const mobileBlocked = !!interviewSettings && interviewSettings.allowMobile === false && isMobileDevice;
@@ -1418,7 +1304,7 @@ export default function Interview() {
           </div>
         )}
 
-        <main className={`content${voiceInterviewEnabled ? ' content--conversational' : ''}`}>
+        <main className="content content--conversational">
           <section className="avatar-panel">
             <AIVisualAssistant
               mode={assistantMode}
@@ -1453,63 +1339,22 @@ export default function Interview() {
               </div>
             </section>
 
-            {/* Demo/debug only: proves whether browser STT is actually hearing
-                anything, live — instead of only finding out after the interview
-                ends with an empty "Transcript unavailable" report. */}
+            {/* Demo/debug only: live caption feed, driven by the LiveKit
+                director's transcript events (acceptExternalTranscript). */}
             {isDemoOrDebug && (
               <div className="stt-debug-bar">
                 <span className={`stt-dot stt-${transcript.sttStatus}`} />
-                {transcript.sttStatus === 'unsupported'
-                  ? 'STT unsupported in this browser — use Chrome or Edge'
-                  : transcript.sttStatus === 'unavailable'
-                  ? 'Live transcription unavailable here — server ASR or Chrome/Edge required'
-                  : transcript.sttStatus === 'error'
-                  ? `STT error: ${transcript.sttError}`
-                  : transcript.liveCaption
-                  ? `"${transcript.liveCaption}"`
-                  : 'Listening for your voice…'}
+                {transcript.liveCaption ? `"${transcript.liveCaption}"` : 'Listening for your voice…'}
               </div>
             )}
           </section>
-
-          {!voiceInterviewEnabled && (
-            <aside className="right-stack">
-              <section className="question-card">
-                <div className="question-top">
-                  <div className="tag">{question.tag}</div>
-                </div>
-                <h2>{question.text}</h2>
-                <div className="question-meta">
-                  Question {String(qIdx + 1).padStart(2, '0')}/{String(questions.length).padStart(2, '0')}
-                </div>
-                <p>{question.hint}</p>
-                <div className="question-actions">
-                  <button
-                    className="circle-btn"
-                    type="button"
-                    disabled={qIdx === 0}
-                    onClick={() => setQuestionIndex((i) => Math.max(0, i - 1))}
-                  >
-                    ‹
-                  </button>
-                  <button
-                    className="next-btn"
-                    type="button"
-                    onClick={() => setQuestionIndex((i) => Math.min(questions.length - 1, i + 1))}
-                  >
-                    NEXT ›
-                  </button>
-                </div>
-              </section>
-            </aside>
-          )}
         </main>
 
         <footer className="controlbar">
           <div className="control-time">
             <i className="red-dot" />
             <span>{clock}</span>
-            <span className="elapsed-label">{voiceProvider === 'livekit' || isStagedSession ? 'Remaining' : 'Elapsed'} · {recordingStatus}</span>
+            <span className="elapsed-label">Remaining · {recordingStatus}</span>
             <button type="button" className="debug-toggle" onClick={() => setShowDebug((v) => !v)} title="Toggle proctoring debug (Ctrl+Shift+D or ` )">
               🐞 Debug
             </button>
@@ -1536,126 +1381,23 @@ export default function Interview() {
           >
             <div
               style={{
-                width: 'min(760px, 94vw)', maxHeight: '90vh', overflow: 'auto', color: '#e6edff',
+                width: 'min(480px, 94vw)', color: '#e6edff', textAlign: 'center',
                 background: 'linear-gradient(180deg,#0c1426,#080d1a)', border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 18, padding: '26px 28px', boxShadow: '0 30px 80px rgba(0,0,0,0.55)',
+                borderRadius: 18, padding: '32px 28px', boxShadow: '0 30px 80px rgba(0,0,0,0.55)',
               }}
             >
               <p style={{ margin: 0, fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#7dd3fc' }}>
                 Interview complete
               </p>
-              <h2 style={{ margin: '6px 0 4px', fontSize: 22, fontWeight: 800 }}>
-                {!report
-                  ? 'Generating the interview report'
-                  : sessionStage === 'screening' && screeningOutcome
-                  ? (screeningOutcome.fits ? "You're moving to the next round" : 'Thanks for your time')
-                  : 'Interview report'}
+              <h2 style={{ margin: '10px 0 8px', fontSize: 22, fontWeight: 800 }}>
+                Thanks for your time
               </h2>
-
-              {report && sessionStage === 'screening' && screeningOutcome ? (
-                <div style={{ marginTop: 6 }}>
-                  {screeningOutcome.fits ? (
-                    <>
-                      <p style={{ margin: '0 0 18px', fontSize: 13.5, lineHeight: 1.65, color: '#c7d4ee' }}>
-                        Nice work — based on your screening conversation, you're a good fit to continue.
-                        Click below to start your functional interview.
-                      </p>
-                      {screeningOutcome.link ? (
-                        <a
-                          href={screeningOutcome.link}
-                          style={{
-                            display: 'inline-block', padding: '12px 22px', borderRadius: 10, fontWeight: 700,
-                            fontSize: 14, color: '#04121f', background: '#7dd3fc', textDecoration: 'none',
-                          }}
-                        >
-                          Continue to Functional Interview →
-                        </a>
-                      ) : (
-                        <p style={{ fontSize: 13, color: '#9fb2d4' }}>
-                          Your recruiter will follow up shortly with your next interview link.
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.65, color: '#c7d4ee' }}>
-                      Thanks for taking the time to speak with us today. Your responses have been recorded and
-                      our team will follow up with you shortly on next steps.
-                    </p>
-                  )}
-                </div>
-              ) : !report ? (
-                <>
-                  <p style={{ margin: '0 0 14px', fontSize: 13.5, lineHeight: 1.6, color: '#9fb2d4' }}>
-                    The transcript was captured automatically — your speech via speech-to-text and the
-                    interviewer's voice from the interview audio — then transcribed and scored. No paste needed.
-                  </p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6, flexWrap: 'wrap' }}>
-                    <span
-                      style={{
-                        display: 'inline-block', width: 16, height: 16, borderRadius: '50%',
-                        border: '2px solid rgba(125,211,252,0.35)', borderTopColor: '#7dd3fc',
-                        animation: reportBusy ? 'spin 0.8s linear infinite' : 'none', opacity: reportBusy ? 1 : 0,
-                      }}
-                    />
-                    <span style={{ fontSize: 13, color: '#9fb2d4' }}>{reportStatus || 'Working…'}</span>
-                    <style>{'@keyframes spin{to{transform:rotate(360deg)}}'}</style>
-                  </div>
-                  {transcriptReady && (
-                    <a
-                      href={transcript.downloadUrl()}
-                      download
-                      style={{ display: 'inline-block', marginTop: 14, fontSize: 12.5, color: '#7dd3fc', textDecoration: 'underline' }}
-                    >
-                      ⬇ Download full interview transcript (.txt)
-                    </a>
-                  )}
-                </>
-              ) : (
-                <div style={{ marginTop: 6 }}>
-                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 14 }}>
-                    <div style={{ flex: '1 1 160px', background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '14px 16px' }}>
-                      <p style={{ margin: 0, fontSize: 11, textTransform: 'uppercase', color: '#9fb2d4' }}>Overall</p>
-                      <p style={{ margin: '4px 0 0', fontSize: 30, fontWeight: 800 }}>
-                        {report.overallScore ?? '–'}<span style={{ fontSize: 14, color: '#7e90b2' }}>/100</span>
-                      </p>
-                    </div>
-                    <div style={{ flex: '1 1 160px', background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '14px 16px' }}>
-                      <p style={{ margin: 0, fontSize: 11, textTransform: 'uppercase', color: '#9fb2d4' }}>Recommendation</p>
-                      <p style={{ margin: '4px 0 0', fontSize: 16, fontWeight: 800, textTransform: 'capitalize' }}>
-                        {String(report.recommendation ?? '–').replace(/_/g, ' ')}
-                      </p>
-                    </div>
-                    {report.proctoringSummary && (
-                      <div style={{ flex: '1 1 160px', background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '14px 16px' }}>
-                        <p style={{ margin: 0, fontSize: 11, textTransform: 'uppercase', color: '#9fb2d4' }}>Proctoring</p>
-                        <p style={{ margin: '4px 0 0', fontSize: 14, fontWeight: 700 }}>
-                          {report.proctoringSummary.eventCount} events
-                          <span style={{ color: '#f87171' }}> · {report.proctoringSummary.criticalOrHighCount} high</span>
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                  {report.summary && (
-                    <p style={{ fontSize: 13.5, lineHeight: 1.65, color: '#c7d4ee' }}>{report.summary}</p>
-                  )}
-                  <details style={{ marginTop: 10 }}>
-                    <summary style={{ cursor: 'pointer', fontSize: 12.5, color: '#7dd3fc' }}>View full report JSON</summary>
-                    <pre style={{ marginTop: 8, maxHeight: 280, overflow: 'auto', fontSize: 11, lineHeight: 1.5, color: '#cbd5e1', background: 'rgba(0,0,0,0.35)', borderRadius: 10, padding: 12 }}>
-                      {JSON.stringify(report, null, 2)}
-                    </pre>
-                  </details>
-                  {transcriptReady && (
-                    <a
-                      href={transcript.downloadUrl()}
-                      download
-                      style={{ display: 'inline-block', marginTop: 12, fontSize: 12.5, color: '#7dd3fc', textDecoration: 'underline' }}
-                    >
-                      ⬇ Download full interview transcript (.txt)
-                    </a>
-                  )}
-                  <p style={{ marginTop: 12, fontSize: 12, color: '#9fb2d4' }}>{reportStatus} It also persists to the dashboard's Deep Analysis.</p>
-                </div>
-              )}
+              <p style={{ margin: '0 0 18px', fontSize: 13.5, lineHeight: 1.65, color: '#c7d4ee' }}>
+                Your responses have been recorded. Our team will follow up with next steps by email shortly.
+              </p>
+              <p style={{ margin: 0, fontSize: 12, color: '#9fb2d4' }}>
+                {closeAttempted ? 'You may now close this tab.' : 'This window will close automatically in a few seconds…'}
+              </p>
             </div>
           </div>
         )}

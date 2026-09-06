@@ -26,6 +26,7 @@ Trigger it however your host allows — both share this one function:
 - CLI:      ``python -m app.jobs.reminders [--dry-run] [--limit N]``
 - Endpoint: ``POST /api/internal/run-reminders`` (x-internal-secret; ``?dry_run=false`` to arm)
 """
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -37,6 +38,8 @@ from app.models.applicant import Applicant, InterviewStatus
 from app.models.job import Job
 from app.utils.email_sender import send_interview_reminder_email
 from app.utils.twilio_client import build_content_variables, send_whatsapp_message, place_reminder_call
+
+logger = logging.getLogger(__name__)
 
 # stage key -> (scheduled_at column, status column, reminder_sent_at column, display name)
 STAGES = {
@@ -184,6 +187,22 @@ def run_reminders(db: Session, *, dry_run: bool = True, limit: Optional[int] = N
         result["sample"] = dry_run_sample[:20]
 
     return result
+
+
+def _run_reminders_job() -> None:
+    """Entry point for the in-process scheduler (see main.py's lifespan). Opens
+    its own DB session — this runs on APScheduler's own background thread, so
+    it can't reuse a request-scoped session — and never lets one bad run take
+    down future scheduled runs."""
+    db = SessionLocal()
+    try:
+        result = run_reminders(db, dry_run=False)
+        if result.get("candidates_found") or result.get("errors"):
+            logger.info(f"Reminder job run: {result}")
+    except Exception:
+        logger.exception("Reminder job run failed")
+    finally:
+        db.close()
 
 
 def main(argv=None) -> None:

@@ -12,6 +12,7 @@ import { interviewRoutes } from './routes/interview.routes.js';
 import { transcriptRoutes } from './routes/transcript.routes.js';
 import { internalRoutes } from './routes/internal.routes.js';
 import { registerWebsocket } from './websocket/gateway.js';
+import { runEvaluationPoll } from './jobs/evaluation-poller.js';
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(serverDirectory, '../../../.env') });
@@ -61,6 +62,15 @@ await app.register(transcriptRoutes, { prefix: '/api/interviews' });
 await app.register(assistantRoutes, { prefix: '/api/assistant' });
 await app.register(internalRoutes, { prefix: '/internal' });
 await registerWebsocket(app);
+
+// Post-interview report + screening-outcome generation (previously run
+// synchronously in the candidate's browser — see jobs/evaluation-poller.ts for
+// why that moved here) — polls for sessions the candidate room has marked
+// COMPLETED and evaluates them independently of the candidate's browser.
+const evaluationPollIntervalMs = Number(process.env.EVALUATION_POLL_INTERVAL_MS || 15_000);
+setInterval(() => {
+  runEvaluationPoll(app).catch((err) => app.log.error(err, 'evaluation poll failed'));
+}, evaluationPollIntervalMs);
 
 const port = Number(process.env.PORT || 4000);
 app.listen({ port, host: '0.0.0.0' }).catch(err => { app.log.error(err); process.exit(1); });

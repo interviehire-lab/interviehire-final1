@@ -11,6 +11,7 @@ import { createTopic, createQuestionBlueprint, toFunctionalParameters, toScreeni
 import { request, API_BASE, apiLogin, apiSignup, apiMe, apiLogout, isAuthed, clearAuthed, apiOnboarding, apiListOrganisations, apiSwitchContext, apiClearContext } from '../auth-client';
 import { defaultInterviewSettings } from './state';
 import type { Candidate, Job, CandidateReport, InterviewStatusLabel } from './types';
+import { mapInterviewStatus as mapInterviewStatusPure } from './interview-status';
 
 // Auth + HTTP primitives live in ../auth-client.js (dependency-free so the lean
 // /login + /signup pages can reuse them). Re-export for existing callers here.
@@ -626,18 +627,11 @@ function mapJobToParametersPayload(job) {
 }
 
 // Normalise a backend interview status (snake_case) to the dashboard enum so the
-// status chips never mislabel — unknown/absent reads as null (→ "Not Started").
+// status chips never mislabel — unknown/absent reads as null. Delegates to the
+// pure, dependency-free implementation in interview-status.ts (single source of
+// truth, and the one that's actually unit-tested — see dashboard/tests/).
 function mapInterviewStatus(s: unknown): InterviewStatusLabel | null {
-  if (!s) return null;
-  const k = String(s).toLowerCase().replace(/\s+/g, '_');
-  const map: Record<string, InterviewStatusLabel> = {
-    completed: 'Completed', incomplete: 'Incomplete', evaluating: 'Evaluating',
-    attempting: 'Attempting', in_progress: 'Attempting', not_started: 'Not Started',
-    scheduled: 'Not Started', pending: 'Not Started', slot_missed: 'Slot Missed', missed: 'Slot Missed',
-  };
-  // Unknown backend values fall through to a title-cased label outside the
-  // documented union; cast so the mapper's contract stays InterviewStatusLabel.
-  return map[k] || ((k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' ')) as InterviewStatusLabel);
+  return mapInterviewStatusPure(s) as InterviewStatusLabel | null;
 }
 
 function mapApplicantOutToCandidate(a: any = {}): Candidate {

@@ -51,7 +51,6 @@ export default function VoiceTestPage() {
   }, []);
 
   const voice = useVoiceInterview({
-    provider: 'livekit',
     sessionId,
     getInviteToken: () => '',
     onTranscript: handleTranscript,

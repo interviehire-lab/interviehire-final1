@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
-    "start": "next start"
+    "start": "next start",
+    "test:interview-status": "node tests/interview-status.test.mjs"
   },
   "devDependencies": {
     "@types/node": "26.1.1",

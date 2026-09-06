@@ -25,6 +25,10 @@ enum SessionStatus {
   SCHEDULED
   IN_PROGRESS
   COMPLETED
+  // Transient claim marker: the evaluation poller (app/jobs/evaluation-poller.ts)
+  // flips COMPLETED -> EVALUATING atomically before starting the slow LLM work,
+  // so two poll ticks (or instances) can't double-process the same session.
+  EVALUATING
   EVALUATED
   CANCELLED
 }

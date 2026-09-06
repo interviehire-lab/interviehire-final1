@@ -12,7 +12,6 @@ import { analyzeAiToneHeuristics, type AiToneAssessment } from '@interviehire/sh
 //   • queue events and flush them to the backend in batches
 //   • survive network interruptions (failed flushes are re-queued + retried;
 //     a final flush is attempted on tab close via sendBeacon)
-//   • optionally drive the browser Web Speech API to capture candidate speech
 //
 // The backend ALSO captures the conversation server-side, so this layer is
 // additive — duplicates are removed during finalization. That means a flaky mic
@@ -35,33 +34,11 @@ interface QueuedEvent extends TranscriptEventInput {
 }
 
 const FLUSH_INTERVAL_MS = 4000;
-const SEGMENT_MS = 20000;
-
-function createAudioRecorder(stream: MediaStream): MediaRecorder {
-  const mimeType = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4;codecs=mp4a.40.2',
-    'audio/mp4',
-  ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
-  return mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-}
 
 export function useTranscript(sessionId: string) {
   const startRef = useRef<number>(Date.now());
   const queueRef = useRef<QueuedEvent[]>([]);
   const flushingRef = useRef(false);
-  const recognitionRef = useRef<any>(null);
-  const candidateRecorderRef = useRef<MediaRecorder | null>(null);
-  const candidateStreamRef = useRef<MediaStream | null>(null);
-  // When the caller supplies a webcam-only stream, this hook acquires and owns
-  // a microphone stream itself. Keeping ownership explicit lets recording code
-  // share external tracks without this hook stopping them on teardown.
-  const candidateOwnedMicRef = useRef<MediaStream | null>(null);
-  const candidateStartMsRef = useRef<number>(0);
-  const candidateSegTimerRef = useRef<any>(null);
-  const candidateActiveRef = useRef<boolean>(false);
-  const candidateUploadsRef = useRef<Set<Promise<any>>>(new Set());
 
   // Live flagcheck: accumulate the candidate's finalized speech and run the
   // synchronous tier-1 AI-tone heuristics over it so the room can surface a
@@ -70,12 +47,9 @@ export function useTranscript(sessionId: string) {
   const candidateTextRef = useRef<string>('');
   const [aiToneAssessment, setAiToneAssessment] = useState<AiToneAssessment | null>(null);
 
-  // Visibility into browser STT — this used to fail 100% silently (no console
-  // output, no UI, zero transcript captured) for any of: unsupported browser
-  // (Firefox/Safari have no SpeechRecognition), mic permission actually denied,
-  // no network reaching the browser's speech backend, or repeated 'no-speech'/
-  // 'not-allowed'/'service-not-allowed' errors. `sttStatus`/`sttError` let the
-  // room show a real indicator instead of silently producing an empty transcript.
+  // Live-transcription status for the room's debug caption bar, driven by
+  // acceptExternalTranscript() below (the LiveKit director's transcript
+  // events) — flips to 'listening' once the first utterance arrives.
   const [sttStatus, setSttStatus] = useState<'unsupported' | 'unavailable' | 'idle' | 'listening' | 'error'>('idle');
   const [sttError, setSttError] = useState<string | null>(null);
   // Live caption text (interim + final), for the demo/debug on-screen caption —
@@ -194,244 +168,6 @@ export function useTranscript(sessionId: string) {
     [sessionId],
   );
 
-  // ── Browser Web Speech API fallback for candidate speech ──
-  const startBrowserSTT = useCallback(() => {
-    if (typeof window === 'undefined') return false;
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      console.error('[STT] SpeechRecognition unsupported in this browser — candidate speech will NOT be captured. Use Chrome or Edge.');
-      setSttStatus('unsupported');
-      setSttError('Speech recognition is not supported in this browser (need Chrome or Edge).');
-      return false;
-    }
-    if (recognitionRef.current) return false;
-    try {
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = 'en-US';
-      rec.onresult = (e: any) => {
-        setSttStatus('listening');
-        let interim = '';
-        for (let i = e.resultIndex; i < e.results.length; i += 1) {
-          const result = e.results[i];
-          const transcript = result[0]?.transcript ?? '';
-          if (result.isFinal) {
-            recordEvent({ speaker: 'candidate', text: transcript, source: 'browser_stt', isFinal: true });
-          } else {
-            interim += transcript;
-          }
-        }
-        setLiveCaption(interim || (queueRef.current[queueRef.current.length - 1]?.text ?? ''));
-      };
-      rec.onerror = (e: any) => {
-        // A silent no-speech timeout is normal (candidate pausing) — everything
-        // else is worth knowing about, since this used to fail with zero trace.
-        if (e?.error === 'no-speech') return;
-        if (e?.error === 'network' || e?.error === 'service-not-allowed') {
-          console.info('[STT] browser speech service is unavailable; server ASR is required in this browser.');
-          // Prevent onend from entering an endless restart/error loop. Browsers
-          // such as the in-app preview expose SpeechRecognition but cannot reach
-          // the vendor speech service, which is availability—not mic failure.
-          recognitionRef.current = null;
-          setSttStatus('unavailable');
-          setSttError('Live transcription is unavailable in this browser. Configure server ASR or use Chrome/Edge.');
-          try { rec.stop(); } catch { /* noop */ }
-          return;
-        }
-        console.error('[STT] recognition error:', e?.error, e?.message || '');
-        setSttStatus('error');
-        setSttError(String(e?.error || 'unknown error'));
-      };
-      rec.onend = () => {
-        // auto-restart while we still hold the ref (network blips end recognition)
-        if (recognitionRef.current === rec) {
-          try { rec.start(); } catch (err) { console.error('[STT] restart failed:', err); }
-        }
-      };
-      rec.start();
-      recognitionRef.current = rec;
-      setSttError(null);
-      setSttStatus('idle'); // flips to 'listening' on first onresult
-      return true;
-    } catch (err) {
-      console.error('[STT] failed to start:', err);
-      setSttStatus('error');
-      setSttError(String((err as any)?.message || err));
-      return false;
-    }
-  }, [recordEvent]);
-
-  const stopBrowserSTT = useCallback(() => {
-    const rec = recognitionRef.current;
-    recognitionRef.current = null;
-    try { rec?.stop(); } catch { /* noop */ }
-  }, []);
-
-  useEffect(() => () => { stopBrowserSTT(); }, [stopBrowserSTT]);
-
-  // Upload one finished candidate-audio segment (a self-contained webm) for
-  // server-side Deepgram/Whisper transcription. startMs anchors the segment on
-  // the interview clock.
-  const uploadAudioSegment = useCallback(async (
-    blob: Blob,
-    startMs: number,
-    speaker: TranscriptSpeaker,
-  ) => {
-    if (!blob.size || !sessionId) return null;
-    try {
-      // Fields MUST come before the file (@fastify/multipart's req.file() only
-      // exposes fields parsed before the file part).
-      const form = new FormData();
-      form.append('speaker', speaker);
-      form.append('startMs', String(Math.max(0, Math.round(startMs))));
-      const extension = blob.type.includes('mp4') ? 'mp4' : 'webm';
-      form.append('file', blob, `${speaker}-${Date.now()}.${extension}`);
-      const res = await fetch(`${API_URL}/api/interviews/${sessionId}/transcript/audio`, { method: 'POST', body: form });
-      const result = await res.json().catch(() => null);
-      if (!res.ok) return { ok: false, status: res.status, ...(result ?? {}) };
-      return result;
-    } catch {
-      return { ok: false, error: 'Audio transcription request failed.' };
-    }
-  }, [sessionId]);
-
-  // ── Candidate microphone capture with server-side ASR ──
-  // Prefer Deepgram/Whisper when configured. Browser SpeechRecognition remains
-  // an automatic fallback for local/keyless development and provider failures.
-  const releaseOwnedCandidateMic = useCallback(() => {
-    candidateOwnedMicRef.current?.getTracks().forEach((track) => track.stop());
-    candidateOwnedMicRef.current = null;
-  }, []);
-
-  const startCandidateCaptureFromStream = useCallback(async (
-    stream: MediaStream | null,
-  ): Promise<{ ok: boolean; reason?: string; provider?: string }> => {
-    if (typeof MediaRecorder === 'undefined') {
-      return { ok: false, reason: 'Audio recording is unavailable in this browser.' };
-    }
-
-    try {
-      // Check provider availability before prompting for a fresh microphone
-      // stream. This also makes the selected provider observable in API logs.
-      const statusRes = await fetch(`${API_URL}/api/interviews/${sessionId}/transcript/audio/status`);
-      const status = await statusRes.json().catch(() => ({}));
-      if (!statusRes.ok || !status?.available) {
-        return { ok: false, reason: 'Server transcription is not configured.' };
-      }
-
-      let audioTracks = stream?.getAudioTracks().filter((track) => track.readyState === 'live') ?? [];
-      if (!audioTracks.length) {
-        // The proctoring webcam stream is deliberately video-only. Previously
-        // this returned before the status request, so Deepgram was never called.
-        // Acquire the already-consented microphone here for server ASR.
-        if (!navigator.mediaDevices?.getUserMedia) {
-          return { ok: false, reason: 'Microphone capture is unavailable in this browser.' };
-        }
-        const micStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-          video: false,
-        });
-        candidateOwnedMicRef.current = micStream;
-        audioTracks = micStream.getAudioTracks();
-      }
-      if (!audioTracks.length) {
-        releaseOwnedCandidateMic();
-        return { ok: false, reason: 'No microphone audio stream is available.' };
-      }
-
-      candidateStreamRef.current = new MediaStream(audioTracks);
-      candidateActiveRef.current = true;
-      setSttStatus('listening');
-      setSttError(null);
-
-      const recordSegment = (audioStream: MediaStream): void => {
-        if (!candidateActiveRef.current) return;
-        const segStartMs = nowMs();
-        candidateStartMsRef.current = segStartMs;
-        const chunks: BlobPart[] = [];
-        let recorder: MediaRecorder;
-        try { recorder = createAudioRecorder(audioStream); } catch {
-          candidateActiveRef.current = false;
-          releaseOwnedCandidateMic();
-          setSttStatus('error');
-          setSttError('Microphone recording could not start.');
-          startBrowserSTT();
-          return;
-        }
-        candidateRecorderRef.current = recorder;
-        recorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) chunks.push(event.data);
-        };
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-          const upload = uploadAudioSegment(blob, segStartMs, 'candidate').then((result) => {
-            if (result?.transcript) setLiveCaption(String(result.transcript));
-            if (result?.ok === false && candidateActiveRef.current) {
-              candidateActiveRef.current = false;
-              releaseOwnedCandidateMic();
-              setSttStatus('error');
-              setSttError(result.error || 'Server transcription failed; using browser fallback.');
-              startBrowserSTT();
-            }
-            return result;
-          });
-          candidateUploadsRef.current.add(upload);
-          void upload.finally(() => candidateUploadsRef.current.delete(upload));
-          if (candidateActiveRef.current && candidateStreamRef.current) {
-            recordSegment(candidateStreamRef.current);
-          }
-        };
-        recorder.start();
-        candidateSegTimerRef.current = setTimeout(() => {
-          try { recorder.stop(); } catch { /* noop */ }
-        }, SEGMENT_MS);
-      };
-
-      recordSegment(candidateStreamRef.current);
-      return { ok: true, provider: String(status.provider || 'server') };
-    } catch {
-      releaseOwnedCandidateMic();
-      return { ok: false, reason: 'Could not reach the server transcription service.' };
-    }
-  }, [nowMs, releaseOwnedCandidateMic, sessionId, startBrowserSTT, uploadAudioSegment]);
-
-  const stopCandidateCapture = useCallback(async (): Promise<void> => {
-    candidateActiveRef.current = false;
-    if (candidateSegTimerRef.current) {
-      clearTimeout(candidateSegTimerRef.current);
-      candidateSegTimerRef.current = null;
-    }
-    const recorder = candidateRecorderRef.current;
-    candidateRecorderRef.current = null;
-    if (recorder && recorder.state !== 'inactive') {
-      const startMs = candidateStartMsRef.current;
-      const blob: Blob = await new Promise((resolve) => {
-        const chunks: BlobPart[] = [];
-        recorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) chunks.push(event.data);
-        };
-        recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
-        try { recorder.requestData?.(); recorder.stop(); } catch {
-          resolve(new Blob([], { type: 'audio/webm' }));
-        }
-      });
-      const upload = uploadAudioSegment(blob, startMs, 'candidate');
-      candidateUploadsRef.current.add(upload);
-      await upload.finally(() => candidateUploadsRef.current.delete(upload));
-    }
-    await Promise.allSettled([...candidateUploadsRef.current]);
-    candidateStreamRef.current = null;
-    releaseOwnedCandidateMic();
-  }, [releaseOwnedCandidateMic, uploadAudioSegment]);
-
-  useEffect(() => () => {
-    candidateActiveRef.current = false;
-    if (candidateSegTimerRef.current) clearTimeout(candidateSegTimerRef.current);
-    try { candidateRecorderRef.current?.stop(); } catch { /* noop */ }
-    releaseOwnedCandidateMic();
-  }, [releaseOwnedCandidateMic]);
-
   return {
     aiToneAssessment,
     sttStatus,
@@ -444,9 +180,5 @@ export function useTranscript(sessionId: string) {
     flush,
     finalize,
     downloadUrl,
-    startBrowserSTT,
-    stopBrowserSTT,
-    startCandidateCaptureFromStream,
-    stopCandidateCapture,
   };
 }

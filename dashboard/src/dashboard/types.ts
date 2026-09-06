@@ -28,7 +28,9 @@ export type InterviewStatusLabel =
   | 'Evaluating'
   | 'Attempting'
   | 'Not Started'
-  | 'Slot Missed';
+  | 'Slot Missed'
+  | 'Scheduled'
+  | 'Awaiting Schedule';
 
 // A candidate/applicant as consumed by the dashboard UI (camelCase). Mirrors the
 // object returned by mapApplicantOutToCandidate(ApplicantOut).

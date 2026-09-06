@@ -326,20 +326,12 @@ export async function interviewRoutes(app: FastifyInstance) {
   // POST /voice-test-session — a lightweight harness for manually testing the
   // real-time voice pipeline (director + LiveKit + AgentAudioVisualizerAura)
   // without going through the full candidate-room consent/permission/proctoring
-  // flow. Reuses the exact same demo company/role/questions as /demo-session,
-  // with `settings.conversationalInterview` forced to true — /sessions/:id/livekit-token
-  // 409s otherwise. Public, no auth: same trust level as /demo-session itself
-  // (no real candidate data touched).
+  // flow. Reuses the exact same demo company/role/questions as /demo-session.
+  // Public, no auth: same trust level as /demo-session itself (no real
+  // candidate data touched).
   app.post('/voice-test-session', async (_req: any, reply) => {
     const { session } = await getOrCreateDemoSession();
-    const settings = (session.settings && typeof session.settings === 'object')
-      ? session.settings as Record<string, unknown>
-      : {};
-    const updated = await prisma.interviewSession.update({
-      where: { id: session.id },
-      data: { settings: { ...settings, conversationalInterview: true } },
-    });
-    return reply.send({ sessionId: updated.id });
+    return reply.send({ sessionId: session.id });
   });
 
   // ── Candidate consent audit log ("security log") ───────────────────────────
@@ -499,9 +491,6 @@ export async function interviewRoutes(app: FastifyInstance) {
     const settings = (session.settings && typeof session.settings === 'object')
       ? session.settings as Record<string, unknown>
       : {};
-    if (settings.conversationalInterview !== true) {
-      return reply.code(409).send({ error: 'This interview is not configured for conversational voice.', code: 'LIVEKIT_NOT_ENABLED' });
-    }
 
     const roomName = `interview-${session.id}`;
     const deadlineAt = deadlineFor(session.startedAt, settings);

@@ -16,6 +16,101 @@ import { buildExitTranscriptReport, isExitInterviewSettings } from '../services/
 
 type TranscriptSpeaker = 'candidate' | 'interviewer';
 
+type MinimalLogger = { warn?: (obj: any, msg?: string) => void; error?: (obj: any, msg?: string) => void };
+
+export class SessionNotFoundError extends Error {
+  constructor() {
+    super('Session not found');
+  }
+}
+
+// Finalize the transcript, then generate the report by passing the WHOLE transcript
+// to the LLM (fits the Convai-driven interview where questions are dynamic). Falls
+// back to the deterministic evaluator when no LLM key / on error so the candidate
+// always gets a report. Returns { evaluation, engine } or throws on total failure.
+// Called both by POST /:sessionId/report (below) and by the evaluation poller
+// (jobs/evaluation-poller.ts) — pulled out so neither needs to go through HTTP.
+export async function generateSessionReport(sessionId: string, log?: MinimalLogger): Promise<{ evaluation: any; engine: string }> {
+  const session = await prisma.interviewSession.findUnique({ where: { id: sessionId }, select: { id: true, settings: true } });
+  if (!session) throw new SessionNotFoundError();
+
+  await finalizeTranscript(sessionId);
+
+  // Exit interviews are recorded, not scored: skip the holistic LLM report and the
+  // structured grader, and store the no-LLM verbatim transcript report instead.
+  if (isExitInterviewSettings(session.settings)) {
+    const evaluation = await buildExitTranscriptReport(sessionId);
+    return { evaluation, engine: 'exit_verbatim' };
+  }
+
+  // Primary holistic report (keeps Deep Analysis unchanged), then the structured
+  // rubric/dimension/proctoring evaluation (gpt-4o when OPENAI_API_KEY is set,
+  // else OpenRouter) merged under `.structured` for the new analysis section.
+  let primary: any = null;
+  let engine = 'transcript_llm';
+  try {
+    primary = await generateTranscriptReport(sessionId);
+  } catch (llmErr) {
+    log?.warn?.(llmErr, 'transcript LLM report failed; falling back to deterministic evaluator');
+    try {
+      primary = await evaluateInterview(sessionId);
+      engine = 'deterministic';
+    } catch (err: any) {
+      primary = null;
+    }
+  }
+
+  let structured: any = null;
+  try {
+    structured = await evaluateInterviewWithAviral(sessionId);
+  } catch (structErr) {
+    log?.warn?.(structErr, 'structured (aviral) evaluation failed');
+  }
+
+  if (!primary && !structured) {
+    throw new Error('Report generation failed');
+  }
+
+  // Merge: holistic stays the headline report; the structured analysis is nested
+  // (and also used standalone if the holistic pass failed).
+  const evaluation = primary
+    ? { ...primary, structured: structured ?? undefined }
+    : { ...structured, structured };
+
+  await prisma.interviewSession.update({
+    where: { id: sessionId },
+    data: { evaluation: evaluation as any, status: 'EVALUATED', completedAt: new Date() },
+  });
+
+  return { evaluation, engine: structured ? `${engine}+aviral` : engine };
+}
+
+// Recruiter-screening only: after generateSessionReport() has scored the session,
+// ask the backend to decide fit (it re-reads the evaluation we just persisted,
+// never trusts the caller) and — on a fit — auto-mint + email the functional-
+// interview invite. Server-to-server forward, same pattern as drive-upload.service.ts.
+// Never throws — internal/network failures are reported back as a {status, data}
+// pair, same shape as a real backend response, so callers (the route below, and
+// the evaluation poller) don't need their own try/catch for this specific call.
+export async function runScreeningOutcome(sessionId: string, log?: MinimalLogger): Promise<{ status: number; data: any }> {
+  const backendUrl = process.env.BACKEND_URL;
+  if (!backendUrl) {
+    return { status: 503, data: { error: 'Backend not configured for screening outcome routing.' } };
+  }
+
+  try {
+    const res = await fetch(
+      `${backendUrl.replace(/\/$/, '')}/api/public/interview-session/${sessionId}/screening-outcome`,
+      { method: 'POST', headers: { 'X-Webhook-Secret': process.env.ENGINE_WEBHOOK_SECRET ?? '' } },
+    );
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data };
+  } catch (err: any) {
+    log?.error?.(err, 'screening-outcome forward failed');
+    return { status: 502, data: { error: 'Failed to reach backend for screening outcome.' } };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Transcript API (mounted at /api/interviews).
 //   POST /:sessionId/transcript/event      ingest one or many live events
@@ -163,84 +258,25 @@ export async function transcriptRoutes(app: FastifyInstance) {
   // transcript to the LLM (fits the Convai-driven interview where questions are
   // dynamic). Falls back to the deterministic evaluator when no LLM key / on error
   // so the candidate always gets a report. Returns { evaluation, engine }.
+  // Thin wrapper — the actual logic lives in generateSessionReport() below so the
+  // evaluation poller (jobs/evaluation-poller.ts) can call it directly without HTTP.
   app.post('/:sessionId/report', async (req: any, reply) => {
-    const { sessionId } = req.params;
-    const session = await prisma.interviewSession.findUnique({ where: { id: sessionId }, select: { id: true, settings: true } });
-    if (!session) return reply.code(404).send({ error: 'Session not found' });
-
-    await finalizeTranscript(sessionId);
-
-    // Exit interviews are recorded, not scored: skip the holistic LLM report and the
-    // structured grader, and store the no-LLM verbatim transcript report instead.
-    if (isExitInterviewSettings(session.settings)) {
-      const evaluation = await buildExitTranscriptReport(sessionId);
-      return { evaluation, engine: 'exit_verbatim' };
-    }
-
-    // Primary holistic report (keeps Deep Analysis unchanged), then the structured
-    // rubric/dimension/proctoring evaluation (gpt-4o when OPENAI_API_KEY is set,
-    // else OpenRouter) merged under `.structured` for the new analysis section.
-    let primary: any = null;
-    let engine = 'transcript_llm';
     try {
-      primary = await generateTranscriptReport(sessionId);
-    } catch (llmErr) {
-      req.log?.warn?.(llmErr, 'transcript LLM report failed; falling back to deterministic evaluator');
-      try {
-        primary = await evaluateInterview(sessionId);
-        engine = 'deterministic';
-      } catch (err: any) {
-        primary = null;
-      }
+      return await generateSessionReport(req.params.sessionId, req.log);
+    } catch (err: any) {
+      if (err instanceof SessionNotFoundError) return reply.code(404).send({ error: 'Session not found' });
+      return reply.code(500).send({ error: err?.message || 'Report generation failed' });
     }
-
-    let structured: any = null;
-    try {
-      structured = await evaluateInterviewWithAviral(sessionId);
-    } catch (structErr) {
-      req.log?.warn?.(structErr, 'structured (aviral) evaluation failed');
-    }
-
-    if (!primary && !structured) {
-      return reply.code(500).send({ error: 'Report generation failed' });
-    }
-
-    // Merge: holistic stays the headline report; the structured analysis is nested
-    // (and also used standalone if the holistic pass failed).
-    const evaluation = primary
-      ? { ...primary, structured: structured ?? undefined }
-      : { ...structured, structured };
-
-    await prisma.interviewSession.update({
-      where: { id: sessionId },
-      data: { evaluation: evaluation as any, status: 'EVALUATED', completedAt: new Date() },
-    });
-
-    return { evaluation, engine: structured ? `${engine}+aviral` : engine };
   });
 
   // Recruiter-screening only: after `/report` has scored the session, ask the backend
   // to decide fit (it re-reads the evaluation we just persisted, never trusts the
   // client) and — on a fit — auto-mint + email the functional-interview invite.
-  // Server-to-server forward, same pattern as drive-upload.service.ts.
+  // Server-to-server forward, same pattern as drive-upload.service.ts. Thin wrapper
+  // — see runScreeningOutcome() below, also called directly by the evaluation poller.
   app.post('/:sessionId/screening-outcome', async (req: any, reply) => {
-    const { sessionId } = req.params;
-    const backendUrl = process.env.BACKEND_URL;
-    if (!backendUrl) {
-      return reply.code(503).send({ error: 'Backend not configured for screening outcome routing.' });
-    }
-
-    try {
-      const res = await fetch(
-        `${backendUrl.replace(/\/$/, '')}/api/public/interview-session/${sessionId}/screening-outcome`,
-        { method: 'POST', headers: { 'X-Webhook-Secret': process.env.ENGINE_WEBHOOK_SECRET ?? '' } },
-      );
-      const data = await res.json().catch(() => ({}));
-      return reply.code(res.status).send(data);
-    } catch (err: any) {
-      req.log?.error?.(err, 'screening-outcome forward failed');
-      return reply.code(502).send({ error: 'Failed to reach backend for screening outcome.' });
-    }
+    const { status, data } = await runScreeningOutcome(req.params.sessionId, req.log);
+    return reply.code(status).send(data);
   });
 
   // Download the finalized .txt (finalizes on demand if missing).

@@ -1,4 +1,4 @@
-import { document, requestAnimationFrame, setTimeout } from "./runtime";
+import { document, requestAnimationFrame, setTimeout, signal } from "./runtime";
 import { escapeHTML, sourceLabel } from "./escape";
 import { saveStateToLocalStorage } from "./ai-api";
 import { isApiMode, apiUploadResumes } from "./api";
@@ -31,7 +31,9 @@ import {
 	renderResumeStagePaneForJob,
 	toggleResumeCriteriaEdit,
 	runBulkResumeAnalysis,
+	formatSlot,
 } from "./resume-analysis";
+import { getCandidateSubtab } from "./interview-status";
 import { renderScoringEditor } from "./scoring-config";
 import { soundEngine } from "./sound";
 import { showPremiumToast } from "./sourcing";
@@ -50,6 +52,24 @@ import {
 	apiDeleteApplicant,
 	apiRestoreApplicant,
 } from "./api";
+
+// Stage-table row action menus (⋮) — same pattern as kanban-swarm.ts's
+// closeAllKanbanKebabs/bindKanbanKebabOutsideClick for the Kanban board's
+// per-card kebab, applied here to the Screening/Functional table rows.
+function closeAllRowKebabs() {
+	document.querySelectorAll(".row-kebab-dropdown.open").forEach((d) => d.classList.remove("open"));
+	document.querySelectorAll(".stage-data-table tbody tr.kebab-open").forEach((row) => row.classList.remove("kebab-open"));
+}
+
+// Same signal-scoped one-time-bind pattern as kanban-swarm.ts's outside-click
+// listener — survives re-renders (renderJobDetailPanes runs on every state
+// change) without stacking a new document listener each time.
+let rowKebabDocListenerSignal = null;
+function bindRowKebabOutsideClick() {
+	if (rowKebabDocListenerSignal === signal) return;
+	rowKebabDocListenerSignal = signal;
+	document.addEventListener("click", closeAllRowKebabs);
+}
 
 function renderJobDetailPanes(job) {
 	const searchVal = document
@@ -258,13 +278,14 @@ function renderJobDetailPanes(job) {
 		);
 
 		const counts = {
+			"awaiting-schedule": 0,
 			"window-missed": 0,
 			scheduled: 0,
 			"partially-completed": 0,
 			completed: 0,
 		};
 		screeningCands.forEach((c) => {
-			counts[getCandidateSubtab(c)]++;
+			counts[getCandidateSubtab(c, "screening")]++;
 		});
 
 		const activeSubtab = getOrInitActiveSubtab("screening", screeningCands);
@@ -282,7 +303,7 @@ function renderJobDetailPanes(job) {
 		} else {
 			const allScreeningCands = screeningCands;
 			const subtabFilteredCands = screeningCands.filter(
-				(c) => getCandidateSubtab(c) === activeSubtab,
+				(c) => getCandidateSubtab(c, "screening") === activeSubtab,
 			);
 			const displayScreeningCands = applyStageFilters(
 				subtabFilteredCands,
@@ -328,19 +349,23 @@ function renderJobDetailPanes(job) {
 										.split(" ")
 										.map((n) => n[0])
 										.join("");
+									// Screening-pane row: every field below must read screeningStatus,
+									// not interviewStatus (which is the functional-stage status — always
+									// null while a candidate is still in Screening, which is exactly the
+									// bug that made every screening candidate look identical here).
 									const hasReport =
-										c.interviewStatus === "Incomplete" ||
-										c.interviewStatus === "Completed";
+										c.screeningStatus === "Incomplete" ||
+										c.screeningStatus === "Completed";
 									const sourceIcon =
 										c.source === "Direct Link"
 											? '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>'
 											: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg>';
 									const actionLabel =
-										c.interviewStatus === "Slot Missed"
+										c.screeningStatus === "Slot Missed"
 											? "Reschedule"
 											: "Schedule";
 									const actionClass =
-										c.interviewStatus === "Slot Missed"
+										c.screeningStatus === "Slot Missed"
 											? "btn-reschedule"
 											: "btn-schedule";
 									return `
@@ -354,23 +379,41 @@ function renderJobDetailPanes(job) {
                       </div>
                     </td>
                     <td>${c.phone ? escapeHTML(c.phone) : "—"}</td>
-                    <td>${interviewStatusChip(c.interviewStatus)}</td>
+                    <td>${interviewStatusChip(c.screeningStatus)}</td>
                     <td>${c.recruiterScreening ? escapeHTML(c.recruiterScreening) : "—"}</td>
                     <td>${(c.recruiterScreeningScore ?? c.screeningScore) != null ? escapeHTML(String(c.recruiterScreeningScore ?? c.screeningScore)) : "—"}</td>
                     <td>${hasReport ? `<a href="#" class="report-link" data-cand-id="${c.id}">Report <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>` : "—"}</td>
                     <td><span class="source-badge">${sourceIcon} ${c.source || "—"}</span></td>
-                    <td>${c.screeningStatus ? escapeHTML(c.screeningStatus) : "—"}</td>
+                    <td>${formatSlot(c.attemptedAt) || "—"}</td>
                     <td>
-                      <button class="${actionClass}" data-candidate-id="${c.id}">${c.interviewStatus === "Slot Missed" ? '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> ' : '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg> '}${actionLabel}</button>
-                      ${c.decision === 'rejected'
-                        ? `<span class="ra-stage-tag rejected">Rejected</span>
-                           <button class="btn-stage-unreject" data-candidate-id="${c.id}" title="Restore to pipeline">Restore</button>`
-                        : c.decision === 'on_hold'
-                          ? `<span class="ra-stage-tag on-hold">On Hold</span>
-                             <button class="btn-stage-unhold" data-candidate-id="${c.id}" title="Resume reviewing this candidate">Resume review</button>`
-                          : `<button class="btn-stage-hold" data-candidate-id="${c.id}">Hold</button>
-                             <button class="btn-stage-reject" data-candidate-id="${c.id}">Reject</button>`}
-                      <button class="btn-stage-delete" data-candidate-id="${c.id}" title="Delete candidate">Delete</button>
+                      <div class="stage-row-actions">
+                        <button class="${actionClass}" data-candidate-id="${c.id}">${c.screeningStatus === "Slot Missed" ? '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> ' : '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg> '}${actionLabel}</button>
+                        ${c.decision === 'rejected'
+                          ? `<span class="ra-stage-tag rejected">Rejected</span>`
+                          : c.decision === 'on_hold'
+                            ? `<span class="ra-stage-tag on-hold">On Hold</span>`
+                            : ''}
+                        <div class="row-kebab-wrap">
+                          <button class="btn-row-kebab" data-candidate-id="${c.id}" title="More actions" aria-label="More actions">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                          </button>
+                          <div class="job-kebab-dropdown row-kebab-dropdown">
+                            ${c.decision === 'rejected'
+                              ? `<button class="kebab-item btn-stage-unreject" data-candidate-id="${c.id}">Restore to pipeline</button>
+                                 <div class="kebab-divider"></div>
+                                 <button class="kebab-item kebab-item-danger btn-stage-delete" data-candidate-id="${c.id}">Delete</button>`
+                              : c.decision === 'on_hold'
+                                ? `<button class="kebab-item btn-stage-unhold" data-candidate-id="${c.id}">Resume review</button>
+                                   <div class="kebab-divider"></div>
+                                   <button class="kebab-item kebab-item-danger btn-stage-delete" data-candidate-id="${c.id}">Delete</button>`
+                                : `<button class="kebab-item btn-stage-advance" data-candidate-id="${c.id}" data-next-stage="Functional">Advance</button>
+                                   <button class="kebab-item btn-stage-hold" data-candidate-id="${c.id}">Hold</button>
+                                   <button class="kebab-item btn-stage-reject" data-candidate-id="${c.id}">Reject</button>
+                                   <div class="kebab-divider"></div>
+                                   <button class="kebab-item kebab-item-danger btn-stage-delete" data-candidate-id="${c.id}">Delete</button>`}
+                          </div>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 `;
@@ -406,13 +449,14 @@ function renderJobDetailPanes(job) {
 		);
 
 		const countsFn = {
+			"awaiting-schedule": 0,
 			"window-missed": 0,
 			scheduled: 0,
 			"partially-completed": 0,
 			completed: 0,
 		};
 		functionalCands.forEach((c) => {
-			countsFn[getCandidateSubtab(c)]++;
+			countsFn[getCandidateSubtab(c, "functional")]++;
 		});
 
 		const activeSubtabFn = getOrInitActiveSubtab("functional", functionalCands);
@@ -457,7 +501,7 @@ function renderJobDetailPanes(job) {
 
 			const allFunctionalCands = functionalCands;
 			const subtabFilteredFnCands = functionalCands.filter(
-				(c) => getCandidateSubtab(c) === activeSubtabFn,
+				(c) => getCandidateSubtab(c, "functional") === activeSubtabFn,
 			);
 			const displayFunctionalCands = applyStageFilters(
 				subtabFilteredFnCands,
@@ -509,6 +553,14 @@ function renderJobDetailPanes(job) {
 										c.source === "Direct Link"
 											? '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>'
 											: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg>';
+									const actionLabel =
+										c.interviewStatus === "Slot Missed"
+											? "Reschedule"
+											: "Schedule";
+									const actionClass =
+										c.interviewStatus === "Slot Missed"
+											? "btn-reschedule"
+											: "btn-schedule";
 									return `
                   <tr data-candidate-id="${c.id}">
                     <td><input type="checkbox" class="table-checkbox-row" /></td>
@@ -528,16 +580,34 @@ function renderJobDetailPanes(job) {
                     <td>${screeningBadge(c.recruiterScreening)}</td>
                     <td>${c.interviewStatus ? escapeHTML(c.interviewStatus) : "—"}</td>
                     <td>
-                      ${c.decision === 'rejected'
-                        ? `<span class="ra-stage-tag rejected">Rejected</span>
-                           <button class="btn-stage-unreject" data-candidate-id="${c.id}" title="Restore to pipeline">Restore</button>`
-                        : c.decision === 'on_hold'
-                          ? `<span class="ra-stage-tag on-hold">On Hold</span>
-                             <button class="btn-stage-unhold" data-candidate-id="${c.id}" title="Resume reviewing this candidate">Resume review</button>`
-                          : `<button class="btn-stage-advance" data-candidate-id="${c.id}" data-next-stage="Hired">Advance</button>
-                             <button class="btn-stage-hold" data-candidate-id="${c.id}">Hold</button>
-                             <button class="btn-stage-reject" data-candidate-id="${c.id}">Reject</button>`}
-                      <button class="btn-stage-delete" data-candidate-id="${c.id}" title="Delete candidate">Delete</button>
+                      <div class="stage-row-actions">
+                        <button class="${actionClass}" data-candidate-id="${c.id}">${c.interviewStatus === "Slot Missed" ? '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> ' : '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg> '}${actionLabel}</button>
+                        ${c.decision === 'rejected'
+                          ? `<span class="ra-stage-tag rejected">Rejected</span>`
+                          : c.decision === 'on_hold'
+                            ? `<span class="ra-stage-tag on-hold">On Hold</span>`
+                            : ''}
+                        <div class="row-kebab-wrap">
+                          <button class="btn-row-kebab" data-candidate-id="${c.id}" title="More actions" aria-label="More actions">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                          </button>
+                          <div class="job-kebab-dropdown row-kebab-dropdown">
+                            ${c.decision === 'rejected'
+                              ? `<button class="kebab-item btn-stage-unreject" data-candidate-id="${c.id}">Restore to pipeline</button>
+                                 <div class="kebab-divider"></div>
+                                 <button class="kebab-item kebab-item-danger btn-stage-delete" data-candidate-id="${c.id}">Delete</button>`
+                              : c.decision === 'on_hold'
+                                ? `<button class="kebab-item btn-stage-unhold" data-candidate-id="${c.id}">Resume review</button>
+                                   <div class="kebab-divider"></div>
+                                   <button class="kebab-item kebab-item-danger btn-stage-delete" data-candidate-id="${c.id}">Delete</button>`
+                                : `<button class="kebab-item btn-stage-advance" data-candidate-id="${c.id}" data-next-stage="Hired">Advance</button>
+                                   <button class="kebab-item btn-stage-hold" data-candidate-id="${c.id}">Hold</button>
+                                   <button class="kebab-item btn-stage-reject" data-candidate-id="${c.id}">Reject</button>
+                                   <div class="kebab-divider"></div>
+                                   <button class="kebab-item kebab-item-danger btn-stage-delete" data-candidate-id="${c.id}">Delete</button>`}
+                          </div>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 `;
@@ -641,6 +711,30 @@ function renderJobDetailPanes(job) {
 		pane.querySelectorAll(".btn-stage-unreject").forEach((btn) => {
 			btn.addEventListener("click", () => restoreCandidateFromRejection(btn.getAttribute("data-candidate-id")));
 		});
+
+		// Stage-table row actions (⋮) — Advance/Hold/Reject/Delete/Restore/Resume
+		// review live behind this menu now (see .stage-row-actions in
+		// 19-stage-table.css); same open/close-on-outside-click behavior as the
+		// Kanban board's per-card kebab (kanban-swarm.ts).
+		pane.querySelectorAll(".btn-row-kebab").forEach((btn) => {
+			btn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				const dropdown = btn.nextElementSibling;
+				const wasOpen = dropdown.classList.contains("open");
+				closeAllRowKebabs();
+				if (!wasOpen) {
+					dropdown.classList.add("open");
+					btn.closest("tr")?.classList.add("kebab-open");
+				}
+			});
+		});
+		pane.querySelectorAll(".row-kebab-dropdown").forEach((dropdown) => {
+			// Runs after the individual .btn-stage-* handler above (target phase
+			// fires first, then this ancestor's bubble-phase listener) — closes the
+			// menu once whatever action was clicked has already been dispatched.
+			dropdown.addEventListener("click", () => closeAllRowKebabs());
+		});
+		bindRowKebabOutsideClick();
 
 		pane.querySelectorAll(".btn-player-play").forEach((btn) => {
 			btn.addEventListener("click", () => {
@@ -1378,6 +1472,22 @@ function interviewStatusChip(status) {
 				),
 				"Slot Missed",
 			);
+		case "Scheduled":
+			return chip(
+				"scheduled",
+				ic(
+					'<rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><polyline points="9 15 11 17 15 13"></polyline>',
+				),
+				"Scheduled",
+			);
+		case "Awaiting Schedule":
+			return chip(
+				"awaiting-schedule",
+				ic(
+					'<circle cx="12" cy="12" r="9"></circle><line x1="8" y1="12" x2="16" y2="12"></line>',
+				),
+				"Awaiting Schedule",
+			);
 		default:
 			return chip(
 				"not-started",
@@ -1876,40 +1986,41 @@ function bindAddApplicantsPanel(job, paneKey) {
 }
 
 // ── Subtabs helpers ───────────────────────────────────────────────────────────
+// getCandidateSubtab lives in interview-status.ts (stage-aware — reads
+// screeningStatus for the Screening pane, interviewStatus for the Functional
+// pane; used to always read interviewStatus for both, which is always null
+// for a screening-stage candidate, so every one of them fell into the same
+// default 'scheduled' bucket regardless of their real status).
 
-function getCandidateSubtab(c) {
-	if (c.interviewStatus === 'Completed') return 'completed';
-	if (c.interviewStatus === 'Incomplete') return 'partially-completed';
-	if (c.interviewStatus === 'Slot Missed') return 'window-missed';
-	return 'scheduled';
-}
+const SUBTAB_KEYS = ['awaiting-schedule', 'scheduled', 'partially-completed', 'window-missed', 'completed'];
 
 function getOrInitActiveSubtab(stage, candidates) {
 	const appStateKey = stage === 'screening' ? 'activeScreeningSubtab' : 'activeFunctionalSubtab';
 	const fromAppState = AppState[appStateKey];
-	if (fromAppState && ['window-missed', 'scheduled', 'partially-completed', 'completed'].includes(fromAppState)) {
+	if (fromAppState && SUBTAB_KEYS.includes(fromAppState)) {
 		return fromAppState;
 	}
 	const key = `ih-subtab-${stage}`;
 	const saved = localStorage.getItem(key);
-	if (saved && ['window-missed', 'scheduled', 'partially-completed', 'completed'].includes(saved)) {
+	if (saved && SUBTAB_KEYS.includes(saved)) {
 		return saved;
 	}
-	const order = ['scheduled', 'completed', 'partially-completed', 'window-missed'];
+	const order = ['awaiting-schedule', 'scheduled', 'completed', 'partially-completed', 'window-missed'];
 	for (const tab of order) {
-		if (candidates.some((c) => getCandidateSubtab(c) === tab)) return tab;
+		if (candidates.some((c) => getCandidateSubtab(c, stage) === tab)) return tab;
 	}
-	return 'scheduled';
+	return 'awaiting-schedule';
 }
 
 function buildSubtabsBarHTML(stage, counts, activeSubtab) {
 	const labels = {
+		'awaiting-schedule': 'Awaiting Schedule',
 		'window-missed': 'Window Missed',
 		scheduled: 'Scheduled',
 		'partially-completed': 'Partially Completed',
 		completed: 'Completed',
 	};
-	const keys = ['window-missed', 'scheduled', 'partially-completed', 'completed'];
+	const keys = ['awaiting-schedule', 'scheduled', 'window-missed', 'partially-completed', 'completed'];
 	return `
     <div class="stage-subtabs" data-stage="${stage}">
       ${keys.map((k) => `

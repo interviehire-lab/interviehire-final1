@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
@@ -192,7 +193,36 @@ async def lifespan(app: FastAPI):
         init_db()
     except Exception as e:
         print(f"[startup] init_db failed; serving without migration this boot. Fix DB/migrations: {e}")
+
+    # Pre-interview reminder job (app/jobs/reminders.py) is fully implemented
+    # but was previously wired to no scheduler anywhere — no cron service, no
+    # in-process loop — so reminder emails silently never sent. Run it
+    # in-process on its own background thread; non-fatal, same pattern as
+    # init_db above, so a scheduler hiccup doesn't crash the app.
+    scheduler = None
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from app.jobs.reminders import _run_reminders_job
+
+        scheduler = BackgroundScheduler(daemon=True)
+        scheduler.add_job(
+            _run_reminders_job,
+            "interval",
+            minutes=settings.REMINDER_POLL_INTERVAL_MINUTES,
+            id="pre_interview_reminders",
+            next_run_time=datetime.now(),  # also run once immediately on boot
+        )
+        scheduler.start()
+    except Exception as e:
+        print(f"[startup] reminder scheduler failed to start; reminders will not be sent this boot: {e}")
+
     yield
+
+    if scheduler is not None:
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)

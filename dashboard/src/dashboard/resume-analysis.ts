@@ -8,6 +8,7 @@ import { computeWeightedScore, getScoringConfig, recommendationFromScore } from 
 import { soundEngine } from './sound';
 import { addCandidateToAppState, extractResumeIdentity, showPremiumToast } from './sourcing';
 import { AppState } from './state';
+import { statusFieldForStage, scoreFieldForStage } from './interview-status';
 import { getDataSource, apiUpdateApplicant, apiGetResumeText, apiAddApplicant, apiUploadApplicantResume } from './api';
 
 // ==========================================
@@ -1253,7 +1254,7 @@ function pad2(n) { return String(n).padStart(2, '0'); }
 function istPartsToUtcIso(d) {
   return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), 0) - IST_OFFSET_MS).toISOString();
 }
-function formatSlot(iso) {
+export function formatSlot(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
@@ -1453,9 +1454,10 @@ function buildFilterDropdown(chip, type, candidates, stageKey) {
   const filters = AppState.stageFilters[stageKey];
 
   if (type === 'interviewStatus') {
-    const statuses = ['Completed', 'Incomplete', 'Evaluating', 'Attempting', 'Not Started', 'Slot Missed'];
+    const statuses = ['Awaiting Schedule', 'Scheduled', 'Attempting', 'Evaluating', 'Completed', 'Incomplete', 'Slot Missed', 'Not Started'];
+    const statusField = statusFieldForStage(stageKey);
     const counts = {};
-    statuses.forEach(s => { counts[s] = candidates.filter(c => c.interviewStatus === s).length; });
+    statuses.forEach(s => { counts[s] = candidates.filter(c => c[statusField] === s).length; });
     dd.innerHTML = `
       <div class="sfd-search"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" placeholder="Interview Status" /></div>
       <div class="sfd-items">${statuses.map(s => `<label class="sfd-item"><input type="checkbox" value="${s}" ${filters.interviewStatus.includes(s) ? 'checked' : ''} />${sfdIcon(s)}<span class="sfd-item-label">${s}</span><span class="sfd-item-count">${counts[s]}</span></label>`).join('')}</div>
@@ -1532,12 +1534,19 @@ function buildFilterDropdown(chip, type, candidates, stageKey) {
 function applyStageFilters(candidates, stageKey) {
   const f = AppState.stageFilters[stageKey];
   if (!f) return candidates;
+  // Screening and functional track status/score in SEPARATE fields
+  // (screeningStatus/screeningScore vs interviewStatus/interviewScore) — this
+  // used to always read the functional-derived fields regardless of stageKey,
+  // so the Screening pane's own filters could never match a screening-stage
+  // candidate (their functional fields are null until they reach that stage).
+  const statusField = statusFieldForStage(stageKey);
+  const scoreField = scoreFieldForStage(stageKey);
   let filtered = candidates;
-  if (f.interviewStatus.length > 0) filtered = filtered.filter(c => f.interviewStatus.includes(c.interviewStatus));
+  if (f.interviewStatus.length > 0) filtered = filtered.filter(c => f.interviewStatus.includes(c[statusField]));
   if (f.cheatProb.length > 0) filtered = filtered.filter(c => f.cheatProb.includes(c.cheatProbability));
   if (f.recruiterScreening.length > 0) filtered = filtered.filter(c => f.recruiterScreening.includes(c.recruiterScreening));
-  if (f.scoreMin != null) filtered = filtered.filter(c => c.interviewScore != null && c.interviewScore >= f.scoreMin);
-  if (f.scoreMax != null) filtered = filtered.filter(c => c.interviewScore != null && c.interviewScore <= f.scoreMax);
+  if (f.scoreMin != null) filtered = filtered.filter(c => c[scoreField] != null && c[scoreField] >= f.scoreMin);
+  if (f.scoreMax != null) filtered = filtered.filter(c => c[scoreField] != null && c[scoreField] <= f.scoreMax);
   return filtered;
 }
 

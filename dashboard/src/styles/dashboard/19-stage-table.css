@@ -730,6 +730,18 @@ body.light-theme .afd-item:hover { background: rgba(0,0,0,0.03); }
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
+.status-chip.scheduled {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.status-chip.awaiting-schedule {
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+}
+
 .report-link {
   color: var(--color-indigo-light);
   text-decoration: none;
@@ -846,6 +858,85 @@ body.light-theme .afd-item:hover { background: rgba(0,0,0,0.03); }
 }
 .btn-schedule:hover {
   background: rgba(var(--color-indigo-rgb), 0.15);
+}
+
+/* Actions column: one primary button (Schedule/Reschedule) + a status tag when
+   rejected/on-hold, everything else (Advance, Hold, Reject, Delete, Restore,
+   Resume review) tucked behind a kebab menu — same "primary action + overflow"
+   pattern already used on the Kanban board (kanban-swarm.ts's .btn-kanban-kebab
+   / .kanban-kebab-dropdown), reusing its .job-kebab-dropdown / .kebab-item /
+   .kebab-divider styling (defined in 05-cards.css). Previously this column
+   rendered up to 5 buttons side by side per row. */
+.stage-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.row-kebab-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.btn-row-kebab {
+  background: none;
+  border: none;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.btn-row-kebab:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+/* Lift the row whose kebab menu is open above sibling rows (each row can carry
+   its own hover background), matching .kanban-card.kebab-open / .job-card.kebab-open. */
+.stage-data-table tbody tr.kebab-open {
+  z-index: 50;
+}
+/* Reset the old standalone pill-button look (padding/border/background from
+   12-stage-cards.css's .btn-stage-advance/hold/reject/delete/unhold/unreject)
+   to a flat full-width list item once nested inside the kebab dropdown — the
+   class names are kept as-is purely so the existing pane.querySelectorAll(
+   ".btn-stage-*") click bindings (job-detail-panes.ts) keep working unchanged,
+   including for other panes' own advance buttons that share these classes. */
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-advance,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-hold,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-reject,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-delete,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-unhold,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-unreject {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 9px 14px;
+  font-size: 0.82rem;
+  font-weight: 400;
+  width: 100%;
+  text-align: left;
+  color: var(--color-text-secondary);
+  box-shadow: none;
+  transform: none;
+}
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-advance:hover,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-hold:hover,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-reject:hover,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-unhold:hover,
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-unreject:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+}
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-delete {
+  color: #f87171;
+}
+.row-kebab-dropdown.job-kebab-dropdown .btn-stage-delete:hover {
+  background: rgba(239, 68, 68, 0.08);
+  color: #f87171;
 }
 
 .action-select-status {

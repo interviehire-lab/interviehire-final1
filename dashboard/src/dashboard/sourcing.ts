@@ -94,7 +94,7 @@ function initSourcing() {
       interviewEnabled: 'iset-toggle-status', allowMobile: 'iset-toggle-mobile',
       allowLate: 'iset-toggle-late', continueFromMiddle: 'iset-toggle-continue',
       allowReattempt: 'iset-toggle-reattempt', requireCv: 'iset-toggle-cv',
-      proctoring: 'iset-toggle-proctor', conversationalInterview: 'iset-toggle-conversational',
+      proctoring: 'iset-toggle-proctor',
       whiteLabel: 'iset-toggle-whitelabel',
     };
     const activeJob = () => AppState.jobs.find(j => j.id === AppState.activeJobId);

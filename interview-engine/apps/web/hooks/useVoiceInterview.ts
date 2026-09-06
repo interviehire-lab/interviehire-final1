@@ -11,7 +11,6 @@ import {
 } from 'livekit-client';
 import { API_URL } from '@/lib/api';
 
-export type VoiceProvider = 'legacy' | 'livekit';
 export type VoiceActivity = 'idle' | 'thinking' | 'speaking';
 export type VoiceTranscript = {
   role: 'candidate' | 'interviewer';
@@ -20,7 +19,6 @@ export type VoiceTranscript = {
 };
 
 type UseVoiceInterviewOptions = {
-  provider: VoiceProvider;
   sessionId: string;
   getInviteToken: () => string;
   onTranscript: (event: VoiceTranscript) => void;
@@ -48,7 +46,6 @@ function parseLiveKitMessage(payload: Uint8Array): Record<string, unknown> | nul
 }
 
 export function useVoiceInterview({
-  provider,
   sessionId,
   getInviteToken,
   onTranscript,
@@ -160,7 +157,6 @@ export function useVoiceInterview({
   // right after consent, gets the agent joining in parallel with the
   // permission-grant and calibration screens instead of serialized after them.
   const connect = useCallback(async () => {
-    if (provider === 'legacy') return;
     if (activeRef.current) return;
 
     deliberateStopRef.current = false;
@@ -264,7 +260,7 @@ export function useVoiceInterview({
       if (agentConnectedRef.current || deliberateStopRef.current) return;
       callbacksRef.current.onError("Couldn't connect you with your interviewer. Please refresh and try again.");
     }, 20_000);
-  }, [clearAgentJoinTimeout, detachRemoteAudio, emitEnded, getInviteToken, markAgentDisconnected, provider, sessionId]);
+  }, [clearAgentJoinTimeout, detachRemoteAudio, emitEnded, getInviteToken, markAgentDisconnected, sessionId]);
 
   // publishMicrophone() is called once the candidate's mic permission is
   // actually granted and the stream is available (today: once calibration
@@ -273,7 +269,6 @@ export function useVoiceInterview({
   // Publishes against the already-connected room from connect() (via roomRef,
   // not local state, so this doesn't depend on a render having landed).
   const publishMicrophone = useCallback(async (track?: MediaStreamTrack | null) => {
-    if (provider === 'legacy') return;
     const room = roomRef.current;
     if (!room || !activeRef.current) {
       throw new Error('publishMicrophone() was called before connect() completed. Call connect() first.');
@@ -298,7 +293,7 @@ export function useVoiceInterview({
       new TextEncoder().encode(JSON.stringify({ type: 'candidate-ready' })),
       { reliable: true },
     );
-  }, [provider]);
+  }, []);
 
   const setMuted = useCallback((muted: boolean) => {
     const publication = publishedMicRef.current?.publication;
