@@ -43,14 +43,21 @@ Completed with domain/API/PostgreSQL tests. Core sees only an `InterviewProvisio
 port; its transaction stores mapping, stage history, and outbox without importing
 Interview-owned storage.
 
-## DOING — Interview API session provisioning
+## DONE — Interview API session provisioning
 
 RED: provision endpoint creates a distinct session ID, validates stage/timing inputs,
 is tenant/idempotency scoped, and can be called through the Core adapter.
 
+Completed with fixed 5/25-minute stage caps, an Interview-owned PostgreSQL table,
+service-secret Elysia endpoint, and reference-only Core HTTP adapter.
+
+## DOING — Voice compatibility contracts
+
+RED: start enforces timing/access gates and returns the legacy LiveKit timing shape;
+turns are synchronous and idempotent; completion is durable and emits one outbox event.
+
 ## TODO
 
-- Scheduling and Interview API mapping
 - Voice compatibility contracts
 - Completion and dual evaluation workers
 - Recruiter Web, Deep Analysis, deterministic demo seed, and Playwright golden path

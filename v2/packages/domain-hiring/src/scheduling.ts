@@ -41,6 +41,7 @@ export interface InterviewProvisioner {
     readonly scheduledAt: string;
     readonly timeZone: string;
     readonly correlationId: string;
+    readonly idempotencyKey: string;
   }): Promise<{ readonly interviewSessionId: string }>;
 }
 
@@ -93,6 +94,7 @@ export function createSchedulingService(
         scheduledAt: command.scheduledAt,
         timeZone: command.timeZone,
         correlationId: command.correlationId,
+        idempotencyKey: command.idempotencyKey,
       });
       const schedule: ScheduledInterview = {
         ...command,

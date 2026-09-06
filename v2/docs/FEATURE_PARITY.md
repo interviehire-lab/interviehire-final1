@@ -13,7 +13,7 @@
 | Resume analysis | BullMQ processing and persisted result | legacy request/poller behavior | `ai.resume` worker | MIGRATED | real Redis/PostgreSQL success, retry, duplicate, durable-read tests |
 | Interview bridge | Explicit application/session reference | legacy `backend/app/utils/ai_sync.py` relies on equal IDs | `v2_application_interview_refs` | MIGRATED | unequal-ID PostgreSQL test |
 | Scheduling | Core orchestration and atomic mapping/stage history | `backend/app/routers/jobs.py`, `backend/app/routers/invites.py` | `POST /v2/applications/:id/schedule` | MIGRATED | domain/API/PostgreSQL tests with unequal session ID |
-| Scheduling | Interview-owned session provisioning | legacy `backend/app/utils/ai_sync.py` and Engine session tables | Interview API port | PENDING MIGRATION | Contract test next |
+| Scheduling | Interview-owned session provisioning | legacy `backend/app/utils/ai_sync.py` and Engine session tables | `POST /internal/v2/sessions` + Core HTTP adapter | MIGRATED | domain/API/PostgreSQL/adapter tests |
 | Voice | LiveKit/Deepgram/Silero/Cartesia runtime | `interview-engine/apps/voice-agent` | preserved legacy runtime | PRESERVED | Contract suite pending |
 | Voice | Turn idempotency | `voice-agent/src/engine-client.ts` idempotency key | Interview API compatibility | PENDING MIGRATION | Characterisation located |
 | Privacy | DSAR/export/retention | `backend/tests/test_data_rights.py`, `test_retention.py` | compatibility gateway | PENDING MIGRATION | Proxy smoke pending |

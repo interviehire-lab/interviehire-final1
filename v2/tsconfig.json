@@ -4,9 +4,12 @@
     { "path": "packages/contracts" },
     { "path": "packages/testing" },
     { "path": "packages/domain-hiring" },
+    { "path": "packages/domain-interview" },
     { "path": "packages/db-hiring" },
+    { "path": "packages/db-interview" },
     { "path": "packages/queue" },
     { "path": "apps/core-api" },
+    { "path": "apps/interview-api" },
     { "path": "apps/worker" }
   ]
 }

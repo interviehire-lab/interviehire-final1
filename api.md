@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-07** — **Added the V2 Interview API health and internal session-provisioning routes: `GET /health` and `POST /internal/v2/sessions`.** Provisioning is service-secret protected, tenant scoped, and idempotent. It creates an Interview-owned session ID distinct from the Core application ID and applies fixed stage limits: 300 seconds for recruiter screening and 1500 seconds for functional interviews. Core's scheduling port now forwards its idempotency key to this route.
 - **2026-09-07** — **Added the first IntervieHire V2 Core API surface under `v2/apps/core-api` (Bun + Elysia + Effect v3): `GET /health`, `GET /v2/jobs/{id}/board`, `GET /v2/applications/{id}`, `POST /v2/applications/{id}/transitions`, `POST /v2/applications/{id}/resume-analysis`, `GET /v2/async-jobs/{id}`, and `POST /v2/applications/{id}/schedule`.** V2 recruiter routes use explicit `x-tenant-id` and `x-correlation-id` headers; commands additionally require `idempotency-key`, and recruiter-authored transition/schedule commands require `x-actor-id`. Pipeline stages are strictly `resume_analysis | recruiter_screening | functional_interview`; hiring decisions are separate. Resume analysis responds 202 with a durable job reference and uses a source-domain transactional outbox. Scheduling delegates session creation through an Interview service port, then stores an explicit application/session mapping; IDs need not be equal. Full schemas and status codes are documented in the V2 section below.
 - **2026-09-07** — **Fixed `POST /api/jobs/{job_id}/applicants/upload-resumes` to actually honor its `source` query parameter for stage placement, matching `add_applicant`/`add_applicants_bulk`.** Since the 2026-09-06 change directly below, `source` was accepted and enum-validated but silently ignored — every newly-created applicant was forced to `source="bulk_upload"` with both `screening_status`/`functional_status` left `null`, so uploaded resumes always landed in Resume Analysis regardless of what the caller passed. This broke the dashboard's "Schedule AI Interviews" tab and the inline "+Add Applicants" panel on the Recruiter Screening/Functional Interview tabs, which upload resumes expecting them to land directly in those stages. `upload_resumes` (`backend/app/routers/jobs.py`) now applies the same source→stage mapping already used by the two sibling routes to each **newly-created** applicant: `source=scheduled` → `screening_status=pending` (Recruiter Screening); `source=functional` or `source=exit` → `functional_status=pending` (Functional Interview); `source` omitted or any other value → defaults to `bulk_upload` as before, both statuses stay `null` (Resume Analysis) — this default path is unchanged, so callers that don't pass `source` see no behavior change. The **existing-applicant match/update branch is untouched** — re-uploading a resume for an already-existing candidate (matched by email or name) still never changes that candidate's `source`, `screening_status`, or `functional_status`. Request (`multipart/form-data`) and response (`List[ApplicantOut]`) schemas are unchanged.
 - **2026-09-06** — **Interview recordings now upload to Backblaze B2 (S3-compatible object storage) instead of Google Drive.** `backend/app/routers/public.py`'s **POST /api/public/interview-session/{session_id}/recording** (`upload_interview_recording`, called server-to-server by the engine after each recording capture) now uploads via the new `upload_recording_to_b2` (`backend/app/utils/backblaze.py`, boto3 S3 client against `B2_ENDPOINT`) instead of `google_drive.upload_recording`. Its success response shape changed from `{"ok": true, "driveFileId": string, "driveUrl": string}` to **`{"ok": true, "b2Key": string}`** — `driveFileId`/`driveUrl` are no longer returned by this route; the object key is `recordings/{session_id}/{candidate name - job title - session_id}.webm`. The `{"ok": false, "simulated": true}` failure-path response (B2 credentials unconfigured) is unchanged. Because B2 is a private bucket, playback now needs a freshly-minted presigned URL per read (new `get_presigned_recording_url`, TTL `B2_PRESIGNED_URL_TTL_SECONDS`, default 14400s/4h) rather than a stored public Drive link — so **GET /api/jobs/applicants/{applicant_id}/functional-report** (`ai_sync.get_applicant_full_report`) gains two new fields in BOTH its not-yet-evaluated and evaluated response branches: `recordingPlaybackUrl` (string|null — presigned fresh on every request from the new `InterviewSession.recordingB2Key` column, `null` if that column is unset) and `recordingStartedAt` (ISO-8601 string|null, from `InterviewSession.startedAt`, UTC-normalized — the dashboard uses it as the recording's t=0 to place proctoring-violation markers on the video timeline). The existing `recordingUrl`/`recordingDriveFileId` fields on that route are UNCHANGED and still returned, as a backward-compat fallback for recordings uploaded before this switch. `InterviewSession.recordingB2Key` (nullable string) is a new column on both the engine's Prisma model (`interview-engine/apps/api/prisma/schema.prisma`) and the backend's mirrored SQLAlchemy model (`backend/app/models/ai_integration.py`), alongside the pre-existing `recordingDriveFileId`/`recordingDriveUrl`. No routes added or removed.
@@ -229,6 +230,38 @@ The lookup is tenant scoped; worker results remain readable after process restar
 Core calls an Interview service port; it does not import or write Interview-owned tables.
 Only after provisioning succeeds does the Core transaction persist its explicit mapping,
 stage, history, and outbox event. `applicationId` and `interviewSessionId` may differ.
+
+---
+
+## V2 Interview API — Elysia
+
+### GET /health
+
+- **Auth:** none
+- **200 response:** `{ "status": "ok", "service": "interview-api" }`
+
+### POST /internal/v2/sessions
+
+- **Required headers:** `x-internal-secret`, `x-tenant-id`, `x-correlation-id`, `idempotency-key`
+- **Request:**
+
+```json
+{
+  "applicationId": "string",
+  "interviewStage": "recruiter_screening | functional_interview",
+  "scheduledAt": "ISO-8601 date-time string",
+  "timeZone": "IANA timezone string"
+}
+```
+
+- **201:** `{ "ok": true, "interviewSessionId": "string", "hardLimitSeconds": 300 | 1500, "replayed": "boolean", "correlationId": "string" }`
+- **400:** `INVALID_SCHEDULE` or `INVALID_TIME_ZONE` domain failure.
+- **401:** `{ "ok": false, "code": "BAD_INTERNAL_SECRET", "message": "Unauthorized." }`
+- **422:** invalid request headers/body.
+
+The `(tenantId, idempotency-key)` pair identifies one provision command. Session and
+application identifiers are deliberately separate. Session state is stored only in the
+Interview database boundary.
 
 ---
 
