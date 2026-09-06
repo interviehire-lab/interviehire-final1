@@ -3,6 +3,7 @@ import { count, eq } from "drizzle-orm";
 import { createResumeAnalysisService } from "@interviehire/domain-hiring";
 import {
   applications,
+  applicationDecisionHistory,
   applicationInterviewRefs,
   applicationStageHistory,
   connectHiringDatabase,
@@ -19,6 +20,7 @@ const connection = connectHiringDatabase(url);
 beforeAll(async () => {
   await migrateHiringDatabase(url);
   await connection.db.delete(resumeAnalysisRuns);
+  await connection.db.delete(applicationDecisionHistory);
   await connection.db.delete(applicationInterviewRefs);
   await connection.db.delete(applicationStageHistory);
   await connection.db.delete(hiringOutbox);

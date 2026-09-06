@@ -119,7 +119,12 @@ export interface ResumeAnalysisRequestedV1 {
   };
 }
 
-export type HiringOutboxEvent = ApplicationStageChangedV1 | ResumeAnalysisRequestedV1;
+export interface ApplicationDecisionRecordedV1 {
+  readonly eventId: string; readonly eventType: "application.decision-recorded.v1"; readonly aggregateId: string;
+  readonly tenantId: string; readonly correlationId: string; readonly occurredAt: string;
+  readonly payload: { readonly resourceType: "application"; readonly resourceId: string; readonly decision: "hired" | "rejected"; readonly stage: ApplicationStage };
+}
+export type HiringOutboxEvent = ApplicationStageChangedV1 | ResumeAnalysisRequestedV1 | ApplicationDecisionRecordedV1;
 
 export interface InterviewCompletedV1 {
   readonly eventId: string; readonly eventType: "interview.completed.v1"; readonly aggregateId: string;

@@ -5,6 +5,7 @@ import type { JobEnvelopeV1 } from "@interviehire/contracts";
 import { createResumeAnalysisService } from "@interviehire/domain-hiring";
 import {
   applications,
+  applicationDecisionHistory,
   applicationInterviewRefs,
   applicationStageHistory,
   connectHiringDatabase,
@@ -30,6 +31,7 @@ const events = new QueueEvents(queueName, { connection: redis });
 beforeAll(async () => {
   await migrateHiringDatabase(databaseUrl);
   await connection.db.delete(resumeAnalysisRuns);
+  await connection.db.delete(applicationDecisionHistory);
   await connection.db.delete(applicationInterviewRefs);
   await connection.db.delete(applicationStageHistory);
   await connection.db.delete(hiringOutbox);

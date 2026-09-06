@@ -4,3 +4,5 @@ export * from "./interview-ref";
 export * from "./pipeline";
 export * from "./resume-analysis";
 export * from "./scheduling";
+export * from "./decision";
+export * from "./deep-analysis";

@@ -9,6 +9,8 @@
 | Async foundation | Hiring transactional outbox | Legacy performs direct/fire-and-forget side effects | `v2_hiring_outbox` + dispatcher | MIGRATED | PostgreSQL/BullMQ commit, rollback, publish, crash-replay tests |
 | Pipeline | Three-column job board read | `dashboard/src/dashboard/job-detail-panes.ts` | `GET /v2/jobs/:id/board` | MIGRATED | domain/API/PostgreSQL tenant tests |
 | Applications | Tenant-scoped application detail | `backend/app/routers/jobs.py` | `GET /v2/applications/:id` | MIGRATED | API/PostgreSQL tenant tests |
+| Applications | Deep Analysis through explicit session mapping | legacy functional report and `deep-analysis.ts` | `GET /v2/applications/:id/deep-analysis` | MIGRATED | domain/Core/Interview adapter tests |
+| Applications | Hire/reject audited decision | legacy applicant PATCH/decision UI | `POST /v2/applications/:id/decisions` | MIGRATED | domain/API/PostgreSQL atomicity and replay tests |
 | Resume analysis | Durable asynchronous request/read | `dashboard/src/dashboard/resume-analysis.ts`, `backend/app/routers/jobs.py` | `POST /v2/applications/:id/resume-analysis`, `GET /v2/async-jobs/:id` | MIGRATED | domain/API/PostgreSQL atomicity tests |
 | Resume analysis | BullMQ processing and persisted result | legacy request/poller behavior | `ai.resume` worker | MIGRATED | real Redis/PostgreSQL success, retry, duplicate, durable-read tests |
 | Interview bridge | Explicit application/session reference | legacy `backend/app/utils/ai_sync.py` relies on equal IDs | `v2_application_interview_refs` | MIGRATED | unequal-ID PostgreSQL test |

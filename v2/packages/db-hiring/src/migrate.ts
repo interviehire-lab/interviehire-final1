@@ -9,6 +9,7 @@ export async function migrateHiringDatabase(url: string): Promise<void> {
     Bun.file(new URL("../migrations/0004_resume_analysis_runs.sql", import.meta.url)).text(),
     Bun.file(new URL("../migrations/0005_resume_worker.sql", import.meta.url)).text(),
     Bun.file(new URL("../migrations/0006_scheduling_bridge.sql", import.meta.url)).text(),
+    Bun.file(new URL("../migrations/0007_decisions.sql", import.meta.url)).text(),
   ]);
   try {
     for (const migration of migrations) await client.unsafe(migration);

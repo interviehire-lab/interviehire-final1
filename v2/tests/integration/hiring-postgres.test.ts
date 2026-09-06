@@ -4,6 +4,7 @@ import { createApplicationService } from "@interviehire/domain-hiring";
 import {
   applicationInterviewRefs,
   applications,
+  applicationDecisionHistory,
   applicationStageHistory,
   hiringOutbox,
   connectHiringDatabase,
@@ -19,6 +20,7 @@ const connection = connectHiringDatabase(url);
 beforeAll(async () => {
   await migrateHiringDatabase(url);
   await connection.db.delete(resumeAnalysisRuns);
+  await connection.db.delete(applicationDecisionHistory);
   await connection.db.delete(applicationInterviewRefs);
   await connection.db.delete(applicationStageHistory);
   await connection.db.delete(hiringOutbox);

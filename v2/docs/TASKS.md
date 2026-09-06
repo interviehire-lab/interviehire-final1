@@ -67,10 +67,18 @@ both retry safely, persist independently, merge deterministically, and survive r
 Completed with independent PostgreSQL evaluation runs, a BullMQ processor, deterministic
 fallback adapter, tenant-scoped report read, and real Redis retry test.
 
-## DOING — Recruiter Deep Analysis and board actions
+## DONE — Recruiter Deep Analysis and board actions
 
 RED: Core resolves explicit application/session mappings, exposes tenant-scoped Deep
 Analysis, and records hire/reject decisions without changing the three-stage board.
+
+Completed with explicit mapping resolution, tenant-scoped Interview adapter, and an
+audited/idempotent decision transaction with its source-domain outbox event.
+
+## DOING — Notifications and automations
+
+RED: schedule and decision events create reference-only notification work; channel
+delivery and reminder scheduling are persistently idempotent with isolated failures.
 
 ## TODO
 

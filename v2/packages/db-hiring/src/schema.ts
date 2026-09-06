@@ -46,6 +46,12 @@ export const applicationStageHistory = pgTable("v2_application_stage_history", {
   index("v2_application_history_application_idx").on(table.applicationId, table.occurredAt),
 ]);
 
+export const applicationDecisionHistory = pgTable("v2_application_decision_history", {
+  id: text("id").primaryKey(), applicationId: text("application_id").notNull().references(() => applications.id), tenantId: text("tenant_id").notNull(),
+  stage: applicationStage("stage").notNull(), fromDecision: applicationDecision("from_decision").notNull(), toDecision: applicationDecision("to_decision").notNull(),
+  actorId: text("actor_id").notNull(), correlationId: text("correlation_id").notNull(), idempotencyKey: text("idempotency_key").notNull(), occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [uniqueIndex("v2_application_decision_idempotency_idx").on(table.tenantId, table.idempotencyKey)]);
+
 export const applicationInterviewRefs = pgTable("v2_application_interview_refs", {
   applicationId: text("application_id").notNull().references(() => applications.id),
   tenantId: text("tenant_id"),

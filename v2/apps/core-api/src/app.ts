@@ -7,6 +7,8 @@ import {
   type ApplicationRepository,
   type ResumeAnalysisService,
   type SchedulingService,
+  type DecisionService,
+  type DeepAnalysisService,
 } from "@interviehire/domain-hiring";
 
 export interface CoreAppDependencies {
@@ -14,6 +16,8 @@ export interface CoreAppDependencies {
   readonly applicationQueries?: ApplicationQueryRepository;
   readonly resumeAnalysis?: ResumeAnalysisService;
   readonly scheduling?: SchedulingService;
+  readonly decisions?: DecisionService;
+  readonly deepAnalysis?: DeepAnalysisService;
 }
 
 export function createCoreApp(dependencies: CoreAppDependencies) {
@@ -32,6 +36,8 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
   };
   const resumeAnalysis = dependencies.resumeAnalysis ?? unavailableResumeAnalysis;
   const scheduling = dependencies.scheduling;
+  const decisions = dependencies.decisions;
+  const deepAnalysis = dependencies.deepAnalysis;
 
   return new Elysia({ name: "interviehire-v2-core" })
     .get("/health", () => ({ status: "ok", service: "core-api" }))
@@ -60,6 +66,18 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
       headers: readHeaders,
       params: t.Object({ id: t.String({ minLength: 1 }) }),
     })
+    .get("/v2/applications/:id/deep-analysis", async ({ headers, params, set }) => {
+      if (!deepAnalysis) { set.status = 503; return { ok: false as const, code: "UNAVAILABLE" as const, message: "Deep Analysis is unavailable.", correlationId: headers["x-correlation-id"] }; }
+      const result = await Effect.runPromise(Effect.tryPromise(() => deepAnalysis.get(headers["x-tenant-id"], params.id, headers["x-correlation-id"])));
+      if (!result.ok) set.status = 404;
+      return { ...result, correlationId: headers["x-correlation-id"] };
+    }, { headers: readHeaders, params: t.Object({ id: t.String({ minLength: 1 }) }) })
+    .post("/v2/applications/:id/decisions", async ({ body, headers, params, set }) => {
+      if (!decisions) { set.status = 503; return { ok: false as const, code: "UNAVAILABLE" as const, message: "Decisions are unavailable.", correlationId: headers["x-correlation-id"] }; }
+      const result = await Effect.runPromise(Effect.tryPromise(() => decisions.decide({ applicationId: params.id, tenantId: headers["x-tenant-id"], actorId: headers["x-actor-id"], correlationId: headers["x-correlation-id"], idempotencyKey: headers["idempotency-key"], decision: body.decision })));
+      if (!result.ok) set.status = result.code === "NOT_FOUND" ? 404 : 409;
+      return { ...result, correlationId: headers["x-correlation-id"] };
+    }, { body: t.Object({ decision: t.Union([t.Literal("hired"), t.Literal("rejected")]) }), headers: t.Object({ "x-tenant-id": t.String({ minLength: 1 }), "x-actor-id": t.String({ minLength: 1 }), "x-correlation-id": t.String({ minLength: 1 }), "idempotency-key": t.String({ minLength: 1 }) }, { additionalProperties: true }), params: t.Object({ id: t.String({ minLength: 1 }) }) })
     .post("/v2/applications/:id/resume-analysis", async ({ body, headers, params, set }) => {
       const result = await Effect.runPromise(Effect.tryPromise(() => resumeAnalysis.request({
         applicationId: params.id,

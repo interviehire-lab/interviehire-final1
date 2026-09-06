@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-07** — **Added recruiter-facing V2 `GET /v2/applications/{id}/deep-analysis` and `POST /v2/applications/{id}/decisions`.** Deep Analysis resolves the explicit Core-owned application/session mapping and reads the tenant-scoped durable Interview report. Decisions accept only `hired | rejected`, remain separate from the three operational stages, and atomically write the application decision, audit history, and `application.decision-recorded.v1` outbox event.
 - **2026-09-07** — **Added asynchronous dual interview evaluation and `GET /internal/v2/sessions/{id}/evaluation`.** `interview.completed.v1` is dispatched to `ai.interview`; the holistic/report and structured/Aviral provider ports persist separate run status/results, retry only incomplete work, and merge into the durable session report after both are ready. A resilient provider wrapper retains deterministic fallback behavior. The internal read is service-secret protected and tenant scoped.
 - **2026-09-07** — **Added V2-compatible synchronous LiveKit director routes: `POST /internal/livekit/sessions/{id}/start`, `/turn`, and `/complete`.** They preserve the existing Node voice agent's paths and response fields. Start applies invite, enablement, reattempt, CV, 10-minute early-entry, and 5-minute late-grace policy and issues the authoritative deadline. Turn processing stays synchronous and persists the candidate/AI pair under the voice agent's idempotency key. Completion atomically persists `completed` state and `interview.completed.v1` in the Interview outbox.
 - **2026-09-07** — **Added the V2 Interview API health and internal session-provisioning routes: `GET /health` and `POST /internal/v2/sessions`.** Provisioning is service-secret protected, tenant scoped, and idempotent. It creates an Interview-owned session ID distinct from the Core application ID and applies fixed stage limits: 300 seconds for recruiter screening and 1500 seconds for functional interviews. Core's scheduling port now forwards its idempotency key to this route.
@@ -144,6 +145,26 @@ on application cards and never create additional board columns.
 - **404 response:** `{ "code": "NOT_FOUND", "message": "Application not found.", "correlationId": "string" }`
 
 A record in another tenant is deliberately indistinguishable from a missing record.
+
+### GET /v2/applications/{id}/deep-analysis
+
+- **Required headers:** `x-tenant-id`, `x-correlation-id`
+- **200:** `{ "ok": true, "applicationId", "interviewSessionId", "interviewStage", "status", "evaluation": "object | null", "correlationId" }`
+- **404:** `NOT_FOUND` when no tenant-scoped application/session mapping or Interview report exists.
+- **503:** `UNAVAILABLE` when the Interview evaluation adapter is not configured.
+
+Core resolves the explicit mapping; it never assumes application and session IDs match.
+
+### POST /v2/applications/{id}/decisions
+
+- **Required headers:** `x-tenant-id`, `x-actor-id`, `x-correlation-id`, `idempotency-key`
+- **Request:** `{ "decision": "hired | rejected" }`
+- **200:** `{ "ok": true, "applicationId", "stage", "decision", "replayed", "correlationId" }`
+- **404:** `NOT_FOUND`; **409:** `APPLICATION_INACTIVE | HIRING_NOT_READY`; **422:** invalid input; **503:** `UNAVAILABLE`.
+
+`hired` is accepted only in `functional_interview`; `rejected` is accepted in any active
+stage. Neither decision changes `stage`. Decision, audit history, and source-domain event
+commit atomically and duplicate commands replay.
 
 ### POST /v2/applications/{id}/transitions
 
