@@ -88,3 +88,18 @@ export type TransitionApplicationResult =
       readonly replayed?: boolean;
     }
   | { readonly ok: false; readonly code: TransitionErrorCode; readonly message: string };
+
+export interface ApplicationStageChangedV1 {
+  readonly eventId: string;
+  readonly eventType: "application.stage_changed.v1";
+  readonly aggregateId: string;
+  readonly tenantId: string;
+  readonly correlationId: string;
+  readonly occurredAt: string;
+  readonly payload: {
+    readonly resourceType: "application";
+    readonly resourceId: string;
+    readonly from: ApplicationStage;
+    readonly to: ApplicationStage;
+  };
+}

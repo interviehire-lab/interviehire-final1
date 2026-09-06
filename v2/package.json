@@ -16,6 +16,7 @@
   "devDependencies": {
     "@interviehire/db-hiring": "workspace:*",
     "@interviehire/domain-hiring": "workspace:*",
+    "@interviehire/queue": "workspace:*",
     "@interviehire/testing": "workspace:*",
     "@types/bun": "latest",
     "bullmq": "^5.58.5",

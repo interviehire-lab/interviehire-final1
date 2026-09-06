@@ -7,8 +7,9 @@ import type {
   StageHistoryRecord,
 } from "@interviehire/domain-hiring";
 import type { ApplicationStage } from "@interviehire/contracts";
+import type { ApplicationStageChangedV1 } from "@interviehire/contracts";
 import type { HiringDatabase } from "./database";
-import { applicationStageHistory, applications } from "./schema";
+import { applicationStageHistory, applications, hiringOutbox } from "./schema";
 
 export class DrizzleApplicationRepository implements ApplicationRepository, ApplicationQueryRepository {
   constructor(private readonly db: HiringDatabase) {}
@@ -54,6 +55,10 @@ export class DrizzleApplicationRepository implements ApplicationRepository, Appl
       idempotencyKey: history.idempotencyKey,
       occurredAt: history.occurredAt,
     });
+  }
+
+  async appendOutbox(event: ApplicationStageChangedV1): Promise<void> {
+    await this.db.insert(hiringOutbox).values(event);
   }
 
   async hasCommand(idempotencyKey: string): Promise<boolean> {

@@ -13,6 +13,7 @@ function repository(): ApplicationRepository {
     find: async () => ({ ...application }),
     updateStage: async (_id, stage) => { application.stage = stage; },
     appendHistory: async () => undefined,
+    appendOutbox: async () => undefined,
     hasCommand: async (key) => commands.has(key),
     recordCommand: async (key) => { commands.add(key); },
   };

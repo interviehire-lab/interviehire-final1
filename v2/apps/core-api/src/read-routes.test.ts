@@ -13,6 +13,7 @@ function dependencies() {
     find: async () => ({ ...application }),
     updateStage: async () => undefined,
     appendHistory: async () => undefined,
+    appendOutbox: async () => undefined,
     hasCommand: async () => false,
     recordCommand: async () => undefined,
   };

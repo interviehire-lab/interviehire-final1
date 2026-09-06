@@ -1,4 +1,5 @@
-import { boolean, index, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import type { ApplicationStageChangedV1 } from "@interviehire/contracts";
 
 export const applicationStage = pgEnum("v2_application_stage", [
   "resume_analysis", "recruiter_screening", "functional_interview",
@@ -53,3 +54,15 @@ export const applicationInterviewRefs = pgTable("v2_application_interview_refs",
   uniqueIndex("v2_application_interview_stage_idx").on(table.applicationId, table.stage),
   uniqueIndex("v2_interview_session_ref_idx").on(table.interviewSessionId),
 ]);
+
+export const hiringOutbox = pgTable("v2_hiring_outbox", {
+  eventId: text("event_id").primaryKey(),
+  eventType: text("event_type").notNull(),
+  aggregateId: text("aggregate_id").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  correlationId: text("correlation_id").notNull(),
+  payload: jsonb("payload").$type<ApplicationStageChangedV1["payload"]>().notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
+  publishAttempts: integer("publish_attempts").notNull().default(0),
+}, (table) => [index("v2_hiring_outbox_pending_idx").on(table.publishedAt, table.occurredAt)]);

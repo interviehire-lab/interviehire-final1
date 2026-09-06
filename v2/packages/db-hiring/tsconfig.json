@@ -3,5 +3,5 @@
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../contracts" }, { "path": "../domain-hiring" }]
+  "references": [{ "path": "../contracts" }, { "path": "../domain-hiring" }, { "path": "../queue" }]
 }

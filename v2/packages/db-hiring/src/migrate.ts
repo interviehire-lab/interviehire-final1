@@ -5,6 +5,7 @@ export async function migrateHiringDatabase(url: string): Promise<void> {
   const migrations = await Promise.all([
     Bun.file(new URL("../migrations/0001_hiring_foundation.sql", import.meta.url)).text(),
     Bun.file(new URL("../migrations/0002_application_reads.sql", import.meta.url)).text(),
+    Bun.file(new URL("../migrations/0003_hiring_outbox.sql", import.meta.url)).text(),
   ]);
   try {
     for (const migration of migrations) await client.unsafe(migration);

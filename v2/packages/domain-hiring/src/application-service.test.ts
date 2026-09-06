@@ -5,7 +5,7 @@ import {
   type ApplicationRepository,
 } from "./application-service";
 
-function repository(options: { failHistory?: boolean } = {}): ApplicationRepository & { histories: unknown[] } {
+function repository(options: { failHistory?: boolean } = {}): ApplicationRepository & { histories: unknown[]; outboxes: unknown[] } {
   const application: ApplicationRecord = {
     id: "app_001",
     tenantId: "org_001",
@@ -15,13 +15,21 @@ function repository(options: { failHistory?: boolean } = {}): ApplicationReposit
     screeningComplete: false,
   };
   const histories: unknown[] = [];
-  const repo: ApplicationRepository & { histories: unknown[] } = {
+  const outboxes: unknown[] = [];
+  const repo: ApplicationRepository & { histories: unknown[]; outboxes: unknown[] } = {
     histories,
+    outboxes,
     transaction: async (work) => {
       const before = { ...application };
       const historyLength = histories.length;
+      const outboxLength = outboxes.length;
       try { return await work(repo); }
-      catch (error) { Object.assign(application, before); histories.length = historyLength; throw error; }
+      catch (error) {
+        Object.assign(application, before);
+        histories.length = historyLength;
+        outboxes.length = outboxLength;
+        throw error;
+      }
     },
     find: async () => ({ ...application }),
     updateStage: async (_id, stage) => { application.stage = stage; },
@@ -29,6 +37,7 @@ function repository(options: { failHistory?: boolean } = {}): ApplicationReposit
       if (options.failHistory) throw new Error("history insert failed");
       histories.push(history);
     },
+    appendOutbox: async (event) => { outboxes.push(event); },
     hasCommand: async (key) => key === "already_done",
     recordCommand: async () => undefined,
   };
@@ -55,6 +64,12 @@ describe("transition command", () => {
     expect(result).toMatchObject({ ok: true });
     expect((await repo.find("app_001"))?.stage).toBe("recruiter_screening");
     expect(repo.histories).toHaveLength(1);
+    expect(repo.outboxes).toEqual([expect.objectContaining({
+      eventType: "application.stage_changed.v1",
+      aggregateId: "app_001",
+      tenantId: "org_001",
+      correlationId: "corr_1",
+    })]);
   });
 
   test("duplicate transition commands do not append history", async () => {
@@ -66,6 +81,7 @@ describe("transition command", () => {
     });
     expect(result).toMatchObject({ ok: true, replayed: true });
     expect(repo.histories).toHaveLength(0);
+    expect(repo.outboxes).toHaveLength(0);
   });
 
   test("rolls back the stage when history persistence fails", async () => {
@@ -77,5 +93,6 @@ describe("transition command", () => {
     })).rejects.toThrow("history insert failed");
     expect((await repo.find("app_001"))?.stage).toBe("resume_analysis");
     expect(repo.histories).toHaveLength(0);
+    expect(repo.outboxes).toHaveLength(0);
   });
 });

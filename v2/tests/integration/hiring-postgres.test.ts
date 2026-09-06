@@ -5,6 +5,7 @@ import {
   applicationInterviewRefs,
   applications,
   applicationStageHistory,
+  hiringOutbox,
   connectHiringDatabase,
   DrizzleApplicationRepository,
   migrateHiringDatabase,
@@ -18,6 +19,7 @@ beforeAll(async () => {
   await migrateHiringDatabase(url);
   await connection.db.delete(applicationInterviewRefs);
   await connection.db.delete(applicationStageHistory);
+  await connection.db.delete(hiringOutbox);
   await connection.db.delete(applications);
 });
 afterAll(() => connection.client.end());
@@ -42,12 +44,15 @@ describe("hiring PostgreSQL semantics", () => {
     expect(await service.transition(command)).toMatchObject({ ok: true, replayed: true });
     const [application] = await connection.db.select().from(applications).where(eq(applications.id, "app_001"));
     const [historyCount] = await connection.db.select({ value: count() }).from(applicationStageHistory);
+    const [outboxCount] = await connection.db.select({ value: count() }).from(hiringOutbox);
     expect(application?.stage).toBe("recruiter_screening");
     expect(historyCount?.value).toBe(1);
+    expect(outboxCount?.value).toBe(1);
   });
 
   test("a rejected history insert rolls back the stage update", async () => {
     await connection.db.delete(applicationStageHistory);
+    await connection.db.delete(hiringOutbox);
     await connection.db.update(applications).set({ stage: "resume_analysis" }).where(eq(applications.id, "app_001"));
     await connection.client.unsafe(`
       CREATE OR REPLACE FUNCTION v2_reject_history() RETURNS trigger AS $$
@@ -67,6 +72,8 @@ describe("hiring PostgreSQL semantics", () => {
     }
     const [application] = await connection.db.select().from(applications).where(eq(applications.id, "app_001"));
     expect(application?.stage).toBe("resume_analysis");
+    const [outboxCount] = await connection.db.select({ value: count() }).from(hiringOutbox);
+    expect(outboxCount?.value).toBe(0);
   });
 
   test("persists deliberately unequal application and interview IDs", async () => {

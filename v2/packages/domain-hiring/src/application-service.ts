@@ -1,5 +1,6 @@
 import type {
   ApplicationDecision,
+  ApplicationStageChangedV1,
   ApplicationStage,
   TransitionApplicationResult,
 } from "@interviehire/contracts";
@@ -30,6 +31,7 @@ export interface ApplicationRepository {
   find(applicationId: string): Promise<ApplicationRecord | undefined>;
   updateStage(applicationId: string, stage: ApplicationStage): Promise<void>;
   appendHistory(history: StageHistoryRecord): Promise<void>;
+  appendOutbox(event: ApplicationStageChangedV1): Promise<void>;
   hasCommand(idempotencyKey: string): Promise<boolean>;
   recordCommand(idempotencyKey: string): Promise<void>;
 }
@@ -64,6 +66,20 @@ export function createApplicationService(repository: ApplicationRepository) {
         const result = transitionApplication(application, command.to, application);
         if (!result.ok) return result;
         await tx.updateStage(application.id, result.to);
+        await tx.appendOutbox({
+          eventId: `evt_${command.tenantId}_${command.idempotencyKey}`,
+          eventType: "application.stage_changed.v1",
+          aggregateId: application.id,
+          tenantId: application.tenantId,
+          correlationId: command.correlationId,
+          occurredAt: command.occurredAt,
+          payload: {
+            resourceType: "application",
+            resourceId: application.id,
+            from: result.from,
+            to: result.to,
+          },
+        });
         await tx.appendHistory({
           applicationId: application.id,
           tenantId: application.tenantId,
