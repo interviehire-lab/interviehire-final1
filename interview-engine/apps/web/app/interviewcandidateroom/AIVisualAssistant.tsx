@@ -1,10 +1,17 @@
 'use client';
 
-import { memo, useEffect, useRef, useState } from 'react';
-import type { RemoteAudioTrack } from 'livekit-client';
-import type { AgentState } from '@livekit/components-react';
-
-import { AgentAudioVisualizerAura } from '@/components/agents-ui/agent-audio-visualizer-aura';
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import type { Room } from 'livekit-client';
+import { createAudioAnalyser } from 'livekit-client';
+import { Orb } from 'orb-ui';
+import type { OrbState } from 'orb-ui';
+// The app-managed LiveKit adapter ({ room, createAudioAnalyser }) is only
+// exported from orb-ui's general adapters barrel — the 'orb-ui/adapters/livekit'
+// subpath resolves to the package's fully-managed browser adapter instead
+// (tokenEndpoint/sandboxId only), which would hand Room ownership to orb-ui and
+// break this app's own timers/question-tracking/proctoring logic already living
+// on this Room. See orb-ui's package.json "exports" map.
+import { createLiveKitAdapter } from 'orb-ui/adapters';
 
 export type AssistantMode = 'connecting' | 'idle' | 'listening' | 'thinking' | 'speaking' | 'complete';
 
@@ -12,32 +19,18 @@ type Props = {
   mode: AssistantMode;
   voiceActive?: boolean;
   /**
-   * Render LiveKit's shader-based AgentAudioVisualizerAura instead of the
-   * built-in orb. Only meaningful for a live LiveKit call — the legacy
-   * static-question flow has no live AI audio to react to, so it keeps the
-   * orb below unconditionally.
+   * The already-connected LiveKit Room from useVoiceInterview, once connect()
+   * has resolved. When set, the orb subscribes to real per-frame audio via
+   * orb-ui's app-managed LiveKit adapter. Null before connect() resolves, and
+   * for the (now rare/legacy) non-LiveKit path — the orb still renders in
+   * controlled mode with a synthesized volume in that case.
    */
-  useAura?: boolean;
-  /** LiveKit's real remote agent-audio track, once subscribed — the aura's audio input. */
-  audioTrack?: RemoteAudioTrack | null;
+  room?: Room | null;
 };
 
-// Same per-state palette as the orb's --orb-a custom property below, so the
-// aura and the orb read as the same design language when a job's settings
-// toggle between voiceProvider values.
-const AURA_COLOR: Record<AssistantMode, `#${string}`> = {
-  connecting: '#94a3b8',
-  idle: '#67e8f9',
-  listening: '#d4ff00',
-  thinking: '#a78bfa',
-  speaking: '#f95738',
-  complete: '#d4ff00',
-};
-
-// AgentAudioVisualizerAura's own AgentState has no "interview complete"
-// concept (it's a generic LiveKit agent vocabulary) — fall back to its calmest
-// resting state and let the copy overlay below carry the "complete" meaning.
-const AURA_STATE: Record<AssistantMode, AgentState> = {
+// orb-ui's OrbState has no "interview complete" concept — fall back to its
+// calmest resting state.
+const ORB_STATE_MAP: Record<AssistantMode, OrbState> = {
   connecting: 'connecting',
   idle: 'idle',
   listening: 'listening',
@@ -46,113 +39,75 @@ const AURA_STATE: Record<AssistantMode, AgentState> = {
   complete: 'idle',
 };
 
-// The aura's `color` prop is a raw WebGL uniform with no CSS transition to
-// smooth it — swapping AURA_COLOR[mode] straight through made every mode
-// change (idle→listening→thinking→...) a hard, jarring color snap. Chase the
-// target color a few percent closer each frame instead, so a mode change
-// reads as a fade rather than a jump cut.
-function hexToRgb(hex: string): [number, number, number] {
-  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
-}
-function rgbToHex(r: number, g: number, b: number): `#${string}` {
-  const c = (n: number) => Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, '0');
-  return `#${c(r)}${c(g)}${c(b)}`;
-}
-function stepColor(from: string, to: string, rate: number): `#${string}` {
-  const [fr, fg, fb] = hexToRgb(from);
-  const [tr, tg, tb] = hexToRgb(to);
-  return rgbToHex(fr + (tr - fr) * rate, fg + (tg - fg) * rate, fb + (tb - fb) * rate);
-}
-function colorDistance(a: string, b: string): number {
-  const [ar, ag, ab] = hexToRgb(a);
-  const [br, bg, bb] = hexToRgb(b);
-  return Math.abs(ar - br) + Math.abs(ag - bg) + Math.abs(ab - bb);
+// Screen-reader-only turn-state announcer — replaces the removed visible
+// "Lina is speaking" / "Understanding your answer" captions for sighted users
+// (who now read turn-state from the orb's own motion) while keeping the same
+// information available to screen-reader users via aria-live.
+function turnStateAnnouncement(mode: AssistantMode): string {
+  if (mode === 'listening') return 'Your turn to speak';
+  if (mode === 'speaking') return 'Lina is responding';
+  return '';
 }
 
-const COPY: Record<AssistantMode, Array<{ title: string; detail: string }>> = {
-  connecting: [
-    { title: 'Preparing your interview', detail: 'Bringing everything into focus' },
-    { title: 'Almost ready', detail: 'Checking the conversation channel' },
-  ],
-  idle: [
-    { title: 'Ready when you are', detail: 'Take a breath and answer naturally' },
-    { title: 'Lina is here', detail: 'There is no need to rush' },
-  ],
-  listening: [
-    { title: 'Listening', detail: 'Take your time—I’m following along' },
-    { title: 'I’m with you', detail: 'Keep going whenever you’re ready' },
-  ],
-  thinking: [
-    { title: 'Understanding your answer', detail: 'Connecting the important details' },
-    { title: 'Thinking it through', detail: 'Preparing a useful next question' },
-    { title: 'Following the thread', detail: 'Turning your answer into context' },
-  ],
-  speaking: [
-    { title: 'Lina is speaking', detail: 'Your next prompt is on screen' },
-    { title: 'Sharing the next thought', detail: 'You can respond when the orb settles' },
-  ],
-  complete: [
-    { title: 'Interview complete', detail: 'Preparing your final report' },
-  ],
+const srOnlyStyle: CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0,0,0,0)',
+  whiteSpace: 'nowrap',
+  border: 0,
 };
 
-// Memoized: with useAura on, this subtree shouldn't re-render just because
-// unrelated state changes elsewhere in the (large) candidate-room page
-// component — that would compete with the WebGL canvas for main-thread time
-// and show up as visible jitter in the aura.
-function AIVisualAssistantImpl({ mode, voiceActive = false, useAura = false, audioTrack = null }: Props) {
-  const [copyIndex, setCopyIndex] = useState(0);
-  const copy = COPY[mode];
+// Memoized: this subtree shouldn't re-render just because unrelated state
+// changes elsewhere in the (large) candidate-room page component — that would
+// compete with orb-ui's own rendering/animation loop for main-thread time.
+function AIVisualAssistantImpl({ mode, voiceActive = false, room = null }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const [auraColor, setAuraColor] = useState<`#${string}`>(AURA_COLOR[mode]);
-  const auraColorRef = useRef(auraColor);
 
-  useEffect(() => {
-    if (!useAura) return;
-    const target = AURA_COLOR[mode];
-    if (auraColorRef.current === target) return;
-    let raf = 0;
-    const step = () => {
-      const next = colorDistance(auraColorRef.current, target) <= 3
-        ? target
-        : stepColor(auraColorRef.current, target, 0.09);
-      auraColorRef.current = next;
-      setAuraColor(next);
-      if (next !== target) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [mode, useAura]);
-
-  useEffect(() => {
-    setCopyIndex(0);
-    if (copy.length < 2) return;
-    const timer = window.setInterval(() => setCopyIndex((index) => (index + 1) % copy.length), 2800);
-    return () => window.clearInterval(timer);
-  }, [mode, copy.length]);
-
-  // Drive the orb's "speaking" energy in real time. Browser speechSynthesis
-  // doesn't expose the synthesized waveform (no MediaStream/AnalyserNode access
-  // like a real <audio> element would give us — see useTranscript.ts's mic-level
-  // meter for that pattern), so there's no raw amplitude to read here. Instead
-  // this generates a smoothed, non-repeating random walk — the same trick most
-  // "AI is talking" orb UIs use even when they DO have real audio, because raw
-  // waveform amplitude looks too jittery on its own. The result: a single CSS
-  // custom property (--speak-energy, 0..1) on the root element, which every
-  // reactive visual below reads via calc()/var() — one signal, many effects,
-  // no per-frame inline styles scattered across the tree.
+  // orb-ui's <Orb> takes a fixed pixel `size` (default 200) rather than
+  // filling its container — track the stage's own box so the orb scales with
+  // the .avatar-panel layout instead of sitting at a constant 200px regardless
+  // of viewport (roughly matching the legacy orb's clamp(150px,20vw,220px)).
+  const [orbSize, setOrbSize] = useState(200);
   useEffect(() => {
     const el = rootRef.current;
-    // The aura drives its own reactivity from the real LiveKit audioTrack —
-    // this synthetic random walk exists only for the orb below, which has no
-    // real waveform to read (see the comment on the orb branch in the JSX).
-    if (!el || useAura) return;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      const next = Math.round(Math.min(box.width, box.height) * 0.6);
+      setOrbSize(Math.max(150, Math.min(280, next)));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // App-managed LiveKit adapter: subscribes to the Room this app already
+  // connected (via useVoiceInterview) rather than orb-ui owning its own
+  // connection. Real per-frame agent/mic volume flows through this; `state`
+  // below is still passed explicitly and stays authoritative for turn-state.
+  const adapter = useMemo(
+    () => (room ? createLiveKitAdapter({ room, createAudioAnalyser }) : undefined),
+    [room],
+  );
+
+  // Legacy/no-room path (rare going forward — only transiently true before
+  // connect() resolves, or for a non-LiveKit session). No real waveform to
+  // read here, so synthesize a smoothed, non-repeating random walk while
+  // "speaking" — the same trick most "AI is talking" orb UIs use — written to
+  // a volume React state instead of a CSS variable.
+  const [syntheticVolume, setSyntheticVolume] = useState(0);
+  useEffect(() => {
+    if (adapter) return;
     if (mode !== 'speaking') {
-      el.style.setProperty('--speak-energy', '0');
+      setSyntheticVolume(0);
       return;
     }
     if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      el.style.setProperty('--speak-energy', '0.4');
+      setSyntheticVolume(0.4);
       return;
     }
     let raf = 0;
@@ -165,53 +120,29 @@ function AIVisualAssistantImpl({ mode, voiceActive = false, useAura = false, aud
         lastTargetChangeMs = t;
       }
       current += (target - current) * 0.14;
-      el.style.setProperty('--speak-energy', current.toFixed(3));
+      setSyntheticVolume(current);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => {
-      cancelAnimationFrame(raf);
-      el.style.setProperty('--speak-energy', '0');
-    };
-  }, [mode, useAura]);
+    return () => cancelAnimationFrame(raf);
+  }, [mode, adapter]);
 
-  const message = copy[copyIndex] ?? copy[0];
+  const announcement = turnStateAnnouncement(mode);
 
   return (
-    <div ref={rootRef} className={`ai-visual ai-visual--${mode}${voiceActive ? ' is-voice-active' : ''}${useAura ? ' ai-visual--aura' : ''}`}>
-      <div className="ai-ambient" />
-
-      {useAura ? (
-        <div className="ai-aura-stage" aria-hidden="true">
-          <AgentAudioVisualizerAura
-            size="xl"
-            className="h-full w-full"
-            state={AURA_STATE[mode]}
-            themeMode="dark"
-            color={auraColor}
-            audioTrack={audioTrack ?? undefined}
-          />
-        </div>
-      ) : (
-        <>
-          <div className="ai-stage" aria-hidden="true">
-            <div className="ai-blob ai-blob-1" />
-            <div className="ai-blob ai-blob-2" />
-            <div className="ai-sphere">
-              <div className="ai-sphere-highlight" />
-              <div className="ai-core" />
-            </div>
-          </div>
-
-          <div className="ai-response-wave" aria-hidden="true">
-            {Array.from({ length: 5 }, (_, index) => <i key={index} />)}
-          </div>
-        </>
-      )}
-
-      <div className="ai-state-copy" role="status" aria-live="polite">
-        <div className="ai-state-title"><i />{message.title}</div>
-        <div className="ai-state-detail" key={`${mode}-${copyIndex}`}>{message.detail}</div>
+    <div ref={rootRef} className={`orb-stage${voiceActive ? ' is-voice-active' : ''}`}>
+      <Orb
+        adapter={adapter}
+        theme="cloud"
+        interactive={false}
+        state={ORB_STATE_MAP[mode]}
+        volume={adapter ? undefined : syntheticVolume}
+        size={orbSize}
+        className="orb-stage-orb"
+        aria-label="Lina, your AI interviewer"
+      />
+      <div role="status" aria-live="polite" style={srOnlyStyle}>
+        {announcement}
       </div>
     </div>
   );

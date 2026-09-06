@@ -12,7 +12,7 @@ import { pushUrl } from './url-sync';
 import { jobStageUrl } from './job-stages';
 import { openJobFlowView } from './job-flow';
 import { initKanbanDragAndDrop, renderColumnsSelectorDropdowns, stopActiveCardPlayer } from './kanban-dnd';
-import { handleSwarmPrompt, recalculateJobPipelines, renderKanbanBoard, startSwarmLogs, toggleWaveformAudio } from './kanban-swarm';
+import { recalculateJobPipelines, renderKanbanBoard, toggleWaveformAudio } from './kanban-swarm';
 import { closeDrawers, createJobUpload, navigateToAriaChat, navigateToCreateJob, navigateToSubtab, navigateToTab, openDrawer, sendAriaMessage, triggerExcelExport } from './navigation';
 import { initSlidingPills } from './pills';
 import { filterCandidatesByDateRange, renderAnalyticsTable, renderJobCards, renderJobListView, renderTeamTable, updateJobsCounters, updateSummaryMetrics } from './render-views';
@@ -1083,21 +1083,6 @@ function initMountBindings() {
     });
   }
 
-  // AI Swarm Prompter bindings
-  const swarmPrompter = document.getElementById('swarm-prompter');
-  const btnSwarmPrompt = document.getElementById('btn-swarm-prompt');
-  
-  if (swarmPrompter && btnSwarmPrompt) {
-    btnSwarmPrompt.addEventListener('click', () => {
-      handleSwarmPrompt(swarmPrompter.value);
-    });
-    swarmPrompter.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        handleSwarmPrompt(swarmPrompter.value);
-      }
-    });
-  }
-
   // Theme Toggle Logic
   const btnThemeToggle = document.getElementById('btn-theme-toggle');
   const careerThemeSelect = document.getElementById('career-theme');
@@ -1415,7 +1400,6 @@ Return ONLY valid JSON:
 
   // Initial Load Actions
   renderJobCards();
-  startSwarmLogs();
 
   // Initialize Crystal Glass Sliding Tab Pills
   initSlidingPills();
@@ -1435,77 +1419,6 @@ Return ONLY valid JSON:
         if (job) {
           renderJobDetailPanes(job);
         }
-      }
-    });
-  }
-
-  // Close button inside Agent Drawer
-  const btnCloseAgent = document.getElementById('btn-close-drawer-agent');
-  if (btnCloseAgent) {
-    btnCloseAgent.addEventListener('click', closeDrawers);
-  }
-
-  // Agent slider value displays
-  const tempSlider = document.getElementById('agent-temp-slider');
-  if (tempSlider) {
-    tempSlider.addEventListener('input', (e) => {
-      document.getElementById('agent-temp-val').textContent = parseFloat(e.target.value).toFixed(1);
-    });
-  }
-  const threshSlider = document.getElementById('agent-threshold-slider');
-  if (threshSlider) {
-    threshSlider.addEventListener('input', (e) => {
-      document.getElementById('agent-threshold-val').textContent = `${e.target.value}%`;
-    });
-  }
-
-  // Bind Swarm Agent Customizer Drawers trigger on agent-cards clicking
-  const bindAgentCard = (elementId, agentKey, agentName) => {
-    const card = document.getElementById(elementId);
-    if (card) {
-      card.style.cursor = 'pointer';
-      card.addEventListener('click', () => {
-        const overlay = document.getElementById('drawer-backdrop');
-        overlay.classList.add('active');
-        
-        const drawer = document.getElementById('drawer-agent-config');
-        drawer.classList.add('active');
-        
-        const config = AppState.agentConfigs[agentKey];
-        document.getElementById('agent-config-title').textContent = `Configure ${agentName}`;
-        document.getElementById('config-agent-id').value = agentKey;
-        document.getElementById('agent-model-select').value = config.model;
-        document.getElementById('agent-temp-slider').value = config.temperature;
-        document.getElementById('agent-temp-val').textContent = config.temperature.toFixed(1);
-        document.getElementById('agent-threshold-slider').value = config.threshold;
-        document.getElementById('agent-threshold-val').textContent = `${config.threshold}%`;
-        document.getElementById('agent-prompt-input').value = config.prompt;
-        
-        soundEngine.playChime([392.00, 523.25], 0.12, 0.1);
-      });
-    }
-  };
-
-  bindAgentCard('agent-aria', 'aria', 'Lina');
-  bindAgentCard('agent-kaelen', 'kaelen', 'Kaelen');
-  bindAgentCard('agent-lyra', 'lyra', 'Lyra');
-
-  // Submit Agent settings config
-  const formAgentConfig = document.getElementById('form-agent-config');
-  if (formAgentConfig) {
-    formAgentConfig.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const agentKey = document.getElementById('config-agent-id').value;
-      const config = AppState.agentConfigs[agentKey];
-      if (config) {
-        config.model = document.getElementById('agent-model-select').value;
-        config.temperature = parseFloat(document.getElementById('agent-temp-slider').value);
-        config.threshold = parseInt(document.getElementById('agent-threshold-slider').value);
-        config.prompt = document.getElementById('agent-prompt-input').value;
-        
-        closeDrawers();
-        showPremiumToast(`Saved agent configuration settings.`, 'success');
-        soundEngine.playChime([261.63, 392.00, 523.25], 0.2, 0.08);
       }
     });
   }

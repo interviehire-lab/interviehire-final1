@@ -2,7 +2,6 @@
 // in dashboard-crystal.js (#view-settings-general); this module makes every control
 // actually do something:
 //   • Update Password / Change Email / Delete Account → modal → backend (settings.py)
-//   • Sound Effects  → drives soundEngine.muted (persisted)
 //   • Dark Mode      → drives the shared theme (body.light-theme + IntervieHire-theme)
 //   • Email / Analytics notifications → persisted preferences
 //   • Export My Data → client-side JSON download of the session's data
@@ -14,9 +13,9 @@ import { soundEngine } from './sound';
 import { showPremiumToast } from './sourcing';
 import { AppState } from './state';
 import { apiChangePassword, apiChangeEmail, apiDeleteAccount, apiLogout, getDataSource } from './api';
+import { API_BASE } from '../auth-client';
 
 const PREF = {
-  sound: 'IntervieHire-sound',          // 'on' | 'off' → soundEngine.muted
   emailNotif: 'IntervieHire-email-notif',
   analytics: 'IntervieHire-analytics',
   theme: 'IntervieHire-theme',          // shared with the header theme toggle
@@ -29,13 +28,6 @@ const prefOn = (key, defaultOn = true) => {
 };
 const setPref = (key, on) => localStorage.setItem(key, on ? 'on' : 'off');
 const setToggle = (el, on) => { if (el) el.classList.toggle('active', !!on); };
-
-// Apply the saved Sound Effects preference to the engine. Defaults ON so the toggle
-// (rendered active) actually produces the click/chime sounds the app fires — the
-// engine ships muted, so without this nothing ever played.
-export function applySoundPref() {
-  soundEngine.muted = !prefOn(PREF.sound, true);
-}
 
 function setEmailDisplay(email) {
   const el = document.getElementById('settings-email-value');
@@ -243,14 +235,18 @@ export function initSettingsPage() {
   if (inited) return;
   inited = true;
 
-  applySoundPref();
-
   document.getElementById('btn-change-password')?.addEventListener('click', onUpdatePassword);
   document.getElementById('btn-change-email')?.addEventListener('click', onChangeEmail);
   document.getElementById('btn-export-data')?.addEventListener('click', onExportData);
   document.getElementById('btn-delete-account')?.addEventListener('click', onDeleteAccount);
+  // Full-page redirect (not a fetch) — this hands off to Google's own consent
+  // screen, then lands back on /api/public/oauth2callback which persists the
+  // refresh token onto this user's row (see google_drive.py / public.py).
+  document.getElementById('btn-connect-drive')?.addEventListener('click', () => {
+    if (!window.IH_USER_ID) return;
+    window.location.href = `${API_BASE}/public/oauth/connect?user_id=${encodeURIComponent(window.IH_USER_ID)}`;
+  });
 
-  bindToggle('toggle-sound', (on) => { setPref(PREF.sound, on); soundEngine.muted = !on; if (on) soundEngine.playClick(); });
   bindToggle('toggle-dark-mode', (on) => setTheme(on));
   bindToggle('toggle-email-notif', (on) => { setPref(PREF.emailNotif, on); soundEngine.playClick(); });
   bindToggle('toggle-analytics', (on) => { setPref(PREF.analytics, on); soundEngine.playClick(); });
@@ -262,7 +258,15 @@ export function initSettingsPage() {
 // email arrives from /me after mount, and the theme can change via the header toggle).
 export function syncSettingsControls() {
   setEmailDisplay(window.IH_USER_EMAIL || '');
-  setToggle(document.getElementById('toggle-sound'), prefOn(PREF.sound, true));
+  const driveStatus = document.getElementById('settings-drive-status');
+  const driveBtn = document.getElementById('btn-connect-drive');
+  if (driveStatus) {
+    const connected = !!window.IH_GOOGLE_DRIVE_CONNECTED;
+    driveStatus.textContent = connected
+      ? 'Connected — interview recordings upload here automatically.'
+      : 'Not connected — recordings run in simulation mode until this is connected.';
+    if (driveBtn) driveBtn.textContent = connected ? 'Reconnect' : 'Connect';
+  }
   setToggle(document.getElementById('toggle-email-notif'), prefOn(PREF.emailNotif, true));
   setToggle(document.getElementById('toggle-analytics'), prefOn(PREF.analytics, true));
   setToggle(document.getElementById('toggle-dark-mode'), !document.body.classList.contains('light-theme'));

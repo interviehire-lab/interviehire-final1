@@ -71,6 +71,7 @@ export function buildAnswerEvaluationPrompt(
     "Compare against the model answer by concept, not exact wording. Give credit for equivalent correct ideas.",
     "Penalize factual errors, contradictions, buzzwords, unsupported claims, and non-answers. Do not invent evidence. Keep evidence quotes short.",
     `Score EVERY one of these dimensions (use these EXACT keys) from 0-100: ${Object.keys(weights).join(", ")}.`,
+    "For communication_quality, judge from the transcript text alone (consistent with using text-only signals above): English-language proficiency — grammar, vocabulary range, sentence structure, and clarity of expression — alongside how well-organized and articulate the answer is. Penalize responses that are hard to follow due to language errors, not just weak content.",
     "In modelAnswerComparison, list the required model-answer concepts the candidate covered vs missed, any bonus concepts covered, and any incorrect claims.",
     "Return strict JSON only.",
     "",

@@ -33,6 +33,25 @@ const PROCTORING_PENALTY: Record<string, number> = {
   CRITICAL: 20,
 };
 
+// Hire-decision cutoffs (getRecommendation) — the actual pass/fail bar applied
+// to every candidate's overallScore, and the "high red-flag but decent score"
+// override threshold below it.
+const HIRE_STRONG_PROCEED_MIN = 88;
+const HIRE_PROCEED_MIN = 72;
+const HIRE_HOLD_MIN = 55;
+const HIRE_HIGH_REDFLAG_HOLD_BELOW_SCORE = 80;
+
+// Exit-interview attrition classification (deriveAttritionSignal) — a
+// separate scoring context from the hire-decision cutoffs above.
+const ATTRITION_REGRETTABLE_BELOW_SCORE = 45;
+const ATTRITION_EXPECTED_ABOVE_SCORE = 70;
+
+// Recommendation-confidence bucketing (getRecommendationConfidence) — the
+// share of low/high-confidence per-answer evaluations that tips the overall
+// report's confidence bucket.
+const CONFIDENCE_LOW_RATIO_THRESHOLD = 0.35;
+const CONFIDENCE_HIGH_RATIO_THRESHOLD = 0.6;
+
 // finalAnswerScore = 45% rubric coverage + 55% weighted dimensions − red-flag penalty
 const RUBRIC_WEIGHT = 0.45;
 const DIMENSION_WEIGHT = 0.55;
@@ -347,11 +366,11 @@ function deriveAttritionSignal(
     return "regrettable";
   }
 
-  if (overallScore < 45) {
+  if (overallScore < ATTRITION_REGRETTABLE_BELOW_SCORE) {
     return "regrettable";
   }
 
-  if (overallScore > 70) {
+  if (overallScore > ATTRITION_EXPECTED_ABOVE_SCORE) {
     return "expected";
   }
 
@@ -423,19 +442,19 @@ function getRecommendation(
     return "needs_human_review";
   }
 
-  if (redFlags.some((flag) => flag.severity === "high") && overallScore < 80) {
+  if (redFlags.some((flag) => flag.severity === "high") && overallScore < HIRE_HIGH_REDFLAG_HOLD_BELOW_SCORE) {
     return "hold";
   }
 
-  if (overallScore >= 88) {
+  if (overallScore >= HIRE_STRONG_PROCEED_MIN) {
     return "strong_proceed";
   }
 
-  if (overallScore >= 72) {
+  if (overallScore >= HIRE_PROCEED_MIN) {
     return "proceed";
   }
 
-  if (overallScore >= 55) {
+  if (overallScore >= HIRE_HOLD_MIN) {
     return "hold";
   }
 
@@ -456,11 +475,11 @@ function getRecommendationConfidence(
     (evaluation) => evaluation.evaluationConfidence === "high",
   ).length;
 
-  if (lowConfidenceCount / evaluations.length >= 0.35) {
+  if (lowConfidenceCount / evaluations.length >= CONFIDENCE_LOW_RATIO_THRESHOLD) {
     return "low";
   }
 
-  if (highConfidenceCount / evaluations.length >= 0.6) {
+  if (highConfidenceCount / evaluations.length >= CONFIDENCE_HIGH_RATIO_THRESHOLD) {
     return "high";
   }
 

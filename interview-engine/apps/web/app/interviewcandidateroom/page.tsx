@@ -8,6 +8,7 @@ import { Check, Mic, MonitorUp, ShieldCheck, Video } from 'lucide-react';
 import type { CalibrationResult } from '@/hooks/useGazeCalibration';
 import { roomStyles } from './roomStyles';
 import { WaitingRoom } from './WaitingRoom';
+import { AboutToBegin } from './AboutToBegin';
 import { AIVisualAssistant, type AssistantMode } from './AIVisualAssistant';
 import { EARLY_ENTRY_MS } from '@interviehire/shared';
 import { useVoiceInterview, type VoiceActivity, type VoiceTranscript } from '@/hooks/useVoiceInterview';
@@ -129,6 +130,8 @@ export default function Interview() {
   // Recruiter-screening vs functional distinction: same room, same session mechanics,
   // driven off the stage the backend stamped into InterviewSession.settings.
   const [screeningOutcome, setScreeningOutcome] = useState<{ fits: boolean; link?: string; fitLabel?: string } | null>(null);
+  // One-shot guard for the server-anchored stage deadline (screening AND
+  // functional, despite the name — kept to minimize diff churn).
   const screeningEndTriggeredRef = useRef(false);
   // Per-job interview settings + branding, synced from the recruiter dashboard.
   const [interviewSettings, setInterviewSettings] = useState<any>(null);
@@ -460,25 +463,46 @@ export default function Interview() {
   // Which stage this session is (stamped by the backend into InterviewSession.settings
   // — see ai_sync.py). Undefined for demo/legacy sessions, which behave exactly as before.
   const sessionStage = interviewSettings?.stage as 'screening' | 'functional' | undefined;
-  const SCREENING_DURATION_SECONDS = 300;
+  const isStagedSession = sessionStage === 'screening' || sessionStage === 'functional';
+
+  // Server-anchored deadline for recruiter-screening (5 min) / functional (25 min)
+  // sessions — captured from /start's response, which computes it via
+  // interview-policy.ts's stage-aware deadlineFor(), NOT a client-only counter.
+  // A reload re-calls /start, but the engine only ever stamps session.startedAt
+  // once (`startedAt: session.startedAt ?? new Date()`), so /start returns the
+  // SAME deadline after a refresh — a reload can no longer buy extra time.
+  const [stageDeadlineAt, setStageDeadlineAt] = useState<string | null>(null);
+  const stageDeadlineMs = useMemo(() => {
+    const t = stageDeadlineAt ? Date.parse(stageDeadlineAt) : NaN;
+    return Number.isFinite(t) ? t : null;
+  }, [stageDeadlineAt]);
 
   // --- Elapsed timer (starts once calibration is done) ---
+  // Only drives the "Elapsed" display fallback for non-staged (demo/legacy)
+  // sessions now — staged sessions use the server-anchored countdown below.
   useEffect(() => {
     if (!calibration) return;
     const t = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(t);
   }, [calibration]);
 
-  // --- Recruiter screening: hard 5-minute cutoff, auto-ends the call exactly once ---
+  // --- Recruiter-screening / functional: hard server-anchored cutoff, auto-ends
+  // the call exactly once. Ticks the same deadlineNowMs clock as the LiveKit
+  // deadline effect above so every countdown on screen stays in lockstep. ---
   useEffect(() => {
-    if (sessionStage !== 'screening') return;
-    if (ended || screeningEndTriggeredRef.current) return;
-    if (elapsed >= SCREENING_DURATION_SECONDS) {
-      screeningEndTriggeredRef.current = true;
-      endCall();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionStage, elapsed, ended]);
+    if (!isStagedSession || !stageDeadlineMs || ended || screeningEndTriggeredRef.current) return;
+    const tick = () => {
+      const now = Date.now();
+      setDeadlineNowMs(now);
+      if (now >= stageDeadlineMs) {
+        screeningEndTriggeredRef.current = true;
+        void endCall();
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [isStagedSession, stageDeadlineMs, ended]);
 
   // --- Recording lifecycle ---
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -559,17 +583,25 @@ export default function Interview() {
     audioMixCtxRef.current = null;
   }
 
-  // --- Auto-start the recorded session once calibrated + connected ---
+  // --- Early session start (parallelizes the LiveKit agent-join delay) ---
+  // Fires right after consent — BEFORE the permission-grant gate — instead of
+  // after calibration like the rest of session startup below. Calling
+  // voice.connect() here is what actually triggers the LiveKit Agents worker's
+  // dispatch (the access token embeds RoomConfiguration.agents, so dispatch
+  // fires once room.connect() reaches LiveKit), so the multi-second join delay
+  // now overlaps the permission-grant/calibration screens instead of landing
+  // fully exposed on the candidate behind a "Preparing your interview…" spinner.
+  // One-shot via earlyStartRef, mirroring sessionStartedRef's pattern below.
+  // Accepted tradeoff: session.startedAt is now stamped a few seconds (up to
+  // ~30s with proctoring on) sooner than before — negligible against a
+  // ~30 minute interview budget.
+  const earlyStartRef = useRef(false);
   useEffect(() => {
-    if (!calibration || !interviewSettingsLoaded || sessionStartedRef.current) return;
+    if (!consentGiven || !interviewSettingsLoaded || earlyStartRef.current) return;
     if (socket?.readyState !== WebSocket.OPEN) return;
-    sessionStartedRef.current = true;
+    earlyStartRef.current = true;
     (async () => {
       try {
-        setRecordingStatus('Starting session…');
-        // Engage the engine's proctoring engine (gaze/face/object/tab/etc) and
-        // its integrity scoring — detection is gated until this is called.
-        startProctoringSession();
         // Honor the recruiter's interview settings enforced server-side at /start
         // (disabled / late / reattempt / CV required). On a block, surface the
         // message and stop instead of proceeding into a broken room.
@@ -583,23 +615,49 @@ export default function Interview() {
         // synced/blueprint questions, and a transient engine/session error must
         // not block a legitimately scheduled candidate.
         if (startRes.status >= 400 && startRes.status < 500) {
-          const msg = startJson?.error || 'This interview could not be started.';
-          setStartError(msg);
-          try { endProctoringSession(); } catch { /* noop */ }
-          setRecordingStatus('');
+          setStartError(startJson?.error || 'This interview could not be started.');
           return;
         }
         if (!startRes.ok) {
           console.error(`Engine /start returned ${startRes.status}; proceeding into the interview anyway.`);
         }
+        // Server-anchored deadline for recruiter-screening/functional sessions —
+        // see the stageDeadlineAt declaration above for why this is reload-proof.
+        if (typeof startJson?.deadlineAt === 'string') setStageDeadlineAt(startJson.deadlineAt);
+        if (voiceInterviewEnabled) {
+          await voice.connect();
+        }
+      } catch (err) {
+        console.error('early session start failed', err);
+        if (voiceInterviewEnabled) {
+          setStartError(`Voice interview could not start: ${err instanceof Error ? err.message : 'Unknown voice provider error'}`);
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consentGiven, socket, interviewSettingsLoaded, voiceInterviewEnabled, voice]);
+
+  // --- Auto-start recording + publish the mic once calibrated + connected ---
+  // The LiveKit room itself was already connected by the early effect above;
+  // this only publishes the candidate's mic track against it (and, on the
+  // legacy/non-voice path, is where proctoring + recording always started).
+  useEffect(() => {
+    if (!calibration || !interviewSettingsLoaded || sessionStartedRef.current) return;
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    // The early effect above already hard-blocked this session (recruiter
+    // policy gate) — don't proceed into proctoring/recording/mic-publish.
+    if (startError) return;
+    sessionStartedRef.current = true;
+    (async () => {
+      try {
+        setRecordingStatus('Starting session…');
+        // Engage the engine's proctoring engine (gaze/face/object/tab/etc) and
+        // its integrity scoring — detection is gated until this is called.
+        startProctoringSession();
         await startRecording();
         if (voiceInterviewEnabled) {
-          const firstQuestion = String(startJson?.initialQuestion || questionsRef.current[0]?.text || '').trim();
           setAssistantActivity('thinking');
-          await voice.start({
-            firstQuestion,
-            microphoneTrack: micStreamRef.current?.getAudioTracks()[0] || null,
-          });
+          await voice.publishMicrophone(micStreamRef.current?.getAudioTracks()[0] ?? null);
         }
         // Transcript capture (markStart + browser STT + auto interviewer-audio
         // capture) is started in the calibration-gated effect below — NOT here —
@@ -614,7 +672,7 @@ export default function Interview() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calibration, socket, interviewSettingsLoaded, voiceInterviewEnabled, voice]);
+  }, [calibration, socket, interviewSettingsLoaded, voiceInterviewEnabled, voice, startError]);
 
   // Start transcript capture as soon as calibration is done, independent of the
   // proctoring WebSocket. Flag-off candidate speech prefers server-side
@@ -954,10 +1012,13 @@ export default function Interview() {
   const liveKitRemainingSeconds = voiceDeadlineMs == null
     ? voice.hardLimitSeconds
     : Math.max(0, Math.ceil((voiceDeadlineMs - deadlineNowMs) / 1000));
+  const stageRemainingSeconds = stageDeadlineMs == null
+    ? null
+    : Math.max(0, Math.ceil((stageDeadlineMs - deadlineNowMs) / 1000));
   const clockSeconds = voiceProvider === 'livekit'
     ? liveKitRemainingSeconds
-    : sessionStage === 'screening'
-      ? Math.max(0, SCREENING_DURATION_SECONDS - elapsed)
+    : isStagedSession && stageRemainingSeconds != null
+      ? stageRemainingSeconds
       : elapsed;
   const mm = String(Math.floor(clockSeconds / 60)).padStart(2, '0');
   const ss = String(clockSeconds % 60).padStart(2, '0');
@@ -983,11 +1044,6 @@ export default function Interview() {
             : calibration
               ? 'listening'
               : 'idle';
-  const assistantModeLabel = assistantMode === 'connecting'
-    ? 'Connecting'
-    : assistantMode === 'complete'
-      ? 'Complete'
-      : assistantMode.charAt(0).toUpperCase() + assistantMode.slice(1);
   const qIdx = Math.min(questionIndex, Math.max(0, questions.length - 1));
   const question = questions[qIdx] || { text: 'No questions loaded.', tag: 'Interview', hint: 'Please wait.' };
 
@@ -1169,8 +1225,13 @@ export default function Interview() {
         </div>
       )}
 
-      {/* Pre-interview permission gate — prompts fire only on the button click */}
-      {consentGiven && !calibration && !permissionsAcknowledged && (
+      {/* Pre-interview permission gate — prompts fire only on the button click.
+          Gated on !startError too: the early session-start effect above can now
+          hard-block (recruiter policy gate) before this screen would otherwise
+          show, and both this and the "Interview unavailable" gate share the
+          same fixed z-index — without this guard the permission gate (later in
+          the DOM) would render on top and hide the actual error. */}
+      {!startError && consentGiven && !calibration && !permissionsAcknowledged && (
         <div className="gate">
           <div className="gate-card">
             <p className="gate-eyebrow">Pre-interview access</p>
@@ -1273,12 +1334,21 @@ export default function Interview() {
 
       {/* Gaze calibration — only after the candidate clicks to proceed, and only
           when proctoring (camera/gaze tracking) is actually on for this job. */}
-      {consentGiven && !calibration && permissionsAcknowledged && proctoringSettingEnabled && (
+      {!startError && consentGiven && !calibration && permissionsAcknowledged && proctoringSettingEnabled && (
         <GazeCalibration
           videoRef={videoRef}
           onComplete={setCalibration}
           onSkip={() => setCalibration(DEFAULT_CALIBRATION)}
         />
+      )}
+
+      {/* On-screen introduction: shown for the gap between calibration-complete
+          and the LiveKit voice-agent worker actually joining (agentConnected),
+          replacing the previously-generic "connecting" spinner for this window
+          specifically — everyone gets a real introduction, not just candidates
+          who arrived early enough to see WaitingRoom's tour. */}
+      {!startError && !!calibration && awaitingAgent && (
+        <AboutToBegin />
       )}
 
       {/* ===== Interview room ===== */}
@@ -1353,8 +1423,7 @@ export default function Interview() {
             <AIVisualAssistant
               mode={assistantMode}
               voiceActive={voiceActive && micOn}
-              useAura={voiceInterviewEnabled}
-              audioTrack={voice.agentAudioTrack}
+              room={voice.room}
             />
             <div className="avatar-overlay" />
             <div className="identity">
@@ -1363,9 +1432,6 @@ export default function Interview() {
                 <strong>Lina</strong>
                 <span>AI Interviewer</span>
               </div>
-            </div>
-            <div className={`status-pill assistant-status assistant-status--${assistantMode}`}>
-              <i className="assistant-status-dot" /> {assistantModeLabel}
             </div>
             {/* Candidate camera as a Google-Meet-style PiP in the corner of Lina's
                 panel, so the right column is free to show the full question. */}
@@ -1443,7 +1509,7 @@ export default function Interview() {
           <div className="control-time">
             <i className="red-dot" />
             <span>{clock}</span>
-            <span className="elapsed-label">{voiceProvider === 'livekit' || sessionStage === 'screening' ? 'Remaining' : 'Elapsed'} · {recordingStatus}</span>
+            <span className="elapsed-label">{voiceProvider === 'livekit' || isStagedSession ? 'Remaining' : 'Elapsed'} · {recordingStatus}</span>
             <button type="button" className="debug-toggle" onClick={() => setShowDebug((v) => !v)} title="Toggle proctoring debug (Ctrl+Shift+D or ` )">
               🐞 Debug
             </button>

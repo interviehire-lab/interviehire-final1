@@ -57,6 +57,7 @@ class UserProfileOut(BaseModel):
     organisation_id: Optional[UUID] = None
     organisation_name: Optional[str] = None
     onboarding_required: bool
+    google_drive_connected: bool = False
 
     class Config:
         from_attributes = True
@@ -292,6 +293,7 @@ def get_me(request: Request, current_user: User = Depends(get_current_user), db:
         organisation_id=org_id,
         organisation_name=org_name,
         onboarding_required=onboarding_required,
+        google_drive_connected=bool(current_user.google_refresh_token),
     )
 
 

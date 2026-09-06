@@ -75,6 +75,9 @@ function deriveLocalRows(job) {
       reportUrl: null,
       evaluatedAt: c.attemptedAt || null,
       source: c.source || null,
+      recruiterScreening: c.recruiterScreening || null,
+      recruiterScreeningScore: c.recruiterScreeningScore ?? null,
+      screeningStatus: c.screeningStatus || null,
     }));
 }
 
@@ -100,6 +103,7 @@ function tableHTML(rows) {
         <thead>
           <tr>
             <th>Candidate</th>
+            <th>Recruiter Screening</th>
             <th>Score <span class="sort-arrows">⇅</span></th>
             <th>Recommendation</th>
             <th>Questions</th>
@@ -117,6 +121,7 @@ function tableHTML(rows) {
                   <span class="cand-email-sub">${escapeHTML(r.email)}</span>
                 </div>
               </td>
+              <td>${r.recruiterScreening ? escapeHTML(r.recruiterScreening) : '—'}${r.recruiterScreeningScore != null ? ` (${Math.round(r.recruiterScreeningScore)})` : ''}</td>
               <td><span class="interview-score-dot ${scoreColor(r.overallScore)}"></span> ${r.overallScore != null ? Math.round(r.overallScore) : '—'}</td>
               <td>${recommendationBadge(r.recommendation)}</td>
               <td>${r.questionCount || '—'}</td>
@@ -137,8 +142,10 @@ function bindRows(container) {
       const candId = el.getAttribute('data-cand-id');
       if (!candId) return;
       soundEngine.playClick();
-      // Open the saved structured report directly on its Interview Analysis tab.
-      openCandidateReportPage(candId, 'analysis');
+      // Open the saved structured report directly on its Interview Analysis tab,
+      // restricted to recruiter-screening + functional data — no resume tab here,
+      // that's Deep Analysis's definition, not this page's.
+      openCandidateReportPage(candId, 'analysis', 'interview-analysis');
     });
   });
 }

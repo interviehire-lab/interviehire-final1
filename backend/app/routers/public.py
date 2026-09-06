@@ -366,7 +366,21 @@ def public_reschedule_interview(
         parsed_time = parse_scheduled_datetime(new_time)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid ISO datetime format.")
-        
+
+    # Reschedule window: the client (reschedule.html) already blocks past times,
+    # but that check is trivially bypassed with a direct POST, and neither side
+    # enforced any upper bound at all — a stray/malicious date (year 3000) was
+    # previously accepted outright. There's no recruiter-configured scheduling
+    # window anywhere in the data model to check against, so this is a sane
+    # fixed safety rail (not a business rule): must be in the future (small
+    # grace buffer for clock skew, matching the interview room's own
+    # LATE_GRACE_MS pattern) and no more than ~2 months out.
+    _now = datetime.now(timezone.utc)
+    if parsed_time < _now - timedelta(minutes=1):
+        raise HTTPException(status_code=400, detail="Please choose a time in the future.")
+    if parsed_time > _now + timedelta(days=60):
+        raise HTTPException(status_code=400, detail="Please choose a time within the next 60 days.")
+
     job = db.query(Job).filter(Job.id == applicant.job_id).first()
     job_title = job.role_name or job.title if job else "General Position"
     recruiter_id = job.created_by_id if job else None

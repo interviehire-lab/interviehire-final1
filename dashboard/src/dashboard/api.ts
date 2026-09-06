@@ -178,6 +178,9 @@ export async function apiFetchInterviewAnalysis(jobId) {
     reportUrl: r.report_url || null,
     evaluatedAt: r.evaluated_at || null,
     source: r.source || null,
+    recruiterScreening: r.recruiter_screening || null,
+    recruiterScreeningScore: r.recruiter_screening_score ?? null,
+    screeningStatus: r.screening_status || null,
   }));
 }
 
@@ -688,7 +691,16 @@ function mapUsertypeOut(usertype) {
 function mapFullReportToCandidateReport(data: any): CandidateReport | null {
   if (!data) return null;
   const report = data.report;
-  if (data.evaluated && report && Array.isArray(report.questionBreakdown)) return report;
+  if (data.evaluated && report && Array.isArray(report.questionBreakdown)) {
+    // recordingUrl/transcript are session-level metadata, not part of the
+    // engine's CandidateReport contract (kept mirrored 1:1 with the engine
+    // above) — attached here so report-page.ts can render a video/transcript
+    // panel without a second fetch. Read via an `any` cast at call sites.
+    (report as any).recordingUrl = data.recordingUrl || null;
+    (report as any).recordingDriveFileId = data.recordingDriveFileId || null;
+    (report as any).transcript = Array.isArray(data.transcript) ? data.transcript : [];
+    return report;
+  }
   return null;
 }
 

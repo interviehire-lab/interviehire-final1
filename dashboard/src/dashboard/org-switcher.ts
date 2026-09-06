@@ -42,12 +42,16 @@ export async function initOrgSwitcher() {
   const menu = document.getElementById('org-switcher-menu');
   if (!wrap || !trigger || !menu) return;
 
-  // Only super-admins get the switcher; everyone else keeps it hidden.
+  // Only super-admins get the switcher (and the Super Admin dashboard link);
+  // everyone else keeps both hidden.
+  const adminLink = document.getElementById('link-super-admin');
   if (window.IH_USER_TYPE !== 'super_admin') {
     wrap.style.display = 'none';
+    if (adminLink) adminLink.style.display = 'none';
     return;
   }
   wrap.style.display = '';
+  if (adminLink) adminLink.style.display = '';
   updateLabel(trigger);
 
   // Native, element-scoped listeners (trigger + menu) live as long as the DOM

@@ -139,6 +139,7 @@
       const input = $('newtime');
       input.value = toISTInputValue(base);
       input.min = toISTInputValue(new Date());
+      input.max = toISTInputValue(new Date(Date.now() + 60*24*60*60000));
       show('form');
     }catch(e){ show('fatal'); }
   }
@@ -161,6 +162,7 @@
     const chosen = parseISTInputValue(val);
     if(isNaN(chosen)){ msg.className='msg err'; msg.textContent='That date/time looks invalid.'; return; }
     if(chosen.getTime() < Date.now() - 60000){ msg.className='msg err'; msg.textContent='Please choose a time in the future.'; return; }
+    if(chosen.getTime() > Date.now() + 60*24*60*60000){ msg.className='msg err'; msg.textContent='Please choose a time within the next 60 days.'; return; }
     const btn = $('submit'); btn.disabled = true; btn.textContent = 'Rescheduling…';
     try{
       // Send a real, unambiguous UTC instant (computed from the IST-interpreted

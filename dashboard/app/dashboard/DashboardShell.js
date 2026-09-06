@@ -252,6 +252,8 @@ export default function DashboardShell({ children }) {
 		const firstName = label.split(/\s+/)[0] || label;
 		window.IH_USER_NAME = firstName;
 		window.IH_USER_EMAIL = user.email || "";
+		window.IH_USER_ID = user.id || null;
+		window.IH_GOOGLE_DRIVE_CONNECTED = !!user.google_drive_connected;
 		window.IH_ORG_NAME = (user.organisation_name || "").trim();
 		window.IH_USER_TYPE = user.user_type || "member";
 		window.IH_ACTIVE_ORG_ID = user.organisation_id || null;

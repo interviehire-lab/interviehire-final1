@@ -40,15 +40,6 @@ export const html = `
               </svg>
               <span>Usage Overview</span>
             </li>
-            <li class="nav-item" data-tab="swarm">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                <line x1="2" y1="20" x2="22" y2="20"></line>
-                <line x1="5" y1="17" x2="19" y2="17"></line>
-                <circle cx="12" cy="10" r="2"></circle>
-              </svg>
-              <span>AI Swarm</span>
-            </li>
             <li class="nav-item" data-tab="talent">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="11" cy="11" r="8"></circle>
@@ -164,6 +155,12 @@ export const html = `
               </button>
               <div class="bulk-actions-dropdown org-switcher-menu" id="org-switcher-menu" style="display:none;"></div>
             </div>
+
+            <!-- Super Admin link (same gate as the org switcher above; revealed by JS) -->
+            <a class="btn-org-switcher" id="link-super-admin" href="/admin" style="display:none; text-decoration:none;" title="Platform-wide overview">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v6c0 5 4 9 9 9s9-4 9-9V7z"/></svg>
+              <span>Super Admin</span>
+            </a>
 
             <!-- Theme Toggle Button -->
             <button class="btn-theme-toggle" id="btn-theme-toggle" aria-label="Toggle Theme">
@@ -521,75 +518,6 @@ export const html = `
           </section>
 
           <!-- ===================================== -->
-          <!-- AI SWARM VIEW (TAB 2.5) -->
-          <!-- ===================================== -->
-          <section class="dashboard-view" id="view-swarm">
-            <div class="swarm-layout">
-              <!-- Agents Cards Grid -->
-              <div class="agents-status-grid">
-                <!-- Agent Lina -->
-                <div class="card-glass agent-card" id="agent-aria">
-                  <div class="agent-avatar-status">
-                    <div class="agent-pic">AR</div>
-                    <span class="pulse-dot green"></span>
-                  </div>
-                  <div class="agent-meta">
-                    <h3 class="agent-name">Lina</h3>
-                    <p class="agent-role-lbl">Resume Analyst Agent</p>
-                    <p class="agent-status-msg" id="aria-status">Monitoring candidate submissions...</p>
-                  </div>
-                </div>
-                <!-- Agent Kaelen -->
-                <div class="card-glass agent-card" id="agent-kaelen">
-                  <div class="agent-avatar-status">
-                    <div class="agent-pic">KL</div>
-                    <span class="pulse-dot green"></span>
-                  </div>
-                  <div class="agent-meta">
-                    <h3 class="agent-name">Kaelen</h3>
-                    <p class="agent-role-lbl">Technical Vetting Specialist</p>
-                    <p class="agent-status-msg" id="kaelen-status">Generating code challenge rubrics...</p>
-                  </div>
-                </div>
-                <!-- Agent Lyra -->
-                <div class="card-glass agent-card" id="agent-lyra">
-                  <div class="agent-avatar-status">
-                    <div class="agent-pic">LY</div>
-                    <span class="pulse-dot orange"></span>
-                  </div>
-                  <div class="agent-meta">
-                    <h3 class="agent-name">Lyra</h3>
-                    <p class="agent-role-lbl">HR Communications Bot</p>
-                    <p class="agent-status-msg" id="lyra-status">Idle. Waiting for candidate triggers...</p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Terminal console logs -->
-              <div class="card-glass terminal-box">
-                <div class="terminal-header">
-                  <div class="terminal-dots">
-                    <span class="dot red"></span>
-                    <span class="dot yellow"></span>
-                    <span class="dot green"></span>
-                  </div>
-                  <span class="terminal-title">A.I. Swarm Ticker Activity Feed</span>
-                </div>
-                <div class="terminal-body" id="swarm-terminal-body">
-                  <div class="term-log"><code>[10:42:01] Lina:</code> System diagnostics initiated. Swarm link online.</div>
-                  <div class="term-log"><code>[10:42:15] Lyra:</code> Syncing candidate databases with email queue...</div>
-                  <div class="term-log font-gold"><code>[10:43:02] Kaelen:</code> Dispatched coding test to Candidate CAN-8234-EA1.</div>
-                </div>
-                <div class="terminal-input-wrap">
-                  <span class="terminal-prompt">&gt;</span>
-                  <input type="text" id="swarm-prompter" placeholder="Ask the AI Swarm to do something... (e.g. 'Lina, search for Go devs')" />
-                  <button id="btn-swarm-prompt" class="btn-term-send">Send</button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- ===================================== -->
           <!-- TALENT FINDER VIEW (top-level page) -->
           <!-- ===================================== -->
           <section class="dashboard-view" id="view-talent">
@@ -690,7 +618,7 @@ export const html = `
                 <div class="settings-row">
                   <div class="settings-row-info">
                     <span class="settings-row-label">Email Address</span>
-                    <span class="settings-row-hint">vanshmalik6606@gmail.com</span>
+                    <span class="settings-row-hint" id="settings-email-value">Loading…</span>
                   </div>
                   <button class="settings-btn-action" id="btn-change-email">Change</button>
                 </div>
@@ -720,12 +648,17 @@ export const html = `
                   </div>
                   <div class="settings-toggle active" id="toggle-email-notif"></div>
                 </div>
+              </div>
+
+              <div class="settings-section">
+                <h4 class="settings-section-title">Integrations</h4>
+                <p class="settings-section-desc">Connect third-party services used for candidate recordings and calendar invites.</p>
                 <div class="settings-row">
                   <div class="settings-row-info">
-                    <span class="settings-row-label">Sound Effects</span>
-                    <span class="settings-row-hint">Play chimes and click sounds in the dashboard</span>
+                    <span class="settings-row-label">Google Drive</span>
+                    <span class="settings-row-hint" id="settings-drive-status">Checking connection…</span>
                   </div>
-                  <div class="settings-toggle active" id="toggle-sound"></div>
+                  <button class="settings-btn-action" id="btn-connect-drive">Connect</button>
                 </div>
               </div>
 
@@ -1482,47 +1415,6 @@ export const html = `
           </form>
         </div>
       </div>
-
-      <!-- Drawer: Agent Customizer -->
-      <div class="slide-drawer" id="drawer-agent-config">
-        <div class="drawer-header">
-          <h2 class="drawer-title" id="agent-config-title">Customize Agent Config</h2>
-          <button class="btn-close-drawer" id="btn-close-drawer-agent" aria-label="Close panel">×</button>
-        </div>
-        <div class="drawer-body">
-          <form id="form-agent-config">
-            <input type="hidden" id="config-agent-id" />
-            <div class="form-group">
-              <label for="agent-model-select">AI Model</label>
-              <select id="agent-model-select">
-                <option value="gpt-4o">GPT-4o (Premium Vetting)</option>
-                <option value="claude-3-5-sonnet">Claude 3.5 Sonnet (Analytical)</option>
-                <option value="gemini-1-5-pro">Gemini 1.5 Pro (Deep Context)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <label for="agent-temp-slider">Creativity / Temperature</label>
-                <span id="agent-temp-val" style="font-weight:600; font-family:var(--font-mono); color:var(--color-gold);">0.4</span>
-              </div>
-              <input type="range" id="agent-temp-slider" min="0" max="1" step="0.1" value="0.4" style="width:100%; margin-top:8px;" />
-            </div>
-            <div class="form-group">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <label for="agent-threshold-slider">Match Threshold (%)</label>
-                <span id="agent-threshold-val" style="font-weight:600; font-family:var(--font-mono); color:var(--color-indigo-light);">80%</span>
-              </div>
-              <input type="range" id="agent-threshold-slider" min="50" max="95" step="5" value="80" style="width:100%; margin-top:8px;" />
-            </div>
-            <div class="form-group">
-              <label for="agent-prompt-input">Agent Instructions (System Prompt)</label>
-              <textarea id="agent-prompt-input" rows="6" style="width:100%; font-family:var(--font-sans); background:var(--color-bg-dark); color:var(--color-text); border:1px solid var(--color-border); border-radius:4px; padding:8px; resize:vertical;"></textarea>
-            </div>
-            <button type="submit" class="btn-drawer-submit">Save Settings</button>
-          </form>
-        </div>
-      </div>
-
 
       <!-- Modal: AI Question Enhancer -->
       <div class="modal-overlay" id="enhance-modal" style="display: none;">

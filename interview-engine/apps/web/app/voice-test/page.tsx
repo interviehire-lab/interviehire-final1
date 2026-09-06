@@ -91,7 +91,11 @@ export default function VoiceTestPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
-      await voice.start({ firstQuestion: initialQuestion, microphoneTrack: stream.getAudioTracks()[0] || null });
+      // This harness doesn't need connect/publish parallelized (no
+      // permission-grant/calibration screens to overlap the agent-join delay
+      // with) — just run them back to back.
+      await voice.connect();
+      await voice.publishMicrophone(stream.getAudioTracks()[0] ?? null);
       setPhase('live');
     } catch (error) {
       handleError(error instanceof Error ? error.message : 'Could not start the voice call.', error);
@@ -163,7 +167,7 @@ export default function VoiceTestPage() {
 
       <div className="vt-body">
         <div className="vt-visual">
-          <AIVisualAssistant mode={assistantMode} useAura audioTrack={voice.agentAudioTrack} />
+          <AIVisualAssistant mode={assistantMode} room={voice.room} />
         </div>
 
         <div className="vt-panel">

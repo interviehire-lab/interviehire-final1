@@ -2,11 +2,11 @@ import { prisma } from '../lib/prisma.js';
 import { callDeepSeekJson } from './deepseek.service.js';
 import { getEffectiveQuestions } from './effective-questions.js';
 import {
-  INTERVIEW_TARGET_SECONDS,
   deadlineFor,
   hardLimitSeconds,
   secondsRemaining,
   shouldForceClose,
+  targetSeconds,
 } from './interview-policy.js';
 import { recordEventSafe } from './transcript.service.js';
 
@@ -89,6 +89,7 @@ async function decideNextTurn(params: {
   hasNextQuestion: boolean;
   remainingMainQuestions: number;
   remainingSeconds: number | null;
+  targetSecondsForPrompt: number;
 }): Promise<DirectorDecision | null> {
   if (!hasDeepSeekKey()) return null;
   try {
@@ -118,7 +119,7 @@ async function decideNextTurn(params: {
         `\nFollow-ups already asked on this question: ${params.followUpsUsed}. Follow-ups asked across the whole interview so far: ${params.followUpsTotal}.`,
         `${params.remainingMainQuestions} more prepared question(s) remain after this one${params.hasNextQuestion ? '' : ' (this is the last one)'}.`,
         params.remainingSeconds != null
-          ? `Time remaining before this interview is force-ended: ~${Math.max(0, Math.round(params.remainingSeconds / 60))} minute(s) (interview targets roughly ${Math.round(INTERVIEW_TARGET_SECONDS / 60)} minutes total). Pace yourself against this — plenty of time left means a good follow-up is worth it; running low means prefer moving on so every prepared question gets a chance.`
+          ? `Time remaining before this interview is force-ended: ~${Math.max(0, Math.round(params.remainingSeconds / 60))} minute(s) (interview targets roughly ${Math.round(params.targetSecondsForPrompt / 60)} minutes total). Pace yourself against this — plenty of time left means a good follow-up is worth it; running low means prefer moving on so every prepared question gets a chance. When time is genuinely tight, treat covering every remaining prepared question at least once as more important than a follow-up — a shallow pass over all questions beats a deep pass over only some.`
           : '',
         'Decide the next move and return JSON.',
       ]
@@ -208,6 +209,7 @@ export async function handleCandidateTranscript(
       hasNextQuestion,
       remainingMainQuestions,
       remainingSeconds: remainingSecondsForPrompt,
+      targetSecondsForPrompt: targetSeconds(settings),
     });
   }
 

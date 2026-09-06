@@ -19,11 +19,6 @@ export type VoiceTranscript = {
   isFinal: boolean;
 };
 
-type StartOptions = {
-  firstQuestion: string;
-  microphoneTrack?: MediaStreamTrack | null;
-};
-
 type UseVoiceInterviewOptions = {
   provider: VoiceProvider;
   sessionId: string;
@@ -71,13 +66,19 @@ export function useVoiceInterview({
   const agentConnectedRef = useRef(false);
   const agentJoinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [connected, setConnected] = useState(false);
+  // The raw LiveKit Room instance, reactively exposed once connect() resolves —
+  // consumed by AIVisualAssistant to build orb-ui's app-managed LiveKit adapter
+  // (createLiveKitAdapter({ room, createAudioAnalyser })), which subscribes to
+  // this SAME Room rather than owning a connection of its own.
+  const [room, setRoom] = useState<Room | null>(null);
   const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [hardLimitSeconds, setHardLimitSeconds] = useState(1800);
-  // The real remote agent-audio track, once LiveKit subscribes to it — this is
-  // AgentAudioVisualizerAura's `audioTrack` input, giving it a genuine
-  // per-frame waveform (via @livekit/components-react's own AnalyserNode-based
-  // useTrackVolume, smoothed there) instead of anything we compute ourselves.
+  // The real remote agent-audio track, once LiveKit subscribes to it. Kept in
+  // the hook's return value for any other consumer that wants raw access to
+  // it directly; AIVisualAssistant's orb-ui adapter now gets its per-frame
+  // waveform straight from the exposed `room` (createLiveKitAdapter), not
+  // from this track.
   const [agentAudioTrack, setAgentAudioTrack] = useState<RemoteAudioTrack | null>(null);
   // Room-level `connected` only means the BROWSER reached LiveKit Cloud — the
   // voice-agent worker is dispatched to the room as a separate async process
@@ -132,6 +133,7 @@ export function useVoiceInterview({
     activeRef.current = false;
     setConnected(false);
     setAgentAudioTrack(null);
+    setRoom(null);
     markAgentDisconnected();
 
     const room = roomRef.current;
@@ -151,7 +153,13 @@ export function useVoiceInterview({
     callbacksRef.current.onActivity('idle');
   }, [detachRemoteAudio, markAgentDisconnected]);
 
-  const start = useCallback(async ({ firstQuestion: _firstQuestion, microphoneTrack }: StartOptions) => {
+  // connect() covers everything through room.connect() and event wiring —
+  // deliberately WITHOUT publishing a microphone track. room.connect() reaching
+  // LiveKit is what triggers the LiveKit Agents worker's dispatch (the access
+  // token embeds RoomConfiguration.agents), so calling this alone, as early as
+  // right after consent, gets the agent joining in parallel with the
+  // permission-grant and calibration screens instead of serialized after them.
+  const connect = useCallback(async () => {
     if (provider === 'legacy') return;
     if (activeRef.current) return;
 
@@ -161,10 +169,6 @@ export function useVoiceInterview({
     setStartedAt(null);
     setAgentAudioTrack(null);
     markAgentDisconnected();
-
-    if (!microphoneTrack || microphoneTrack.readyState !== 'live') {
-      throw new Error('The granted microphone stream is unavailable. Recheck microphone permission and try again.');
-    }
 
     const inviteToken = getInviteToken();
     const query = inviteToken ? `?token=${encodeURIComponent(inviteToken)}` : '';
@@ -187,6 +191,7 @@ export function useVoiceInterview({
 
     const room = new Room({ adaptiveStream: true, dynacast: true, disconnectOnPageLeave: true });
     roomRef.current = room;
+    setRoom(room);
     room.on(RoomEvent.TrackSubscribed, (track) => {
       if (track.kind !== Track.Kind.Audio) return;
       setAgentAudioTrack(track as RemoteAudioTrack);
@@ -238,14 +243,11 @@ export function useVoiceInterview({
     });
 
     callbacksRef.current.onActivity('thinking');
-    await room.connect(credentials.url, credentials.token, { autoSubscribe: true });
     try {
-      const publication = await room.localParticipant.publishTrack(microphoneTrack, {
-        source: Track.Source.Microphone,
-      });
-      publishedMicRef.current = { track: microphoneTrack, publication };
+      await room.connect(credentials.url, credentials.token, { autoSubscribe: true });
     } catch (error) {
-      await room.disconnect();
+      roomRef.current = null;
+      setRoom(null);
       throw error;
     }
     activeRef.current = true;
@@ -255,12 +257,48 @@ export function useVoiceInterview({
     // Safety net: if the worker never dispatches/joins (LiveKit region issue,
     // agent crash, a payload the worker rejects), don't leave the candidate
     // staring at "connecting" forever with no way to know something's wrong.
+    // Attached here (not to publishMicrophone) since room.connect() succeeding
+    // is what actually triggers the worker's dispatch.
     clearAgentJoinTimeout();
     agentJoinTimeoutRef.current = setTimeout(() => {
       if (agentConnectedRef.current || deliberateStopRef.current) return;
       callbacksRef.current.onError("Couldn't connect you with your interviewer. Please refresh and try again.");
     }, 20_000);
-  }, [clearAgentJoinTimeout, detachRemoteAudio, emitEnded, getInviteToken, provider, sessionId]);
+  }, [clearAgentJoinTimeout, detachRemoteAudio, emitEnded, getInviteToken, markAgentDisconnected, provider, sessionId]);
+
+  // publishMicrophone() is called once the candidate's mic permission is
+  // actually granted and the stream is available (today: once calibration
+  // completes) — deliberately separate from connect() so a real, multi-second
+  // LiveKit-agent-join delay isn't serialized behind permission-grant/calibration.
+  // Publishes against the already-connected room from connect() (via roomRef,
+  // not local state, so this doesn't depend on a render having landed).
+  const publishMicrophone = useCallback(async (track?: MediaStreamTrack | null) => {
+    if (provider === 'legacy') return;
+    const room = roomRef.current;
+    if (!room || !activeRef.current) {
+      throw new Error('publishMicrophone() was called before connect() completed. Call connect() first.');
+    }
+    if (!track || track.readyState !== 'live') {
+      throw new Error('The granted microphone stream is unavailable. Recheck microphone permission and try again.');
+    }
+    try {
+      const publication = await room.localParticipant.publishTrack(track, {
+        source: Track.Source.Microphone,
+      });
+      publishedMicRef.current = { track, publication };
+    } catch (error) {
+      await room.disconnect();
+      throw error;
+    }
+    // Tells the voice-agent the candidate can actually hear/respond now (it may
+    // otherwise resolve waitForParticipant() before the mic is published and
+    // speak the first question into a room nobody can answer in yet). Wire
+    // shape coordinated with the voice-agent-side work — do not change it.
+    room.localParticipant.publishData(
+      new TextEncoder().encode(JSON.stringify({ type: 'candidate-ready' })),
+      { reliable: true },
+    );
+  }, [provider]);
 
   const setMuted = useCallback((muted: boolean) => {
     const publication = publishedMicRef.current?.publication;
@@ -274,10 +312,12 @@ export function useVoiceInterview({
   }, [stop]);
 
   return {
-    start,
+    connect,
+    publishMicrophone,
     stop,
     setMuted,
     connected,
+    room,
     startedAt,
     deadlineAt,
     hardLimitSeconds,

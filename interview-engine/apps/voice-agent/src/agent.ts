@@ -11,6 +11,7 @@ import {
 import * as cartesia from '@livekit/agents-plugin-cartesia';
 import * as deepgram from '@livekit/agents-plugin-deepgram';
 import * as silero from '@livekit/agents-plugin-silero';
+import { RoomEvent } from '@livekit/rtc-node';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -45,6 +46,93 @@ function parseMetadata(raw: string) {
     throw new Error(`Invalid LiveKit dispatch metadata: ${parsed.error.message}`);
   }
   return parsed.data;
+}
+
+// The frontend now dispatches this agent (via room.connect()) before the
+// candidate's mic permission has resolved, so it can join/warm up while the
+// candidate is still clicking through permission prompts. That means
+// `ctx.waitForParticipant()` alone (which resolves as soon as ANY participant
+// joins the room) can resolve before the candidate's microphone track is
+// actually published. A ~15-20s bound: long enough for a normal
+// permission-grant, short enough that a stale frontend build (or a dropped
+// data message) never hangs the interview — it just falls back to today's
+// participant-only behavior.
+const CANDIDATE_READY_TIMEOUT_MS = 18_000;
+
+function isCandidateReadyMessage(value: unknown): value is { type: 'candidate-ready' } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Record<string, unknown>).type === 'candidate-ready'
+  );
+}
+
+/**
+ * Waits until the candidate can actually hear and respond, not just until
+ * some participant is in the room. Right after `publishMicrophone()`
+ * succeeds, the frontend sends a reliable data message
+ * `{ type: 'candidate-ready' }` (no `topic`, so any other data traffic on the
+ * room is simply ignored here). We wait for that message, bounded by
+ * `CANDIDATE_READY_TIMEOUT_MS`, so a frontend that hasn't shipped this change
+ * yet (or a lost message) still proceeds via the old participant-only path
+ * instead of stalling the interview.
+ */
+async function waitForCandidateReady(
+  ctx: JobContext<ProcessData>,
+  logger: ReturnType<typeof log>,
+): Promise<void> {
+  const onData = (payload: Uint8Array) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(payload));
+    } catch {
+      return; // Not JSON — ignore rather than crash the job.
+    }
+    if (!isCandidateReadyMessage(parsed)) return; // Some other message type on this channel.
+    resolve?.();
+  };
+  let resolve: (() => void) | undefined;
+  const candidateReady = new Promise<void>((res) => {
+    resolve = res;
+    ctx.room.on(RoomEvent.DataReceived, onData);
+  });
+
+  try {
+    // Still require an actual participant in the room first — this is the
+    // original, untimed wait. Only once someone has joined do we additionally
+    // wait (bounded) for confirmation their mic is live.
+    await ctx.waitForParticipant();
+
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      candidateReady,
+      new Promise<void>((res) => {
+        timer = setTimeout(() => {
+          logger.warn(
+            { timeoutMs: CANDIDATE_READY_TIMEOUT_MS },
+            'candidate-ready message not received in time; falling back to participant-only wait',
+          );
+          res();
+        }, CANDIDATE_READY_TIMEOUT_MS);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+  } finally {
+    ctx.room.off(RoomEvent.DataReceived, onData);
+  }
+}
+
+// `startResponseSchema` (engine-client.ts) has no question-count field today,
+// and adding one would mean touching engine-client.ts/internal.routes.ts,
+// which are out of scope here — so the intro deliberately doesn't state a count.
+function buildIntro(candidateName: string | undefined, roleTitle: string | undefined): string {
+  const name = candidateName?.trim();
+  const role = roleTitle?.trim();
+
+  const greeting = name ? `Hi ${name}, I'm Lina` : "Hi, I'm Lina";
+  const forRole = role ? `your AI interviewer for the ${role} role` : 'your AI interviewer today';
+
+  return `${greeting}, ${forRole}. I'll ask a few questions — take your time with each one. Let's get started.`;
 }
 
 async function runInterview(ctx: JobContext<ProcessData>): Promise<void> {
@@ -222,11 +310,12 @@ async function runInterview(ctx: JobContext<ProcessData>): Promise<void> {
     return;
   }
 
-  await ctx.waitForParticipant();
+  await waitForCandidateReady(ctx, logger);
   if (controller.isCompleting) return;
 
   const firstQuestion = metadata.firstMessage ?? start.initialQuestion;
-  const firstSpeech = session.say(firstQuestion, {
+  const intro = buildIntro(start.candidateName, start.roleTitle);
+  const firstSpeech = session.say(`${intro} ${firstQuestion}`, {
     allowInterruptions: true,
     addToChatCtx: true,
   });

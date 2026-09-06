@@ -70,6 +70,11 @@ export async function apiMe() {
   return request('/auth/me');
 }
 
+// Platform-wide stats — 403s server-side for anyone who isn't super_admin.
+export async function apiGetAdminOverview() {
+  return request('/admin/overview');
+}
+
 export async function apiLogout() {
   try { await request('/auth/logout', { method: 'POST' }); } catch {}
   setAuthed(false);

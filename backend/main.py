@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.websocket_routes import router as websocket_router
 from app.database import Base, engine
-from app.routers import jobs, team, organisation, usage, settings as settings_router, deepseek, auth, public, leaderboard, invites, privacy, internal_jobs
+from app.routers import jobs, team, organisation, usage, settings as settings_router, deepseek, auth, public, leaderboard, invites, privacy, internal_jobs, admin
 from app.talent_finder.routes import router as talent_finder_router
 
 # Import all models so SQLAlchemy registers them before create_all
@@ -227,6 +227,7 @@ app.include_router(invites.router,          prefix="/api/invites", tags=["Invite
 app.include_router(invites.public_link_router, tags=["Invites"])  # public GET /i/{token}
 app.include_router(privacy.router,          prefix="/api/privacy", tags=["Privacy / Data Rights"])
 app.include_router(internal_jobs.router,    prefix="/api/internal", tags=["Internal Jobs"])
+app.include_router(admin.router,            prefix="/api/admin",    tags=["Super Admin"])
 
 
 @app.get("/")

@@ -232,10 +232,14 @@ function renderResumeStagePaneForJob(candidates, job, container) {
                     <div class="ra-action-btns">
                       ${c.status === 'Rejected'
                         ? `<span class="ra-stage-tag rejected">Rejected</span>`
-                        : c.status === 'Resume'
-                          ? `<button class="btn-stage-advance" data-candidate-id="${c.id}" data-next-stage="Screening">Advance</button>
-                             <button class="btn-stage-reject" data-candidate-id="${c.id}">Reject</button>`
-                          : `<span class="ra-stage-tag advanced">Advanced</span>`}
+                        : c.status === 'Resume' && c.decision === 'on_hold'
+                          ? `<span class="ra-stage-tag on-hold">On Hold</span>
+                             <button class="btn-stage-unhold" data-candidate-id="${c.id}" title="Resume reviewing this candidate">Resume review</button>`
+                          : c.status === 'Resume'
+                            ? `<button class="btn-stage-advance" data-candidate-id="${c.id}" data-next-stage="Screening">Advance</button>
+                               <button class="btn-stage-hold" data-candidate-id="${c.id}">Hold</button>
+                               <button class="btn-stage-reject" data-candidate-id="${c.id}">Reject</button>`
+                            : `<span class="ra-stage-tag advanced">Advanced</span>`}
                     </div>
                   </td>
                 </tr>

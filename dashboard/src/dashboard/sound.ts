@@ -1,75 +1,29 @@
-import { window } from './runtime';
-
 // ==========================================
-// AUDIO SYNTHESIZER ENGINE
+// SOUND ENGINE (disabled)
 // ==========================================
+// Sound effects have been removed from the product. This engine is kept as a
+// no-op shape rather than deleted outright — ~150 call sites across the
+// dashboard (mount.ts, navigation.ts, sourcing.ts, blueprint-studio.ts, etc.)
+// call `soundEngine.playClick()`/`playChime()` inline alongside real UI logic
+// (e.g. `soundEngine.playClick(); reRender(); break;`), so removing the calls
+// themselves would mean hundreds of risky micro-edits across nearly the whole
+// codebase for zero behavioral gain over simply never producing audio here.
 class SoundEngine {
-  ctx: AudioContext | null;
   muted: boolean;
-  lastSliderSoundTime: number;
 
   constructor() {
-    this.ctx = null;
     this.muted = true;
-    this.lastSliderSoundTime = 0;
   }
 
-  init(): void {
-    if (this.ctx) return;
-    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-
-  playChime(notes: number[], duration: number = 0.1, delayMultiplier: number = 0.15): void {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    
-    const now = this.ctx.currentTime;
-    notes.forEach((freq, index) => {
-      const osc = this.ctx.createOscillator();
-      const gainNode = this.ctx.createGain();
-      
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, now + index * delayMultiplier);
-      
-      gainNode.gain.setValueAtTime(0, now + index * delayMultiplier);
-      gainNode.gain.linearRampToValueAtTime(0.05, now + index * delayMultiplier + 0.02);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + index * delayMultiplier + duration);
-      
-      osc.connect(gainNode);
-      gainNode.connect(this.ctx.destination);
-      
-      osc.start(now + index * delayMultiplier);
-      osc.stop(now + index * delayMultiplier + duration);
-    });
+  playChime(_notes: number[], _duration?: number, _delayMultiplier?: number): void {
+    // no-op
   }
 
   playClick(): void {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    
-    const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gainNode = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(320, now);
-    osc.frequency.setValueAtTime(640, now + 0.03);
-
-    gainNode.gain.setValueAtTime(0.03, now);
-    gainNode.gain.linearRampToValueAtTime(0.015, now + 0.03);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
-
-    osc.connect(gainNode);
-    gainNode.connect(this.ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + 0.08);
+    // no-op
   }
 }
 
 const soundEngine = new SoundEngine();
-
 
 export { soundEngine, SoundEngine };

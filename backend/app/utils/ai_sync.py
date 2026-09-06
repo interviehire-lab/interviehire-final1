@@ -600,19 +600,31 @@ def get_applicant_vetting(db: Session, applicant_id: str) -> Dict[str, Any]:
 def get_applicant_full_report(db: Session, applicant_id: str) -> Dict[str, Any]:
     """Return the full canonical CandidateReport (raw InterviewSession.evaluation)
     so the recruiter dashboard's Deep Analysis can render it directly, rather than
-    the lossy vetting projection. Returns evaluated=False until the engine scores it."""
+    the lossy vetting projection. Returns evaluated=False until the engine scores it.
+    Also carries the recording URL + raw transcript turns, so Interview Analysis
+    can render a real video/transcript panel without a separate endpoint —
+    both are already columns on the same InterviewSession row."""
     session = db.query(InterviewSession).filter(InterviewSession.id == applicant_id).first()
-    if not session or not session.evaluation:
+    if not session:
+        return {"status": "not_scheduled", "evaluated": False, "report": None}
+    transcript_turns = session.transcript if isinstance(session.transcript, list) else []
+    if not session.evaluation:
         return {
-            "status": session.status.value if session else "not_scheduled",
+            "status": session.status.value,
             "evaluated": False,
             "report": None,
+            "recordingUrl": session.recordingDriveUrl,
+            "recordingDriveFileId": session.recordingDriveFileId,
+            "transcript": transcript_turns,
         }
     return {
         "status": session.status.value,
         "evaluated": True,
         "report": session.evaluation,
         "reportUrl": session.reportUrl,
+        "recordingUrl": session.recordingDriveUrl,
+        "recordingDriveFileId": session.recordingDriveFileId,
+        "transcript": transcript_turns,
     }
 
 def get_applicant_screening_report(db: Session, applicant: Applicant) -> Dict[str, Any]:

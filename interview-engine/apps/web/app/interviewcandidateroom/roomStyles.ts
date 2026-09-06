@@ -144,124 +144,20 @@ export const roomStyles = `
 
   .avatar-panel { position: relative; min-height: 0; overflow: hidden; border-radius: 30px; }
 
-  /* Minimal native conversational orb. Subtle colour and motion changes carry
-     state without making the candidate watch a loading animation. */
-  .ai-visual {
-    --orb-a: #67e8f9;
-    --orb-b: #8b5cf6;
-    position: absolute; inset: 0;
+  /* orb-ui's <Orb theme="cloud"> replaces the legacy CSS blob/sphere/wave
+     visualization entirely (one visual system everywhere, no CSS-orb
+     fallback). This is just the sizing/positioning wrapper .avatar-panel
+     needs — orb-ui owns everything about the orb's own rendering. .identity
+     and .candidate-panel still stack above it via their own z-index. */
+  .orb-stage {
+    position: absolute; inset: 0; z-index: 1;
     display: grid; place-items: center;
     overflow: hidden;
     background:
       radial-gradient(circle at 50% 47%, rgba(103, 232, 249, .055), transparent 32%),
       #060810;
   }
-  .ai-visual--connecting { --orb-a: #94a3b8; --orb-b: #38bdf8; }
-  .ai-visual--idle { --orb-a: #67e8f9; --orb-b: #8b5cf6; }
-  .ai-visual--listening { --orb-a: #d4ff00; --orb-b: #22d3ee; }
-  .ai-visual--thinking { --orb-a: #a78bfa; --orb-b: #6366f1; }
-  .ai-visual--speaking { --orb-a: #f95738; --orb-b: #fb7185; }
-  .ai-visual--complete { --orb-a: #d4ff00; --orb-b: #34d399; }
-
-  .ai-visual { --speak-energy: 0; }
-
-  .ai-ambient {
-    position: absolute; width: min(46vw, 430px); aspect-ratio: 1; border-radius: 50%;
-    background: var(--orb-b); filter: blur(110px);
-    opacity: calc(.08 + var(--speak-energy) * .2);
-    transition: background 700ms ease, opacity 120ms linear;
-  }
-  .ai-stage {
-    position: relative; z-index: 1;
-    width: clamp(150px, 20vw, 220px); aspect-ratio: 1;
-    display: grid; place-items: center;
-    transform: scale(calc(1 + var(--speak-energy) * .06));
-    transition: transform 120ms linear;
-  }
-
-  /* LiveKit AgentAudioVisualizerAura, live-voice modes only (see useAura on
-     AIVisualAssistant). Close to .ai-stage's own footprint above so switching
-     a job between voice modes doesn't visibly reflow the room; the
-     component's own "xl" size variant is overridden to fill this wrapper
-     instead of its fixed 448px default (see className on the JSX). */
-  .ai-aura-stage {
-    position: relative; z-index: 1;
-    width: clamp(170px, 22vw, 280px); aspect-ratio: 1;
-    display: grid; place-items: center;
-    overflow: hidden;
-  }
-
-  /* Soft, organically-morphing blobs drifting behind the sphere — the "plasma
-     cloud" softness that reads as an AI voice orb rather than a static icon.
-     Independent timings/directions so the two never sync into something
-     mechanical-looking. Colored via the same --orb-a/--orb-b the sphere and
-     every other mode-color already key off, so this stays in sync for free. */
-  .ai-blob {
-    position: absolute; inset: 6%; border-radius: 46% 54% 63% 37% / 45% 40% 60% 55%;
-    filter: blur(22px); opacity: .5; mix-blend-mode: screen;
-  }
-  .ai-blob-1 { background: color-mix(in srgb, var(--orb-a) 70%, transparent); animation: ai-blob-morph-1 9s ease-in-out infinite; }
-  .ai-blob-2 { background: color-mix(in srgb, var(--orb-b) 65%, transparent); animation: ai-blob-morph-2 11s ease-in-out infinite reverse; opacity: .38; }
-  .ai-visual--speaking .ai-blob-1 { animation-duration: 3.2s; }
-  .ai-visual--speaking .ai-blob-2 { animation-duration: 3.8s; }
-
-  .ai-sphere {
-    position: relative; width: 72%; aspect-ratio: 1; overflow: hidden; border-radius: 50%;
-    background:
-      radial-gradient(circle at 36% 28%, rgba(255,255,255,.62), transparent 8%),
-      radial-gradient(circle at 38% 35%, color-mix(in srgb, var(--orb-a) 80%, white), transparent 30%),
-      radial-gradient(circle at 68% 72%, var(--orb-b), #090b18 70%);
-    box-shadow:
-      inset -24px -25px 42px rgba(0,0,0,.42),
-      inset 11px 10px 24px rgba(255,255,255,.09),
-      0 0 calc(48px + var(--speak-energy) * 46px) color-mix(in srgb, var(--orb-a) calc(20% + var(--speak-energy) * 30%), transparent);
-    transition: background 700ms ease, box-shadow 120ms linear;
-    animation: ai-sphere-breathe 4.8s ease-in-out infinite;
-  }
-  .ai-sphere-highlight { position: absolute; top: 16%; left: 23%; width: 27%; height: 13%; border-radius: 50%; background: rgba(255,255,255,.24); filter: blur(6px); transform: rotate(-20deg); }
-  .ai-core {
-    position: absolute; inset: 45%; border-radius: 50%; background: rgba(255,255,255,.88);
-    box-shadow: 0 0 16px var(--orb-a); opacity: .7;
-    filter: brightness(calc(1 + var(--speak-energy) * .6));
-    animation: ai-core-pulse 2.4s ease-in-out infinite;
-  }
-
-  .ai-response-wave { position: absolute; z-index: 3; bottom: 110px; display: flex; align-items: center; gap: 5px; height: 18px; }
-  .ai-response-wave i { width: 2px; height: 3px; border-radius: 999px; background: var(--orb-a); opacity: .28; animation: ai-wave 1.8s ease-in-out infinite; }
-  .ai-response-wave i:nth-child(2n) { animation-delay: -.25s; }
-  .ai-response-wave i:nth-child(3n) { animation-delay: -.55s; }
-  .ai-visual--speaking .ai-response-wave i { animation-duration: .72s; opacity: .72; }
-  .ai-visual--listening.is-voice-active .ai-response-wave i { animation-duration: .58s; opacity: .62; }
-  .ai-visual--thinking .ai-response-wave i { animation-duration: 1.1s; }
-
-  .ai-state-copy { position: absolute; z-index: 3; bottom: 56px; left: 50%; width: min(420px, 72%); transform: translateX(-50%); text-align: center; }
-  .ai-state-title { display: inline-flex; align-items: center; gap: 9px; color: #f8fafc; font: 750 15px Manrope, sans-serif; letter-spacing: .01em; }
-  .ai-state-title i, .assistant-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--orb-a, #67e8f9); box-shadow: 0 0 14px var(--orb-a, #67e8f9); animation: ai-dot 1.8s ease-in-out infinite; }
-  .ai-state-detail { margin-top: 7px; color: #8fa0bc; font-size: 12px; animation: ai-copy-in .45s ease both; }
-
-  .ai-visual--speaking .ai-sphere, .ai-visual--listening.is-voice-active .ai-sphere { animation-duration: 2.3s; }
-
-  @keyframes ai-sphere-breathe { 0%,100% { transform: scale(.98); filter: saturate(.9) brightness(.94); } 50% { transform: scale(1.025); filter: saturate(1.08) brightness(1.05); } }
-  @keyframes ai-core-pulse { 0%,100% { scale: .78; opacity: .5; } 50% { scale: 1.08; opacity: .85; } }
-  @keyframes ai-wave { 0%,100% { height: 3px; } 50% { height: 12px; } }
-  @keyframes ai-dot { 50% { opacity: .35; scale: .72; } }
-  @keyframes ai-copy-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-
-  @keyframes ai-blob-morph-1 {
-    0%, 100% { border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%; transform: rotate(0deg) scale(1); }
-    33%      { border-radius: 60% 40% 35% 65% / 55% 65% 35% 45%; transform: rotate(9deg) scale(1.06); }
-    66%      { border-radius: 35% 65% 55% 45% / 40% 30% 70% 60%; transform: rotate(-7deg) scale(.96); }
-  }
-  @keyframes ai-blob-morph-2 {
-    0%, 100% { border-radius: 55% 45% 40% 60% / 60% 35% 65% 40%; transform: rotate(0deg) scale(1); }
-    50%      { border-radius: 38% 62% 65% 35% / 42% 58% 42% 58%; transform: rotate(-11deg) scale(1.08); }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .ai-visual * { animation: none !important; }
-    .ai-state-detail { animation: none !important; }
-    .ai-stage, .ai-ambient, .ai-sphere { transition: none !important; }
-  }
+  .orb-stage-orb { display: block; }
 
   .avatar-overlay {
     pointer-events: none;
@@ -296,12 +192,6 @@ export const roomStyles = `
   }
 
   .red-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--orange); }
-  .assistant-status { --assistant-status-color: #67e8f9; }
-  .assistant-status--listening { --assistant-status-color: #d4ff00; }
-  .assistant-status--thinking { --assistant-status-color: #a78bfa; }
-  .assistant-status--speaking { --assistant-status-color: #f95738; }
-  .assistant-status--complete { --assistant-status-color: #34d399; }
-  .assistant-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--assistant-status-color); box-shadow: 0 0 14px var(--assistant-status-color); animation: ai-dot 1.8s ease-in-out infinite; }
 
   .listen-card {
     position: absolute; z-index: 3; right: 30px; bottom: 30px; left: 30px;

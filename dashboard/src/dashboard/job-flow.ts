@@ -359,6 +359,7 @@ function openJobFlowView(jobId, showAddCandidates = false) {
       <div class="jf-banner-actions">
         <button class="btn-jf-skip" id="jf-btn-review-flow">Review Flow</button>
         ${job.status === 'published' ? '' : `<button class="btn-jf-skip" id="jf-btn-publish-job">Publish Job</button>`}
+        <button class="btn-jf-skip" id="jf-btn-test-interview">Try Test Interview</button>
         <button class="btn-jf-primary" id="jf-btn-add-candidates">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></line></svg>
           Add Candidates
@@ -375,6 +376,14 @@ function openJobFlowView(jobId, showAddCandidates = false) {
     document.getElementById('jf-btn-publish-job')?.addEventListener('click', () => {
       pendingAddCandidates = null;
       openPublishJobModal(jobId);
+    });
+    // Verify the interview system actually works for this job (questions,
+    // scoring, voice if enabled) before real candidates go through it — reuses
+    // the same test-interview pane already wired on the job-detail page.
+    document.getElementById('jf-btn-test-interview')?.addEventListener('click', () => {
+      pendingAddCandidates = null;
+      banner.remove();
+      navigateToJobDetail(jobId, 'testinterview');
     });
     document.getElementById('jf-btn-add-candidates').addEventListener('click', () => {
       pendingAddCandidates = null;
@@ -1185,7 +1194,7 @@ function renderScreeningConfig(job, panel) {
     });
     const stageCandidates = jobCandidates.filter(c => c.status === 'Screening');
     const interviewSlug = (job.roleName || 'role').toLowerCase().replace(/[^a-z0-9]+/g, '-') + job.id.slice(0, 6);
-    const interviewLink = `${ENGINE_WEB_URL}/interview/${interviewSlug}`;
+    const interviewLink = `${ENGINE_WEB_URL}/interviewcandidateroom/${interviewSlug}`;
 
     bodyHtml = `
       <div class="jf-test-interview-container">
@@ -1530,12 +1539,12 @@ function renderScreeningConfig(job, panel) {
           if (getDataSource() === 'api') {
             const sessionId = await apiCreateTestSession(job.id);
             if (sessionId) {
-              url = `${ENGINE_WEB_URL}/interview?sessionId=${encodeURIComponent(sessionId)}`;
+              url = `${ENGINE_WEB_URL}/interviewcandidateroom?sessionId=${encodeURIComponent(sessionId)}`;
             } else {
-              url = `${ENGINE_WEB_URL}/interview`;
+              url = `${ENGINE_WEB_URL}/interviewcandidateroom`;
             }
           } else {
-            url = `${ENGINE_WEB_URL}/interview`;
+            url = `${ENGINE_WEB_URL}/interviewcandidateroom`;
           }
           
           window.open(url, '_blank');
@@ -1543,7 +1552,7 @@ function renderScreeningConfig(job, panel) {
         } catch (err) {
           console.error('Failed to create test session:', err);
           const interviewSlug = (job.roleName || 'role').toLowerCase().replace(/[^a-z0-9]+/g, '-') + job.id.slice(0, 6);
-          const interviewLink = `${ENGINE_WEB_URL}/interview/${interviewSlug}`;
+          const interviewLink = `${ENGINE_WEB_URL}/interviewcandidateroom/${interviewSlug}`;
           window.open(interviewLink, '_blank');
         } finally {
           tryBtn.disabled = false;
@@ -1712,7 +1721,7 @@ function renderFunctionalConfig(job, panel) {
     });
     const stageCandidates = jobCandidates.filter(c => c.status === 'Functional');
     const interviewSlug = (job.roleName || 'role').toLowerCase().replace(/[^a-z0-9]+/g, '-') + job.id.slice(0, 6);
-    const interviewLink = `${ENGINE_WEB_URL}/interview/${interviewSlug}`;
+    const interviewLink = `${ENGINE_WEB_URL}/interviewcandidateroom/${interviewSlug}`;
 
     bodyHtml = `
       <div class="jf-test-interview-container">
@@ -1994,12 +2003,12 @@ function renderFunctionalConfig(job, panel) {
           if (getDataSource() === 'api') {
             const sessionId = await apiCreateTestSession(job.id);
             if (sessionId) {
-              url = `${ENGINE_WEB_URL}/interview?sessionId=${encodeURIComponent(sessionId)}`;
+              url = `${ENGINE_WEB_URL}/interviewcandidateroom?sessionId=${encodeURIComponent(sessionId)}`;
             } else {
-              url = `${ENGINE_WEB_URL}/interview`;
+              url = `${ENGINE_WEB_URL}/interviewcandidateroom`;
             }
           } else {
-            url = `${ENGINE_WEB_URL}/interview`;
+            url = `${ENGINE_WEB_URL}/interviewcandidateroom`;
           }
           
           window.open(url, '_blank');
@@ -2007,7 +2016,7 @@ function renderFunctionalConfig(job, panel) {
         } catch (err) {
           console.error('Failed to create test session:', err);
           const interviewSlug = (job.roleName || 'role').toLowerCase().replace(/[^a-z0-9]+/g, '-') + job.id.slice(0, 6);
-          const interviewLink = `${ENGINE_WEB_URL}/interview/${interviewSlug}`;
+          const interviewLink = `${ENGINE_WEB_URL}/interviewcandidateroom/${interviewSlug}`;
           window.open(interviewLink, '_blank');
         } finally {
           tryBtn.disabled = false;

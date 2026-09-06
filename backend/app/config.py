@@ -20,10 +20,10 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "https://interviehire.com"
 
     # The candidate interview room BASE URL (the engine web app). The link is
-    # built as `{INTERVIEW_ROOM_URL}/interview?sessionId=…`, so this is the origin
-    # only. The emailed calendar invite's "Enter Interview Room" link points here,
-    # so it opens the SAME AI interview room that "Run test interview" uses.
-    # Local: :3001.  Production: https://interviehire.com  (→ .../interview)
+    # built as `{INTERVIEW_ROOM_URL}/interviewcandidateroom?sessionId=…`, so this
+    # is the origin only. The emailed calendar invite's "Enter Interview Room"
+    # link points here, so it opens the SAME AI interview room that "Run test
+    # interview" uses. Local: :3001.  Production: https://interviehire.com
     INTERVIEW_ROOM_URL: str = "https://interview.interviehire.com"
 
     # Per-candidate unique interview invite links (`/i/{token}`).
@@ -143,3 +143,20 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Fail loud rather than silently signing JWTs/internal-service calls with a
+# publicly-known default secret in a real deployment. Detected the same way
+# app/utils/invites.py already detects "am I on Render/Railway" — these env
+# vars are set automatically by those platforms, never in local dev, so this
+# never affects the zero-config local/demo path.
+if os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT"):
+    _insecure_defaults = {
+        "SECRET_KEY": "change-this-in-production",
+        "INTERNAL_SERVICE_SECRET": "change-this-internal-secret",
+    }
+    _still_default = [name for name, default in _insecure_defaults.items() if getattr(settings, name) == default]
+    if _still_default:
+        raise RuntimeError(
+            f"Refusing to start in production with default value(s) for: {', '.join(_still_default)}. "
+            "Set real secrets via environment variables."
+        )

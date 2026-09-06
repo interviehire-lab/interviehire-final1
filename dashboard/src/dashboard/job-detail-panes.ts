@@ -360,11 +360,11 @@ function renderJobDetailPanes(job) {
                     </td>
                     <td>${c.phone ? escapeHTML(c.phone) : "—"}</td>
                     <td>${interviewStatusChip(c.interviewStatus)}</td>
-                    <td>—</td>
-                    <td>—</td>
+                    <td>${c.recruiterScreening ? escapeHTML(c.recruiterScreening) : "—"}</td>
+                    <td>${(c.recruiterScreeningScore ?? c.screeningScore) != null ? escapeHTML(String(c.recruiterScreeningScore ?? c.screeningScore)) : "—"}</td>
                     <td>${hasReport ? `<a href="#" class="report-link" data-cand-id="${c.id}">Report <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>` : "—"}</td>
                     <td><span class="source-badge">${sourceIcon} ${c.source || "—"}</span></td>
-                    <td>${c.attemptedAt || "—"}</td>
+                    <td>${c.screeningStatus ? escapeHTML(c.screeningStatus) : "—"}</td>
                     <td><button class="${actionClass}" data-candidate-id="${c.id}">${c.interviewStatus === "Slot Missed" ? '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg> ' : '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg> '}${actionLabel}</button></td>
                   </tr>
                 `;
@@ -487,11 +487,12 @@ function renderJobDetailPanes(job) {
                 <th>Cheat <span class="sort-arrows">⇅</span></th>
                 <th>Source</th>
                 <th>Screening</th>
+                <th>Attempted <span class="sort-arrows">⇅</span></th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              ${displayFunctionalCands.length === 0 ? '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--color-text-faint);">No candidates match the current filters. Try resetting or adjusting them.</td></tr>' : ""}
+              ${displayFunctionalCands.length === 0 ? '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--color-text-faint);">No candidates match the current filters. Try resetting or adjusting them.</td></tr>' : ""}
               ${displayFunctionalCands
 								.map((c) => {
 									const initials = c.name
@@ -519,6 +520,7 @@ function renderJobDetailPanes(job) {
                     <td><span class="cheat-prob-badge ${cheatColor(c.cheatProbability)}">${c.cheatProbability ? '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg> ' + c.cheatProbability : "—"}</span></td>
                     <td><span class="source-badge">${sourceIcon} ${c.source || "—"}</span></td>
                     <td>${screeningBadge(c.recruiterScreening)}</td>
+                    <td>${c.interviewStatus ? escapeHTML(c.interviewStatus) : "—"}</td>
                     <td>
                       <select class="action-select-status" data-cand-id="${c.id}">
                         <option value="">Select Sta...</option>
@@ -607,6 +609,17 @@ function renderJobDetailPanes(job) {
 				const nextStage = btn.getAttribute("data-next-stage");
 				updateCandidateStatus(candId, nextStage);
 			});
+		});
+
+		// Hold/Resume-review only ever touch `decision` (matching report-page.ts's
+		// rp-decision select), never `status` — a held candidate stays "Resume"
+		// stage-wise, just parked, so it doesn't need a new status value threaded
+		// through every place that already switches on candidate.status.
+		pane.querySelectorAll(".btn-stage-hold").forEach((btn) => {
+			btn.addEventListener("click", () => setCandidateHold(btn.getAttribute("data-candidate-id"), true));
+		});
+		pane.querySelectorAll(".btn-stage-unhold").forEach((btn) => {
+			btn.addEventListener("click", () => setCandidateHold(btn.getAttribute("data-candidate-id"), false));
 		});
 
 		pane.querySelectorAll(".btn-player-play").forEach((btn) => {
@@ -1214,7 +1227,7 @@ function renderJobDetailPanes(job) {
 						if (newVal === "advance") updateCandidateStatus(candId, "Hired");
 						else if (newVal === "reject")
 							updateCandidateStatus(candId, "Rejected");
-						else showPremiumToast(`${cand.name} placed on hold.`, "info");
+						else setCandidateHold(candId, true);
 					}
 				}
 			});
@@ -1412,6 +1425,28 @@ function refreshAfterStageChange() {
 		renderKanbanBoard();
 	} else {
 		renderJobCards();
+	}
+}
+
+// Puts a Resume-stage candidate on hold (or reverses it) without touching
+// `status` — mirrors report-page.ts's `rp-decision` select, the one place in
+// this codebase that already persists `decision: 'on_hold'` correctly.
+function setCandidateHold(candId, onHold) {
+	const candidate = AppState.candidates.find((c) => c.id === candId);
+	if (!candidate) return;
+	const decision = onHold ? "on_hold" : null;
+	candidate.decision = decision;
+	saveStateToLocalStorage();
+	renderJobDetailPanes(AppState.jobs.find((j) => j.id === AppState.activeJobId));
+	showPremiumToast(
+		onHold ? `${candidate.name} placed on hold.` : `${candidate.name} back under review.`,
+		"info",
+	);
+	if (candidate._backend && getDataSource() === "api") {
+		apiUpdateApplicant(candidate.backendId || candId, { decision }).catch((err) => {
+			console.warn("Hold status saved locally but backend sync failed:", err);
+			showPremiumToast(`Could not sync ${candidate.name}'s hold status to the backend.`, "error");
+		});
 	}
 }
 

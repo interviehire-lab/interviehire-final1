@@ -176,50 +176,6 @@ async function advanceCandidate(candId) {
   }
 }
 
-// Swarm Terminal logging ticker simulation
-let swarmLogsInterval = null;
-const simulatedLogTemplates = [
-  () => {
-    if (AppState.candidates.length === 0) return `<code>[${new Date().toLocaleTimeString()}] Swarm:</code> Awaiting candidate records...`;
-    const name = escapeHTML(AppState.candidates[Math.floor(Math.random() * AppState.candidates.length)].name);
-    return `<code>[${new Date().toLocaleTimeString()}] Lina:</code> Analysed resume profile for ${name}. Match index: ${(80 + Math.random()*19).toFixed(0)}%.`;
-  },
-  () => {
-    if (AppState.candidates.length === 0) return `<code>[${new Date().toLocaleTimeString()}] Swarm:</code> Vetting pipeline inactive.`;
-    const name = escapeHTML(AppState.candidates[Math.floor(Math.random() * AppState.candidates.length)].name);
-    return `<code>[${new Date().toLocaleTimeString()}] Kaelen:</code> Finished functional assessment evaluations for ${name}.`;
-  },
-  () => {
-    if (AppState.candidates.length === 0) return `<code>[${new Date().toLocaleTimeString()}] Swarm:</code> Communications queue idle.`;
-    const name = escapeHTML(AppState.candidates[Math.floor(Math.random() * AppState.candidates.length)].name);
-    return `<code>[${new Date().toLocaleTimeString()}] Lyra:</code> Dispatched automated onboarding checklist update to ${name}.`;
-  },
-  () => {
-    const job = escapeHTML(AppState.jobs[Math.floor(Math.random() * AppState.jobs.length)].roleName);
-    return `<code>[${new Date().toLocaleTimeString()}] Lina:</code> Correlating candidates index for ${job}.`;
-  },
-  () => {
-    return `<code>[${new Date().toLocaleTimeString()}] Kaelen:</code> Reviewing active test-suites and coverage reports. System green.`;
-  },
-  () => {
-    return `<code>[${new Date().toLocaleTimeString()}] Lyra:</code> All scheduled recruiter screens synced to GCal successfully.`;
-  }
-];
-
-function startSwarmLogs() {
-  if (swarmLogsInterval) return;
-  
-  // Append initial ticker line
-  appendTerminalLog(`<code>[${new Date().toLocaleTimeString()}] Swarm:</code> Connection handshake successful. Diagnostic ticker active.`);
-  
-  swarmLogsInterval = setInterval(() => {
-    if (AppState.activeTab === 'swarm') {
-      const log = simulatedLogTemplates[Math.floor(Math.random() * simulatedLogTemplates.length)]();
-      appendTerminalLog(log);
-    }
-  }, 4000);
-}
-
 function appendTerminalLog(text, colorClass = '') {
   const termBody = document.getElementById('swarm-terminal-body');
   if (!termBody) return;
@@ -228,58 +184,6 @@ function appendTerminalLog(text, colorClass = '') {
   div.innerHTML = text;
   termBody.appendChild(div);
   termBody.scrollTop = termBody.scrollHeight;
-}
-
-function handleSwarmPrompt(promptText) {
-  if (!promptText.trim()) return;
-  
-  const inputEl = document.getElementById('swarm-prompter');
-  if (inputEl) inputEl.value = '';
-  
-  soundEngine.playClick();
-  appendTerminalLog(`<code>[${new Date().toLocaleTimeString()}] User:</code> ${promptText}`, 'font-gold');
-  
-  const textLower = promptText.toLowerCase();
-  let targetAgent = 'aria';
-  let activeStatus = '';
-  let finalStatus = '';
-  let response = '';
-  
-  if (textLower.includes('kaelen') || textLower.includes('code') || textLower.includes('review') || textLower.includes('rubric')) {
-    targetAgent = 'kaelen';
-    response = `<code>[${new Date().toLocaleTimeString()}] Kaelen:</code> Completed source-level review audit. Identified 1 candidate matching standard repository test coverages.`;
-    activeStatus = 'Reviewing code repository requests...';
-    finalStatus = 'Vetting analysis reports complete.';
-  } else if (textLower.includes('lyra') || textLower.includes('email') || textLower.includes('invite') || textLower.includes('send')) {
-    targetAgent = 'lyra';
-    response = `<code>[${new Date().toLocaleTimeString()}] Lyra:</code> Scanned queue. Dispatched invitation link templates to pending candidates list.`;
-    activeStatus = 'Mailing screening reminders...';
-    finalStatus = 'Communications queue synced successfully.';
-  } else {
-    targetAgent = 'aria';
-    response = `<code>[${new Date().toLocaleTimeString()}] Lina:</code> Filtered database matches. Identified candidates within desired experience and role configurations.`;
-    activeStatus = 'Searching database indices...';
-    finalStatus = 'Resume search queries completed.';
-  }
-  
-  // Visual pulse indicator & status updates
-  const statusElement = document.getElementById(`${targetAgent}-status`);
-  const agentCard = document.getElementById(`agent-${targetAgent}`);
-  const pulseDot = agentCard ? agentCard.querySelector('.pulse-dot') : null;
-  
-  if (statusElement) statusElement.textContent = activeStatus;
-  if (pulseDot) {
-    pulseDot.className = 'pulse-dot orange';
-  }
-  
-  setTimeout(() => {
-    appendTerminalLog(response);
-    if (statusElement) statusElement.textContent = finalStatus;
-    if (pulseDot) {
-      pulseDot.className = 'pulse-dot green';
-    }
-    soundEngine.playChime([392.00, 523.25, 659.25], 0.15, 0.1);
-  }, 1500);
 }
 
 // Waveform interview snippet player simulation
@@ -404,4 +308,4 @@ const CandidateReviews = {
 };
 
 
-export { advanceCandidate, appendTerminalLog, CandidateReviews, handleSwarmPrompt, recalculateJobPipelines, renderKanbanBoard, resetWaveformAudio, setupWaveformBars, simulatedLogTemplates, startSwarmLogs, swarmLogsInterval, toggleWaveformAudio, waveformDuration, waveformInterval, waveformPlayTime };
+export { advanceCandidate, appendTerminalLog, CandidateReviews, recalculateJobPipelines, renderKanbanBoard, resetWaveformAudio, setupWaveformBars, toggleWaveformAudio, waveformDuration, waveformInterval, waveformPlayTime };

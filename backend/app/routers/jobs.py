@@ -1748,6 +1748,11 @@ def get_interview_analysis(
             "report_url": session.reportUrl,
             "evaluated_at": session.completedAt.isoformat() if session.completedAt else None,
             "source": a.source.value if a.source else None,
+            # Interview Analysis = recruiter screening + functional (never resume) —
+            # merge the recruiter-screening half in here too.
+            "recruiter_screening": a.recruiter_screening,
+            "recruiter_screening_score": a.recruiter_screening_score if a.recruiter_screening_score is not None else a.screening_score,
+            "screening_status": a.screening_status.value if a.screening_status else None,
         })
 
     # Most recently evaluated first.

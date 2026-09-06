@@ -391,9 +391,24 @@
   justify-content: center;
 }
 .ra-action-btns .btn-stage-reject,
-.ra-action-btns .btn-stage-advance {
+.ra-action-btns .btn-stage-advance,
+.ra-action-btns .btn-stage-hold {
   padding: 4px 8px;
   font-size: 0.72rem;
+}
+.ra-action-btns .btn-stage-unhold {
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  background: none;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+.ra-action-btns .btn-stage-unhold:hover {
+  color: var(--color-text-primary);
+  border-color: rgba(var(--color-gold-rgb), 0.4);
 }
 
 /* Inert status pill shown in the Actions column once a candidate has left the
@@ -419,6 +434,11 @@
   color: #f87171;
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
+.ra-stage-tag.on-hold {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
 /* Active option marker for the View (All/Advanced/Rejected) dropdown, which
    reuses the bulk-actions dropdown shell. */
 .ra-view-dropdown .bulk-dd-item.active {
@@ -429,6 +449,9 @@ body.light-theme .ra-stage-tag.advanced {
 }
 body.light-theme .ra-stage-tag.rejected {
   color: #dc2626;
+}
+body.light-theme .ra-stage-tag.on-hold {
+  color: #b45309;
 }
 
 /* RA Spinner */

@@ -543,7 +543,17 @@ function renderProctoringPane(candidate, report) {
       ? Object.entries(bySev).map(([sev, n]) => `<div class="rp-proc-row"><div><strong>${escapeHTML(sev)}</strong></div><span class="rp-proc-count ${sev === 'LOW' ? 'ok' : 'bad'}">${n}</span></div>`).join('')
       : '<p class="rp-muted">No severity buckets.</p>';
     const violations = Array.isArray(p.violations) ? p.violations : [];
+    // Drive's webViewLink (recordingUrl) is a viewer *page*, not a raw media
+    // URL — it can't be used as a <video src>. Its own file-id embeds fine in
+    // an iframe via Drive's dedicated /preview path, which is what this uses.
+    const recordingFileId = report && (report as any).recordingDriveFileId;
     return `
+      ${recordingFileId ? `
+      <div class="rp-card rp-recording-card">
+        <h4 class="rp-card-title">🎥 Interview Recording</h4>
+        <iframe class="rp-recording-video" src="https://drive.google.com/file/d/${encodeURIComponent(recordingFileId)}/preview" allow="autoplay" allowfullscreen></iframe>
+      </div>
+      ` : ''}
       <div class="rp-proc-stats">
         <div class="rp-proc-stat ${tone}"><span>🛡 Integrity Score</span><strong>${Math.round(p.integrityScore)}</strong></div>
         <div class="rp-proc-stat ${p.penalty > 0 ? 'missed' : 'met'}"><span>➖ Score Penalty</span><strong>−${Math.round(p.penalty)}</strong></div>
@@ -622,8 +632,12 @@ function renderProctoringPane(candidate, report) {
 
 // ---------- Transcript ----------
 
-function renderTranscriptPane(candidate) {
-  const lines = getCandidateTranscriptLines(candidate);
+function renderTranscriptPane(candidate, report) {
+  // Prefer the real, server-fetched transcript (InterviewSession.transcript,
+  // attached in api.ts's mapFullReportToCandidateReport) over the client-side
+  // cache, which can be stale or absent even when a real transcript exists.
+  const reportTurns = report && Array.isArray((report as any).transcript) ? (report as any).transcript : null;
+  const lines = (reportTurns && reportTurns.length) ? reportTurns : getCandidateTranscriptLines(candidate);
   if (!lines.length) {
     return emptyCard('No transcript recorded', candidate.status === 'Resume'
       ? 'This candidate only has resume-stage evidence right now. The transcript appears after a screening interview is recorded.'
@@ -631,17 +645,6 @@ function renderTranscriptPane(candidate) {
   }
   return `
     <div class="rp-card">
-      <div class="waveform-box">
-        <h4 class="waveform-title">Interview Audio Recording</h4>
-        <div class="waveform-controls">
-          <button class="btn-play-waveform" id="btn-play-wave" aria-label="Play Interview Snippet">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="play-svg"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="pause-svg" style="display:none;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
-          </button>
-          <div class="waveform-viz" id="waveform-viz-bars"></div>
-          <span class="waveform-time" id="waveform-timer">0:00 / 0:12</span>
-        </div>
-      </div>
       <div class="transcript-chat-flow rp-transcript">
         ${lines.map(line => {
           const speaker = typeof line === 'string' ? 'Transcript' : (line.speaker || 'Transcript');
@@ -739,16 +742,22 @@ async function askInsight(candidate, job, analysis, question, feed) {
 
 // ---------- Main entry ----------
 
-async function openCandidateReportPage(candidateId, initialTab = 'overview') {
+// `mode: 'interview-analysis'` restricts this shared page to recruiter-screening
+// + functional data only (no resume) — Interview Analysis's own definition,
+// distinct from Deep Analysis (resume + recruiter + functional), which keeps
+// calling this with the default 'full' mode and is unaffected.
+async function openCandidateReportPage(candidateId, initialTab = 'overview', mode = 'full') {
   const candidate = findCandidate(candidateId);
   if (!candidate) return;
   const job = findJobForCandidate(candidate);
-  const analysis = await getAnalysis(candidateId);
+  const restrictToInterview = mode === 'interview-analysis';
+  const analysis = restrictToInterview ? null : await getAnalysis(candidateId);
   // Structured interview evaluation (rubric + dimensions + proctoring) from the engine.
   let interviewReport = null;
   if (getDataSource() === 'api') {
     try { interviewReport = await apiFetchCandidateReport(candidateId); } catch { /* not scored yet */ }
   }
+  if (restrictToInterview && (initialTab === 'overview' || !initialTab)) initialTab = 'analysis';
 
   AppState.activeReportCandidateId = candidateId;
   AppState.activeTab = 'candidate-report';
@@ -780,9 +789,11 @@ async function openCandidateReportPage(candidateId, initialTab = 'overview') {
   const decision = candidate.decision || '';
 
   const tabs = [
-    { key: 'overview', label: 'Overview', icon: '▦' },
-    { key: 'competencies', label: 'Competencies', icon: '☆' },
-    { key: 'resume', label: 'Resume', icon: '🗎' },
+    ...(restrictToInterview ? [] : [
+      { key: 'overview', label: 'Overview', icon: '▦' },
+      { key: 'competencies', label: 'Competencies', icon: '☆' },
+      { key: 'resume', label: 'Resume', icon: '🗎' },
+    ]),
     { key: 'screening', label: 'Recruiter Screening', icon: '☷', badge: candidate.recruiterScreening },
     { key: 'analysis', label: 'Interview Analysis', icon: '📊' },
     { key: 'proctoring', label: 'Proctoring', icon: '◉' },
@@ -820,13 +831,15 @@ async function openCandidateReportPage(candidateId, initialTab = 'overview') {
       </div>
 
       <div class="rp-panes">
+        ${restrictToInterview ? '' : `
         <div class="rp-pane active" data-rp-pane="overview">${renderOverviewPane(candidate, job, analysis)}</div>
         <div class="rp-pane" data-rp-pane="competencies">${renderCompetenciesPane(candidate, analysis)}</div>
         <div class="rp-pane" data-rp-pane="resume">${await renderResumePane(candidate, analysis)}</div>
-        <div class="rp-pane" data-rp-pane="screening">${renderScreeningPane(candidate)}</div>
+        `}
+        <div class="rp-pane${restrictToInterview ? ' active' : ''}" data-rp-pane="screening">${renderScreeningPane(candidate)}</div>
         <div class="rp-pane" data-rp-pane="analysis">${renderInterviewAnalysisPane(candidate, interviewReport)}</div>
         <div class="rp-pane" data-rp-pane="proctoring">${renderProctoringPane(candidate, interviewReport)}</div>
-        <div class="rp-pane" data-rp-pane="transcript">${renderTranscriptPane(candidate)}</div>
+        <div class="rp-pane" data-rp-pane="transcript">${renderTranscriptPane(candidate, interviewReport)}</div>
         <div class="rp-pane" data-rp-pane="remarks">${renderRemarksPane(candidate, analysis)}</div>
       </div>
     </div>

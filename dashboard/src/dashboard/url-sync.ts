@@ -20,7 +20,6 @@ import { document, window, requestAnimationFrame, setTimeout } from './runtime';
 const TAB_URLS = {
   'jobs':      '/dashboard/jobs',
   'analytics': '/dashboard/analytics',
-  'swarm':     '/dashboard/swarm',
   'talent':    '/dashboard/talent',
   'team':      '/dashboard/team',
   'career':    '/dashboard/career',

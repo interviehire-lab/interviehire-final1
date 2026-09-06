@@ -63,8 +63,11 @@ function navigateToJobDetail(jobId, stage = 'overview') {
   document.querySelectorAll('.dashboard-view').forEach(v => v.classList.remove('active-view'));
   document.getElementById('view-job-detail').classList.add('active-view');
 
-  // Sub-tab counts
-  document.getElementById('jd-count-resume').textContent = job.pipeline.resume;
+  // Sub-tab counts. jd-count-resume has no matching element in the template
+  // (only screening/functional pills exist, dashboard-crystal.js) — guard it
+  // the same way the refresh path below (line ~138) already does.
+  const jdCountResumeEl = document.getElementById('jd-count-resume');
+  if (jdCountResumeEl) jdCountResumeEl.textContent = job.pipeline.resume;
   document.getElementById('jd-count-screening').textContent = job.pipeline.screening;
   document.getElementById('jd-count-functional').textContent = job.pipeline.functional;
 

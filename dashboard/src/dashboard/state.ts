@@ -822,26 +822,6 @@ const AppState = {
   visibleColumnsAnalyticsJobs: ['id', 'roleName', 'cardName', 'customJobId', 'experienceBand', 'tags', 'createdBy', 'collaborators', 'recruiters'],
   visibleColumnsAnalyticsCandidates: ['id', 'name', 'jobApplied', 'registeredOn', 'status', 'score', 'actions'],
   visibleColumnsTeam: ['member', 'designation', 'usertype', 'registeredOn', 'status', 'actions'],
-  agentConfigs: {
-    aria: {
-      model: 'gpt-4o',
-      temperature: 0.2,
-      threshold: 80,
-      prompt: 'You are Lina, the Resume Analyst Agent. Your job is to extract candidate experience, skills, and check eligibility for public tenders. Screen out any profiles below the match score threshold.'
-    },
-    kaelen: {
-      model: 'claude-3-5-sonnet',
-      temperature: 0.5,
-      threshold: 85,
-      prompt: 'You are Kaelen, the Technical Vetting Specialist. Evaluate code submissions for correctness, clean structure, memory leak preventions, and correct algorithmic complexity.'
-    },
-    lyra: {
-      model: 'gpt-4o',
-      temperature: 0.7,
-      threshold: 75,
-      prompt: 'You are Lyra, the HR Communications Bot. Draft friendly invitations to candidates, schedule interviews, and handle follow-up emails regarding their screening status.'
-    }
-  }
 };
 
 

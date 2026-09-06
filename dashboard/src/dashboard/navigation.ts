@@ -15,7 +15,7 @@ import { escapeHTML } from './escape';
 import { EXPERIENCE_BANDS_PROMPT } from './constants';
 import { callDeepSeekAPI, enrichJobWithAI, parseAIJson, saveStateToLocalStorage } from './ai-api';
 import { openJobFlowView, toggleHeaderElementsForJobFlow } from './job-flow';
-import { renderKanbanBoard, resetWaveformAudio, startSwarmLogs } from './kanban-swarm';
+import { renderKanbanBoard, resetWaveformAudio } from './kanban-swarm';
 import { renderTalentFinderPane } from './talent-finder-panel';
 import { renderAnalyticsTable, renderJobCards, renderTeamTable, hydrateUsageAnalytics } from './render-views';
 import { renderCareerJobs } from './career-panel';
@@ -39,7 +39,6 @@ function navigateToTab(tabId) {
   const TAB_URLS = {
     'jobs':      '/dashboard/jobs',
     'analytics': '/dashboard/analytics',
-    'swarm':     '/dashboard/swarm',
     'talent':    '/dashboard/talent',
     'team':      '/dashboard/team',
     'career':    '/dashboard/career',
@@ -104,14 +103,6 @@ function navigateToTab(tabId) {
     hydrateUsageAnalytics();
     soundEngine.playChime([261.63, 329.63, 392.00], 0.12, 0.12);
 
-  } else if (tabId === 'swarm') {
-    breadcrumb.textContent = 'AI Swarm';
-    mainTitle.textContent = 'AI Swarm Console';
-    subText.textContent = 'A squad of autonomous AI agents working for you';
-    actionBtn.style.display = 'none'; // No primary CTA for swarm config page
-    document.getElementById('view-swarm').classList.add('active-view');
-    startSwarmLogs();
-    soundEngine.playChime([261.63, 329.63, 440.00], 0.15, 0.12);
 
   } else if (tabId === 'talent') {
     breadcrumb.textContent = 'Talent Finder';
@@ -430,11 +421,6 @@ function closeDrawers() {
     reportDrawer.style.right = '-880px';
   }
 
-  const agentDrawer = document.getElementById('drawer-agent-config');
-  if (agentDrawer) {
-    agentDrawer.classList.remove('active');
-  }
-  
   resetWaveformAudio();
   soundEngine.playClick();
 }
