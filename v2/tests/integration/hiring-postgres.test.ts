@@ -9,6 +9,7 @@ import {
   connectHiringDatabase,
   DrizzleApplicationRepository,
   migrateHiringDatabase,
+  resumeAnalysisRuns,
 } from "@interviehire/db-hiring";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -17,6 +18,7 @@ const connection = connectHiringDatabase(url);
 
 beforeAll(async () => {
   await migrateHiringDatabase(url);
+  await connection.db.delete(resumeAnalysisRuns);
   await connection.db.delete(applicationInterviewRefs);
   await connection.db.delete(applicationStageHistory);
   await connection.db.delete(hiringOutbox);

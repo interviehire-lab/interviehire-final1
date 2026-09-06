@@ -3,7 +3,7 @@ import postgres from "postgres";
 export async function resetHiringDb(url: string): Promise<void> {
   const sql = postgres(url, { max: 1 });
   try {
-    await sql`TRUNCATE v2_application_interview_refs, v2_application_stage_history, v2_applications CASCADE`;
+    await sql`TRUNCATE v2_resume_analysis_runs, v2_application_interview_refs, v2_application_stage_history, v2_hiring_outbox, v2_applications CASCADE`;
   } finally { await sql.end(); }
 }
 

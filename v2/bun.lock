@@ -9,6 +9,7 @@
         "@interviehire/domain-hiring": "workspace:*",
         "@interviehire/queue": "workspace:*",
         "@interviehire/testing": "workspace:*",
+        "@interviehire/worker": "workspace:*",
         "@types/bun": "latest",
         "bullmq": "^5.58.5",
         "drizzle-orm": "^0.44.5",
@@ -32,6 +33,11 @@
     },
     "apps/worker": {
       "name": "@interviehire/worker",
+      "dependencies": {
+        "@interviehire/contracts": "workspace:*",
+        "bullmq": "^5.58.5",
+        "effect": "^3.17.14",
+      },
     },
     "packages/contracts": {
       "name": "@interviehire/contracts",

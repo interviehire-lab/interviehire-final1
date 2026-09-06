@@ -1,1 +1,11 @@
-{ "name": "@interviehire/worker", "private": true, "type": "module" }
+{
+  "name": "@interviehire/worker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@interviehire/contracts": "workspace:*",
+    "bullmq": "^5.58.5",
+    "effect": "^3.17.14"
+  },
+  "exports": "./src/index.ts"
+}

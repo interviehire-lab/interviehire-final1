@@ -9,6 +9,8 @@
 | Async foundation | Hiring transactional outbox | Legacy performs direct/fire-and-forget side effects | `v2_hiring_outbox` + dispatcher | MIGRATED | PostgreSQL/BullMQ commit, rollback, publish, crash-replay tests |
 | Pipeline | Three-column job board read | `dashboard/src/dashboard/job-detail-panes.ts` | `GET /v2/jobs/:id/board` | MIGRATED | domain/API/PostgreSQL tenant tests |
 | Applications | Tenant-scoped application detail | `backend/app/routers/jobs.py` | `GET /v2/applications/:id` | MIGRATED | API/PostgreSQL tenant tests |
+| Resume analysis | Durable asynchronous request/read | `dashboard/src/dashboard/resume-analysis.ts`, `backend/app/routers/jobs.py` | `POST /v2/applications/:id/resume-analysis`, `GET /v2/async-jobs/:id` | MIGRATED | domain/API/PostgreSQL atomicity tests |
+| Resume analysis | BullMQ processing and persisted result | legacy request/poller behavior | `ai.resume` worker | MIGRATED | real Redis/PostgreSQL success, retry, duplicate, durable-read tests |
 | Interview bridge | Explicit application/session reference | legacy `backend/app/utils/ai_sync.py` relies on equal IDs | `v2_application_interview_refs` | MIGRATED | unequal-ID PostgreSQL test |
 | Voice | LiveKit/Deepgram/Silero/Cartesia runtime | `interview-engine/apps/voice-agent` | preserved legacy runtime | PRESERVED | Contract suite pending |
 | Voice | Turn idempotency | `voice-agent/src/engine-client.ts` idempotency key | Interview API compatibility | PENDING MIGRATION | Characterisation located |

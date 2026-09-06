@@ -10,3 +10,8 @@ idempotency independently of BullMQ retention.
 transaction writes stage, history, and `v2_hiring_outbox` together. The dispatcher uses
 the event ID as the stable BullMQ ID; a crash after enqueue leaves the outbox pending for
 safe replay. This is at-least-once publication, not an exactly-once claim.
+
+`resume-analysis.requested.v1` is also implemented. Its queue envelope contains the
+application reference, run ID, revision, tenant, and correlation identifiers; resume text
+stays in PostgreSQL and is loaded by the authorised worker. The run and candidate-facing
+async status persist `queued`, `running`, `ready`, or `failed` independently of Redis.

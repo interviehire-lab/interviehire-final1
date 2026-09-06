@@ -56,7 +56,12 @@ export function createBullMqPublisher(queue: Queue<JobEnvelopeV1>): OutboxPublis
         resourceRef: { type: resourceType as ResourceType, id: resourceId },
         requestedAt: event.occurredAt,
         version: 1,
-        payload: { eventType: event.eventType },
+        payload: {
+          eventType: event.eventType,
+          ...Object.fromEntries(Object.entries(event.payload).filter(([key, value]) =>
+            key !== "resourceType" && key !== "resourceId" && ["string", "number", "boolean"].includes(typeof value),
+          )),
+        },
       }, { jobId: event.eventId });
     },
   };

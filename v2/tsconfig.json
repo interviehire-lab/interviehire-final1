@@ -6,6 +6,7 @@
     { "path": "packages/domain-hiring" },
     { "path": "packages/db-hiring" },
     { "path": "packages/queue" },
-    { "path": "apps/core-api" }
+    { "path": "apps/core-api" },
+    { "path": "apps/worker" }
   ]
 }

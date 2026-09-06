@@ -103,3 +103,20 @@ export interface ApplicationStageChangedV1 {
     readonly to: ApplicationStage;
   };
 }
+
+export interface ResumeAnalysisRequestedV1 {
+  readonly eventId: string;
+  readonly eventType: "resume-analysis.requested.v1";
+  readonly aggregateId: string;
+  readonly tenantId: string;
+  readonly correlationId: string;
+  readonly occurredAt: string;
+  readonly payload: {
+    readonly resourceType: "application";
+    readonly resourceId: string;
+    readonly runId: string;
+    readonly resumeRevision: number;
+  };
+}
+
+export type HiringOutboxEvent = ApplicationStageChangedV1 | ResumeAnalysisRequestedV1;

@@ -1,6 +1,6 @@
 import type {
   ApplicationDecision,
-  ApplicationStageChangedV1,
+  HiringOutboxEvent,
   ApplicationStage,
   TransitionApplicationResult,
 } from "@interviehire/contracts";
@@ -31,7 +31,7 @@ export interface ApplicationRepository {
   find(applicationId: string): Promise<ApplicationRecord | undefined>;
   updateStage(applicationId: string, stage: ApplicationStage): Promise<void>;
   appendHistory(history: StageHistoryRecord): Promise<void>;
-  appendOutbox(event: ApplicationStageChangedV1): Promise<void>;
+  appendOutbox(event: HiringOutboxEvent): Promise<void>;
   hasCommand(idempotencyKey: string): Promise<boolean>;
   recordCommand(idempotencyKey: string): Promise<void>;
 }

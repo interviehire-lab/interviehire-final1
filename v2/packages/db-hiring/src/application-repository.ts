@@ -7,7 +7,7 @@ import type {
   StageHistoryRecord,
 } from "@interviehire/domain-hiring";
 import type { ApplicationStage } from "@interviehire/contracts";
-import type { ApplicationStageChangedV1 } from "@interviehire/contracts";
+import type { HiringOutboxEvent } from "@interviehire/contracts";
 import type { HiringDatabase } from "./database";
 import { applicationStageHistory, applications, hiringOutbox } from "./schema";
 
@@ -57,7 +57,7 @@ export class DrizzleApplicationRepository implements ApplicationRepository, Appl
     });
   }
 
-  async appendOutbox(event: ApplicationStageChangedV1): Promise<void> {
+  async appendOutbox(event: HiringOutboxEvent): Promise<void> {
     await this.db.insert(hiringOutbox).values(event);
   }
 

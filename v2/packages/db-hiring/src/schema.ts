@@ -1,5 +1,5 @@
 import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
-import type { ApplicationStageChangedV1 } from "@interviehire/contracts";
+import type { HiringOutboxEvent } from "@interviehire/contracts";
 
 export const applicationStage = pgEnum("v2_application_stage", [
   "resume_analysis", "recruiter_screening", "functional_interview",
@@ -20,6 +20,7 @@ export const applications = pgTable("v2_applications", {
   jobId: text("job_id"),
   candidateName: text("candidate_name"),
   source: text("source"),
+  resumeText: text("resume_text"),
   asyncStatus: resumeAnalysisStatus("resume_analysis_status").notNull().default("not_requested"),
   stage: applicationStage("stage").notNull().default("resume_analysis"),
   decision: applicationDecision("decision").notNull().default("active"),
@@ -61,8 +62,26 @@ export const hiringOutbox = pgTable("v2_hiring_outbox", {
   aggregateId: text("aggregate_id").notNull(),
   tenantId: text("tenant_id").notNull(),
   correlationId: text("correlation_id").notNull(),
-  payload: jsonb("payload").$type<ApplicationStageChangedV1["payload"]>().notNull(),
+  payload: jsonb("payload").$type<HiringOutboxEvent["payload"]>().notNull(),
   occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
   publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
   publishAttempts: integer("publish_attempts").notNull().default(0),
 }, (table) => [index("v2_hiring_outbox_pending_idx").on(table.publishedAt, table.occurredAt)]);
+
+export const resumeAnalysisRuns = pgTable("v2_resume_analysis_runs", {
+  id: text("id").primaryKey(),
+  applicationId: text("application_id").notNull().references(() => applications.id),
+  tenantId: text("tenant_id").notNull(),
+  status: resumeAnalysisStatus("status").notNull(),
+  attempt: integer("attempt").notNull().default(0),
+  idempotencyKey: text("idempotency_key").notNull(),
+  correlationId: text("correlation_id").notNull(),
+  resumeRevision: integer("resume_revision").notNull(),
+  result: jsonb("result").$type<Readonly<Record<string, unknown>>>(),
+  errorCode: text("error_code"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+}, (table) => [
+  uniqueIndex("v2_resume_runs_idempotency_idx").on(table.tenantId, table.idempotencyKey),
+  index("v2_resume_runs_application_idx").on(table.applicationId, table.createdAt),
+]);
