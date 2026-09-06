@@ -73,4 +73,9 @@ setInterval(() => {
 }, evaluationPollIntervalMs);
 
 const port = Number(process.env.PORT || 4000);
-app.listen({ port, host: '0.0.0.0' }).catch(err => { app.log.error(err); process.exit(1); });
+// '::' (not '0.0.0.0') — Railway's private network (*.railway.internal, used by
+// the voice-agent to reach this service) resolves over IPv6 only. An IPv4-only
+// bind accepts the public edge proxy's traffic fine but refuses private-network
+// connections outright (ECONNREFUSED), since nothing is listening on the IPv6
+// side. '::' is dual-stack on Linux, so it keeps serving IPv4 too.
+app.listen({ port, host: '::' }).catch(err => { app.log.error(err); process.exit(1); });
