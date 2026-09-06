@@ -21,6 +21,7 @@ from app.utils.auth import (
     create_access_token,
     get_current_user,
     get_active_org_id,
+    require_super_admin,
 )
 from app.utils.career import unique_career_subdomain
 from app.routers.invites import _rate_limit
@@ -58,6 +59,7 @@ class UserProfileOut(BaseModel):
     organisation_name: Optional[str] = None
     onboarding_required: bool
     google_drive_connected: bool = False
+    active_org_explicit: bool = False
 
     class Config:
         from_attributes = True
@@ -167,8 +169,14 @@ def login(data: LoginIn, request: Request, response: Response, db: Session = Dep
     onboarding_required = user.organisation_id is None and user.user_type != UserType.super_admin
 
     # Super-admin active-org context. NEVER clobber an existing selection: prefer the
-    # cookie already in this browser, then the durable server-side choice, then a
-    # deterministic first org for a brand-new admin.
+    # cookie already in this browser, then the durable server-side choice. Do NOT
+    # fall back to an arbitrary "first org" here — that used to silently re-scope
+    # every fresh superadmin login into some org, which is exactly what
+    # active_org_explicit (see get_me()) exists to distinguish from a real choice.
+    # No genuine prior choice → leave the cookie unset → superadmin lands on
+    # Platform. (get_active_org_id()'s own tier-4 fallback still exists for
+    # requests made without ever hitting login again mid-session, e.g. long-lived
+    # sessions predating this change — unrelated to what gets set here.)
     if user.user_type == UserType.super_admin:
         target_org_id = None
         existing = request.cookies.get("active_org_id")
@@ -179,13 +187,6 @@ def login(data: LoginIn, request: Request, response: Response, db: Session = Dep
                 target_org_id = None
         if target_org_id is None:
             target_org_id = user.last_active_org_id
-        if target_org_id is None:
-            first_org = (
-                db.query(Organisation)
-                .order_by(Organisation.created_at.asc(), Organisation.id.asc())
-                .first()
-            )
-            target_org_id = first_org.id if first_org else None
         if target_org_id is not None:
             response.set_cookie(
                 key="active_org_id",
@@ -267,10 +268,25 @@ def onboarding(data: OnboardingIn, current_user: User = Depends(get_current_user
 def get_me(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     org_name = None
     org_id = current_user.organisation_id
+    active_org_explicit = False
 
     if current_user.user_type == UserType.super_admin:
-        # For super admin, fetch the org name of the active context
-        active_org_id = get_active_org_id(request, current_user, db)
+        # "Explicit" means the superadmin actually chose an org (switch-context,
+        # this session or a past one) — as opposed to get_active_org_id()'s tiers
+        # 3-4, which silently fall back to an owned/arbitrary org. Only an explicit
+        # choice should make the dashboard look "scoped into an org" by default;
+        # see /Users/krishna/.claude/plans/greedy-twirling-ocean.md.
+        org_id_cookie = request.cookies.get("active_org_id")
+        cookie_valid = False
+        if org_id_cookie:
+            try:
+                UUID(org_id_cookie)
+                cookie_valid = True
+            except Exception:
+                cookie_valid = False
+        active_org_explicit = cookie_valid or bool(current_user.last_active_org_id)
+        active_org_id = get_active_org_id(request, current_user, db) if active_org_explicit else None
+        org_id = None
         if active_org_id:
             org = db.query(Organisation).filter(Organisation.id == active_org_id).first()
             if org:
@@ -293,6 +309,7 @@ def get_me(request: Request, current_user: User = Depends(get_current_user), db:
         organisation_id=org_id,
         organisation_name=org_name,
         onboarding_required=onboarding_required,
+        active_org_explicit=active_org_explicit,
         google_drive_connected=bool(current_user.google_refresh_token),
     )
 
@@ -340,3 +357,16 @@ def switch_context(data: SwitchContextIn, response: Response, current_user: User
     )
 
     return {"message": f"Switched context to organisation: {org.org_name}", "organisation_id": org.id, "organisation_name": org.org_name}
+
+
+@router.post("/clear-context")
+def clear_context(response: Response, current_user: User = Depends(require_super_admin), db: Session = Depends(get_db)):
+    # Reverse of switch-context: returns a superadmin to the neutral "Platform"
+    # state. A full reset (not just this browser session) — clearing only the
+    # cookie would leave last_active_org_id to silently re-scope a future login.
+    current_user.last_active_org_id = None
+    db.commit()
+
+    response.delete_cookie(key="active_org_id", path="/")
+
+    return {"message": "Cleared organisation context."}

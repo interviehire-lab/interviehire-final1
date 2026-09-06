@@ -8,13 +8,13 @@
 // see memory: prefer-vansh-version).
 
 import { createTopic, createQuestionBlueprint, toFunctionalParameters, toScreeningQuestions } from './blueprint-engine';
-import { request, API_BASE, apiLogin, apiSignup, apiMe, apiLogout, isAuthed, clearAuthed, apiOnboarding, apiListOrganisations, apiSwitchContext } from '../auth-client';
+import { request, API_BASE, apiLogin, apiSignup, apiMe, apiLogout, isAuthed, clearAuthed, apiOnboarding, apiListOrganisations, apiSwitchContext, apiClearContext } from '../auth-client';
 import { defaultInterviewSettings } from './state';
 import type { Candidate, Job, CandidateReport, InterviewStatusLabel } from './types';
 
 // Auth + HTTP primitives live in ../auth-client.js (dependency-free so the lean
 // /login + /signup pages can reuse them). Re-export for existing callers here.
-export { apiLogin, apiSignup, apiMe, apiLogout, isAuthed, clearAuthed, apiOnboarding, apiListOrganisations, apiSwitchContext };
+export { apiLogin, apiSignup, apiMe, apiLogout, isAuthed, clearAuthed, apiOnboarding, apiListOrganisations, apiSwitchContext, apiClearContext };
 
 const LS_SOURCE = 'IntervieHire_data_source';
 

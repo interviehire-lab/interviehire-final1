@@ -173,6 +173,31 @@ body.light-theme .theme-icon-sun { display: block; }
 }
 .org-switcher-chevron { opacity: 0.7; flex: 0 0 auto; transition: transform 0.2s ease; }
 .btn-org-switcher[aria-expanded="true"] .org-switcher-chevron { transform: rotate(180deg); }
+/* Always-visible exit affordance, shown only while an org context is open
+   (see IH_ACTIVE_ORG_EXPLICIT) — deliberately styled to read as "you're in a
+   special mode," not just another neutral header button. */
+.btn-exit-org-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 10px;
+  color: #f87171;
+  padding: 9px 12px;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--spring-snappy);
+  white-space: nowrap;
+}
+.btn-exit-org-context:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.6);
+}
+.btn-exit-org-context[disabled] { opacity: 0.5; cursor: default; }
 /* Anchor the glass dropdown to the right edge (it sits near the header's end). */
 .org-switcher-menu { left: auto; right: 0; min-width: 220px; }
 .org-switcher-menu .bulk-dd-item { justify-content: space-between; }

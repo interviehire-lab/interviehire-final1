@@ -8,7 +8,7 @@
 import { document, window, signal } from './runtime';
 import { escapeHTML } from './escape';
 import { showPremiumToast } from './sourcing';
-import { apiListOrganisations, apiSwitchContext } from './api';
+import { apiListOrganisations, apiSwitchContext, apiClearContext } from './api';
 
 let cachedOrgs = null; // fetched once per session; re-rendered on every init.
 let docListenerSignal = null; // the runtime signal the outside-click listener is bound under.
@@ -16,6 +16,9 @@ let docListenerSignal = null; // the runtime signal the outside-click listener i
 function renderOrgs(menu) {
   const orgs = Array.isArray(cachedOrgs) ? cachedOrgs : [];
   const activeId = window.IH_ACTIVE_ORG_ID == null ? '' : String(window.IH_ACTIVE_ORG_ID);
+  // Leaving org context lives in the always-visible "Exit to Platform" button
+  // next to this dropdown (see initOrgSwitcher), not as an item in here — one
+  // obvious way to do it, not two.
   if (!orgs.length) {
     menu.innerHTML = '<div class="bulk-dd-item" style="opacity:0.6;cursor:default;">No organisations</div>';
     return;
@@ -40,15 +43,40 @@ export async function initOrgSwitcher() {
   const wrap = document.getElementById('org-switcher');
   const trigger = document.getElementById('btn-org-switcher');
   const menu = document.getElementById('org-switcher-menu');
+  const exitBtn = document.getElementById('btn-exit-org-context');
   if (!wrap || !trigger || !menu) return;
 
   // Only super-admins get the switcher; everyone else keeps it hidden.
   if (window.IH_USER_TYPE !== 'super_admin') {
     wrap.style.display = 'none';
+    if (exitBtn) exitBtn.style.display = 'none';
     return;
   }
   wrap.style.display = '';
   updateLabel(trigger);
+
+  // Always-visible exit affordance — shown only while an org context is
+  // actually open, so leaving it never requires opening the dropdown first.
+  if (exitBtn) {
+    exitBtn.style.display = window.IH_ACTIVE_ORG_EXPLICIT ? 'flex' : 'none';
+    if (!exitBtn.dataset.ihExitBound) {
+      exitBtn.dataset.ihExitBound = '1';
+      exitBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        exitBtn.setAttribute('disabled', '');
+        try {
+          await apiClearContext();
+          // Land on the bare dashboard path (→ Platform), not a reload-in-place —
+          // the current URL may be an org-scoped sub-path (e.g. /dashboard/jobs),
+          // which would just re-request that same org-scoped view.
+          window.location.href = '/dashboard';
+        } catch (err) {
+          exitBtn.removeAttribute('disabled');
+          showPremiumToast((err && err.message) || 'Could not leave organisation context.', 'error');
+        }
+      });
+    }
+  }
 
   // Native, element-scoped listeners (trigger + menu) live as long as the DOM
   // element, so bind them once per element. The dataset flag survives module
@@ -127,6 +155,21 @@ export async function initOrgSwitcher() {
 // DashboardShell.js for both call sites.
 export function initPlatformTabVisibility(): void {
   const navItem = document.getElementById('nav-item-platform');
-  if (!navItem) return;
-  navItem.style.display = window.IH_USER_TYPE === 'super_admin' ? '' : 'none';
+  if (navItem) {
+    navItem.style.display = window.IH_USER_TYPE === 'super_admin' ? '' : 'none';
+  }
+
+  // Platform is the superadmin's home state: until they've explicitly opened an
+  // org (via "Open →" or the org-switcher), every other nav tab stays hidden so
+  // Platform reads as the main experience, not one more sidebar item. Org_admins
+  // and members are untouched — this condition is never true for them.
+  const homeMode = window.IH_USER_TYPE === 'super_admin' && !window.IH_ACTIVE_ORG_EXPLICIT;
+  document.querySelectorAll('.nav-item[data-tab]:not([data-tab="platform"])').forEach((el) => {
+    el.style.display = homeMode ? 'none' : '';
+  });
+  // Platform itself only makes sense as a collapsible dropdown when it's sharing
+  // the sidebar with other org-scoped tabs. As the only nav (home mode), its six
+  // destinations render as flat, always-visible options instead (see the
+  // .platform-home CSS in 03-sidebar.css).
+  if (navItem) navItem.classList.toggle('platform-home', homeMode);
 }

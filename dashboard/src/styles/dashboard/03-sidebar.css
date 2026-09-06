@@ -190,11 +190,66 @@
 .nav-item.has-sub { flex-direction: column; align-items: stretch; padding: 0; }
 .nav-item-header { display: flex; align-items: center; gap: 12px; padding: 11px 14px; }
 .chevron-icon { margin-left: auto; transition: transform 0.4s cubic-bezier(0.16,1,0.3,1); }
-.sub-nav { display: none; list-style: none; flex-direction: column; padding: 4px 0 10px 46px; gap: 8px; }
-.sub-nav li { font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer; transition: var(--spring-fast); }
+.sub-nav { list-style: none; flex-direction: column; padding: 4px 0 10px 46px; gap: 8px; }
+.sub-nav li { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer; transition: var(--spring-fast); }
+.sub-nav li svg { stroke: currentColor; opacity: 0.75; flex: 0 0 auto; }
 .sub-nav li:hover, .sub-nav li.active-sub { color: var(--color-gold); transform: translateX(3px); }
+.sub-nav li:hover svg, .sub-nav li.active-sub svg { opacity: 1; }
+/* `.sidebar-nav .sub-nav` (0,2,0), not the plain `.sub-nav` above (0,1,0): the
+   generic `.sidebar-nav ul { display:flex }` rule is (0,1,1) and was silently
+   beating a plain `.sub-nav { display:none }` on specificity alone, so every
+   has-sub dropdown (Settings, Platform) rendered permanently open regardless
+   of the .open class — this closes that gap. Keep this rule and the .open
+   override below at equal (0,2,0) specificity, in this order, so open still wins. */
+.sidebar-nav .sub-nav { display: none; }
 .nav-item.open .sub-nav { display: flex; }
 .nav-item.open .chevron-icon { transform: rotate(180deg); }
+
+/* Platform-as-home mode (superadmin, no org context — see initPlatformTabVisibility
+   in org-switcher.ts, which toggles this class on #nav-item-platform): Platform
+   is the only nav, so its six destinations render as flat, always-visible
+   sidebar options instead of a collapsible dropdown — no header/chevron, no
+   click-to-expand, styled to match the top-level .nav-item rows exactly. */
+.nav-item.platform-home .nav-item-header { display: none; }
+/* The parent <li> still gets .active added (by navigateToSubtab, for the normal
+   collapsed-dropdown "org mode" header highlight) whenever any platform-* subtab
+   is open — in home mode that parent has no visible header of its own, but its
+   .active background/border/indicator still painted across the whole flattened
+   block (every option from Overview to Audit Log inheriting one shared
+   highlight). Reset it here; the real "which option is active" indicator in
+   this mode is .sub-nav li.active-sub below. */
+.nav-item.platform-home.active {
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+.nav-item.platform-home.active::before { display: none; }
+.nav-item.platform-home .sub-nav { display: flex !important; padding: 0; gap: 4px; }
+.nav-item.platform-home .sub-nav li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  transition: var(--spring-fast);
+}
+.nav-item.platform-home .sub-nav li svg { stroke: var(--color-text-muted); opacity: 1; transition: var(--spring-fast); flex: 0 0 auto; }
+.nav-item.platform-home .sub-nav li:hover {
+  background: rgba(255,255,255,0.2);
+  color: var(--color-text-primary);
+  transform: translateX(3px);
+}
+.nav-item.platform-home .sub-nav li:hover svg { stroke: var(--color-text-primary); }
+.nav-item.platform-home .sub-nav li.active-sub {
+  background: linear-gradient(135deg, rgba(var(--color-indigo-rgb),0.35) 0%, rgba(var(--color-gold-rgb),0.45) 100%);
+  border: 1px solid rgba(var(--color-gold-rgb),0.32);
+  color: var(--color-gold);
+  transform: none;
+}
+.nav-item.platform-home .sub-nav li.active-sub svg { stroke: var(--color-gold); }
 
 /* Sidebar footer */
 .sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 20px; }

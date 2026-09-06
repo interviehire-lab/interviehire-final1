@@ -83,14 +83,31 @@ const DashboardSurface = memo(function DashboardSurface() {
 	return <div dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
-function navigateToPath(path) {
+function navigateToPath(path, bareRetries = 0) {
 	if (!path) return;
 	const segments = path.split("/").filter(Boolean); // e.g. ['dashboard', 'jobs', 'JOB-123']
 	if (segments[0] !== "dashboard") return;
 
 	const sub = segments[1]; // e.g. 'jobs', 'analytics', etc.
 	if (!sub) {
-		window.navigateToTab?.("jobs");
+		// The bare path's default tab depends on whether this is a superadmin —
+		// if /me hasn't resolved yet (IH_USER_TYPE still unset), wait rather than
+		// guess "jobs" and correct later: a second pushUrl() a tick later can
+		// silently lose a race with this one's still-pending rAF-queued push
+		// (see pushUrl's _pushPending guard in url-sync.ts), leaving the URL/view
+		// on the wrong tab. Bounded so a failed /me call can't hang this forever.
+		if (window.IH_USER_TYPE === undefined && bareRetries < 20) {
+			setTimeout(() => navigateToPath(path, bareRetries + 1), 50);
+			return;
+		}
+		// A superadmin who hasn't explicitly opened an org yet lands on Platform
+		// (their home state); everyone else — and a superadmin who has explicitly
+		// opened an org — defaults to Jobs, same as always.
+		if (window.IH_USER_TYPE === "super_admin" && !window.IH_ACTIVE_ORG_EXPLICIT) {
+			window.navigateToSubtab?.("platform-overview");
+		} else {
+			window.navigateToTab?.("jobs");
+		}
 		return;
 	}
 
@@ -267,6 +284,7 @@ export default function DashboardShell({ children }) {
 		window.IH_ORG_NAME = (user.organisation_name || "").trim();
 		window.IH_USER_TYPE = user.user_type || "member";
 		window.IH_ACTIVE_ORG_ID = user.organisation_id || null;
+		window.IH_ACTIVE_ORG_EXPLICIT = !!user.active_org_explicit;
 		// Refresh the settings page's email/toggles now that the profile is known (covers
 		// the case where the settings view is already open on initial load).
 		if (typeof window.__ihSyncSettings === "function")

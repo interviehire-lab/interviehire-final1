@@ -88,3 +88,7 @@ export async function apiListOrganisations() {
 export async function apiSwitchContext(organisationId: string) {
   return request('/auth/switch-context', { method: 'POST', body: { organisation_id: organisationId } });
 }
+// Super-admin only: reverse of apiSwitchContext — returns to the neutral "Platform" state.
+export async function apiClearContext() {
+  return request('/auth/clear-context', { method: 'POST' });
+}
