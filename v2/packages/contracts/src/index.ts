@@ -9,6 +9,9 @@ export type ApplicationStage = (typeof APPLICATION_STAGES)[number];
 export const APPLICATION_DECISIONS = ["active", "hired", "rejected", "withdrawn"] as const;
 export type ApplicationDecision = (typeof APPLICATION_DECISIONS)[number];
 
+export const ASYNC_STATUSES = ["not_requested", "queued", "running", "ready", "failed"] as const;
+export type AsyncStatus = (typeof ASYNC_STATUSES)[number];
+
 export const RESOURCE_TYPES = [
   "application",
   "interview_session",

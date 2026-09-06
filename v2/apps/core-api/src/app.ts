@@ -1,16 +1,55 @@
 import { Elysia, t } from "elysia";
 import { Effect } from "effect";
-import { createApplicationService, type ApplicationRepository } from "@interviehire/domain-hiring";
+import {
+  buildCandidateBoard,
+  createApplicationService,
+  type ApplicationQueryRepository,
+  type ApplicationRepository,
+} from "@interviehire/domain-hiring";
 
 export interface CoreAppDependencies {
   readonly applicationRepository: ApplicationRepository;
+  readonly applicationQueries?: ApplicationQueryRepository;
 }
 
 export function createCoreApp(dependencies: CoreAppDependencies) {
   const applicationService = createApplicationService(dependencies.applicationRepository);
+  const queries: ApplicationQueryRepository = dependencies.applicationQueries ?? {
+    findForTenant: async () => undefined,
+    listForJob: async () => [],
+  };
+  const readHeaders = t.Object({
+    "x-tenant-id": t.String({ minLength: 1 }),
+    "x-correlation-id": t.String({ minLength: 1 }),
+  }, { additionalProperties: true });
 
   return new Elysia({ name: "interviehire-v2-core" })
     .get("/health", () => ({ status: "ok", service: "core-api" }))
+    .get("/v2/jobs/:id/board", async ({ headers, params }) => {
+      const applications = await Effect.runPromise(Effect.tryPromise(() =>
+        queries.listForJob(headers["x-tenant-id"], params.id),
+      ));
+      return {
+        ...buildCandidateBoard(params.id, applications),
+        correlationId: headers["x-correlation-id"],
+      };
+    }, {
+      headers: readHeaders,
+      params: t.Object({ id: t.String({ minLength: 1 }) }),
+    })
+    .get("/v2/applications/:id", async ({ headers, params, set }) => {
+      const application = await Effect.runPromise(Effect.tryPromise(() =>
+        queries.findForTenant(headers["x-tenant-id"], params.id),
+      ));
+      if (!application) {
+        set.status = 404;
+        return { code: "NOT_FOUND" as const, message: "Application not found.", correlationId: headers["x-correlation-id"] };
+      }
+      return { ...application, correlationId: headers["x-correlation-id"] };
+    }, {
+      headers: readHeaders,
+      params: t.Object({ id: t.String({ minLength: 1 }) }),
+    })
     .post("/v2/applications/:id/transitions", async ({ body, headers, params, set }) => {
       const correlationId = headers["x-correlation-id"];
       const result = await Effect.runPromise(Effect.tryPromise(() => applicationService.transition({

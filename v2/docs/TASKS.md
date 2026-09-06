@@ -10,14 +10,20 @@ explicit application/interview mapping, and real PostgreSQL repository integrati
 Completed with focused tests, real PostgreSQL/Redis integration, typecheck/build, diff
 review, and parity updates green.
 
-## DOING — Core board/application contracts
+## DONE — Core board/application contracts
 
 RED: board exposes exactly three columns and remains tenant scoped; application detail
 uses separate stage/decision fields.
 
+Completed with pure-domain, in-process Elysia, and real PostgreSQL tests.
+
+## DOING — Hiring transactional outbox
+
+RED: business mutation and event commit together; both roll back together; dispatcher
+replay can publish twice while a consumer effect remains idempotent.
+
 ## TODO
 
-- Core API board/application contracts and routes
 - Hiring outbox and real BullMQ dispatcher/idempotency tests
 - Async resume analysis worker
 - Scheduling and Interview API mapping

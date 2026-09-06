@@ -79,4 +79,23 @@ describe("hiring PostgreSQL semantics", () => {
     expect(ref?.interviewSessionId).toBe("session_9f8d");
     expect(ref?.applicationId).not.toBe(ref?.interviewSessionId);
   });
+
+  test("board and detail queries are scoped by both tenant and job", async () => {
+    await connection.client`
+      INSERT INTO v2_applications
+        (id, tenant_id, job_id, candidate_name, source, resume_analysis_status)
+      VALUES
+        ('app_org1_job1', 'org_001', 'job_001', 'Aditi Sharma', 'referral', 'ready'),
+        ('app_org1_job2', 'org_001', 'job_002', 'Chen Wei', 'ats', 'queued'),
+        ('app_org2_job1', 'org_002', 'job_001', 'Maya Singh', 'career_page', 'running')
+      ON CONFLICT (id) DO NOTHING
+    `;
+    const repository = new DrizzleApplicationRepository(connection.db);
+    const boardRows = await repository.listForJob("org_001", "job_001");
+    expect(boardRows.map((row) => row.id)).toEqual(["app_org1_job1"]);
+    expect(await repository.findForTenant("org_002", "app_org1_job1")).toBeUndefined();
+    expect(await repository.findForTenant("org_001", "app_org1_job1")).toMatchObject({
+      candidateName: "Aditi Sharma", decision: "active", asyncStatus: "ready",
+    });
+  });
 });

@@ -9,15 +9,25 @@ export const applicationDecision = pgEnum("v2_application_decision", [
 export const interviewStage = pgEnum("v2_interview_stage", [
   "recruiter_screening", "functional_interview",
 ]);
+export const resumeAnalysisStatus = pgEnum("v2_resume_analysis_status", [
+  "not_requested", "queued", "running", "ready", "failed",
+]);
 
 export const applications = pgTable("v2_applications", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
+  jobId: text("job_id"),
+  candidateName: text("candidate_name"),
+  source: text("source"),
+  asyncStatus: resumeAnalysisStatus("resume_analysis_status").notNull().default("not_requested"),
   stage: applicationStage("stage").notNull().default("resume_analysis"),
   decision: applicationDecision("decision").notNull().default("active"),
   resumeAnalysisComplete: boolean("resume_analysis_complete").notNull().default(false),
   screeningComplete: boolean("screening_complete").notNull().default(false),
-}, (table) => [index("v2_applications_tenant_stage_idx").on(table.tenantId, table.stage)]);
+}, (table) => [
+  index("v2_applications_tenant_stage_idx").on(table.tenantId, table.stage),
+  index("v2_applications_tenant_job_idx").on(table.tenantId, table.jobId),
+]);
 
 export const applicationStageHistory = pgTable("v2_application_stage_history", {
   id: text("id").primaryKey(),

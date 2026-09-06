@@ -6,6 +6,8 @@
 | Pipeline | Hire/reject outcome separation | `dashboard/src/dashboard/api.ts`, `deep-analysis.ts` | separate `decision` contract | MIGRATED | `pipeline.test.ts`, contract test |
 | Pipeline | Tenant-scoped authoritative transition | `backend/app/routers/jobs.py` | `POST /v2/applications/:id/transitions` | MIGRATED | API + PostgreSQL integration tests |
 | Pipeline | Atomic stage history and command replay | Legacy has no equivalent history table | `v2_application_stage_history` | MIGRATED | PostgreSQL commit/rollback/replay tests |
+| Pipeline | Three-column job board read | `dashboard/src/dashboard/job-detail-panes.ts` | `GET /v2/jobs/:id/board` | MIGRATED | domain/API/PostgreSQL tenant tests |
+| Applications | Tenant-scoped application detail | `backend/app/routers/jobs.py` | `GET /v2/applications/:id` | MIGRATED | API/PostgreSQL tenant tests |
 | Interview bridge | Explicit application/session reference | legacy `backend/app/utils/ai_sync.py` relies on equal IDs | `v2_application_interview_refs` | MIGRATED | unequal-ID PostgreSQL test |
 | Voice | LiveKit/Deepgram/Silero/Cartesia runtime | `interview-engine/apps/voice-agent` | preserved legacy runtime | PRESERVED | Contract suite pending |
 | Voice | Turn idempotency | `voice-agent/src/engine-client.ts` idempotency key | Interview API compatibility | PENDING MIGRATION | Characterisation located |

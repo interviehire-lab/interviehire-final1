@@ -1,10 +1,16 @@
-import { eq } from "drizzle-orm";
-import type { ApplicationRepository, ApplicationRecord, StageHistoryRecord } from "@interviehire/domain-hiring";
+import { and, asc, eq } from "drizzle-orm";
+import type {
+  ApplicationQueryRepository,
+  ApplicationRepository,
+  ApplicationRecord,
+  ApplicationView,
+  StageHistoryRecord,
+} from "@interviehire/domain-hiring";
 import type { ApplicationStage } from "@interviehire/contracts";
 import type { HiringDatabase } from "./database";
 import { applicationStageHistory, applications } from "./schema";
 
-export class DrizzleApplicationRepository implements ApplicationRepository {
+export class DrizzleApplicationRepository implements ApplicationRepository, ApplicationQueryRepository {
   constructor(private readonly db: HiringDatabase) {}
 
   transaction<T>(work: (repository: ApplicationRepository) => Promise<T>): Promise<T> {
@@ -14,6 +20,22 @@ export class DrizzleApplicationRepository implements ApplicationRepository {
   async find(applicationId: string): Promise<ApplicationRecord | undefined> {
     const [row] = await this.db.select().from(applications).where(eq(applications.id, applicationId)).limit(1);
     return row;
+  }
+
+  async findForTenant(tenantId: string, applicationId: string): Promise<ApplicationView | undefined> {
+    const [row] = await this.db.select().from(applications).where(and(
+      eq(applications.tenantId, tenantId),
+      eq(applications.id, applicationId),
+    )).limit(1);
+    return row ? toApplicationView(row) : undefined;
+  }
+
+  async listForJob(tenantId: string, jobId: string): Promise<readonly ApplicationView[]> {
+    const rows = await this.db.select().from(applications).where(and(
+      eq(applications.tenantId, tenantId),
+      eq(applications.jobId, jobId),
+    )).orderBy(asc(applications.candidateName), asc(applications.id));
+    return rows.map(toApplicationView);
   }
 
   async updateStage(applicationId: string, stage: ApplicationStage): Promise<void> {
@@ -42,4 +64,19 @@ export class DrizzleApplicationRepository implements ApplicationRepository {
   }
 
   async recordCommand(_idempotencyKey: string): Promise<void> {}
+}
+
+type ApplicationRow = typeof applications.$inferSelect;
+
+function toApplicationView(row: ApplicationRow): ApplicationView {
+  return {
+    id: row.id,
+    jobId: row.jobId ?? "",
+    tenantId: row.tenantId,
+    candidateName: row.candidateName ?? "",
+    stage: row.stage,
+    decision: row.decision,
+    source: row.source,
+    asyncStatus: row.asyncStatus,
+  };
 }
