@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.websocket_routes import router as websocket_router
 from app.database import Base, engine
-from app.routers import jobs, team, organisation, usage, settings as settings_router, deepseek, auth, public, leaderboard, invites, privacy, internal_jobs
+from app.routers import jobs, team, organisation, usage, settings as settings_router, deepseek, auth, public, leaderboard, invites, privacy, internal_jobs, platform
 from app.talent_finder.routes import router as talent_finder_router
 
 # Import all models so SQLAlchemy registers them before create_all
@@ -55,6 +55,9 @@ def init_db():
         # VARCHAR (not the native jobtype enum) so the ALTER never depends on the
         # enum type pre-existing on already-deployed DBs; DEFAULT keeps old jobs 'hiring'.
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS job_kind VARCHAR DEFAULT 'hiring';"))
+        # Superadmin org suspension (platform.py) — same VARCHAR-not-native-enum
+        # reasoning as job_kind directly above.
+        conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'active';"))
         conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS department VARCHAR;"))
         conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS manager_name VARCHAR;"))
         conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS tenure_months INTEGER;"))
@@ -227,6 +230,7 @@ app.include_router(invites.router,          prefix="/api/invites", tags=["Invite
 app.include_router(invites.public_link_router, tags=["Invites"])  # public GET /i/{token}
 app.include_router(privacy.router,          prefix="/api/privacy", tags=["Privacy / Data Rights"])
 app.include_router(internal_jobs.router,    prefix="/api/internal", tags=["Internal Jobs"])
+app.include_router(platform.router,         prefix="/api/platform", tags=["Platform"])
 
 
 @app.get("/")

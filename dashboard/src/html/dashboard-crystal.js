@@ -86,6 +86,26 @@ export const html = `
                 <li data-subtab="settings-general">General Settings</li>
               </ul>
             </li>
+            <!-- Super-admin only (revealed by JS, see platform-nav.ts) -->
+            <li class="nav-item has-sub" data-tab="platform" id="nav-item-platform" style="display:none;">
+              <div class="nav-item-header">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2 3 7v6c0 5 4 9 9 9s9-4 9-9V7z"></path>
+                </svg>
+                <span>Platform</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </div>
+              <ul class="sub-nav">
+                <li data-subtab="platform-overview">Overview</li>
+                <li data-subtab="platform-organisations">Organisations</li>
+                <li data-subtab="platform-users">Users</li>
+                <li data-subtab="platform-jobs">Jobs</li>
+                <li data-subtab="platform-interviews">Interviews</li>
+                <li data-subtab="platform-audit">Audit Log</li>
+              </ul>
+            </li>
           </ul>
         </nav>
 
@@ -707,6 +727,52 @@ export const html = `
               </div>
 
             </div>
+          </section>
+
+          <!-- ===================================== -->
+          <!-- PLATFORM VIEWS (SUPER-ADMIN SUBTABS) -->
+          <!-- ===================================== -->
+          <section class="dashboard-view" id="view-platform-overview">
+            <section class="card-glass">
+              <h3 class="panel-title">Platform Overview</h3>
+              <p class="panel-desc">Counts and recent activity across every organisation on the platform.</p>
+              <div id="platform-overview-content"></div>
+            </section>
+          </section>
+          <section class="dashboard-view" id="view-platform-organisations">
+            <section class="card-glass">
+              <h3 class="panel-title">All Organisations</h3>
+              <p class="panel-desc">Every organisation on the platform. Suspending one blocks its members immediately.</p>
+              <div id="platform-organisations-content"></div>
+            </section>
+          </section>
+          <section class="dashboard-view" id="view-platform-users">
+            <section class="card-glass">
+              <h3 class="panel-title">All Users</h3>
+              <p class="panel-desc">Every user across every organisation. Role changes and invites stay on each org's own Team tab.</p>
+              <div id="platform-users-content"></div>
+            </section>
+          </section>
+          <section class="dashboard-view" id="view-platform-jobs">
+            <section class="card-glass">
+              <h3 class="panel-title">All Jobs</h3>
+              <p class="panel-desc">Every job across every organisation. Open an organisation to edit its jobs.</p>
+              <div id="platform-jobs-content"></div>
+            </section>
+          </section>
+          <section class="dashboard-view" id="view-platform-interviews">
+            <section class="card-glass">
+              <h3 class="panel-title">All Interviews</h3>
+              <p class="panel-desc">Every interview session across every organisation.</p>
+              <div id="platform-interviews-content"></div>
+            </section>
+          </section>
+          <section class="dashboard-view" id="view-platform-audit">
+            <section class="card-glass">
+              <h3 class="panel-title">Audit Log</h3>
+              <p class="panel-desc">Every action taken from this Platform tab — organisation and user status changes.</p>
+              <div id="platform-audit-content"></div>
+            </section>
           </section>
 
           <!-- ===================================== -->

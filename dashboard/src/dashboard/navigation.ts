@@ -20,6 +20,14 @@ import { renderTalentFinderPane } from './talent-finder-panel';
 import { renderAnalyticsTable, renderJobCards, renderTeamTable, hydrateUsageAnalytics } from './render-views';
 import { renderCareerJobs } from './career-panel';
 import { renderDataRights } from './data-rights-panel';
+import {
+  renderPlatformOverview,
+  renderPlatformOrganisations,
+  renderPlatformUsers,
+  renderPlatformJobs,
+  renderPlatformInterviews,
+  renderPlatformAuditLog,
+} from './platform-panel';
 import { soundEngine } from './sound';
 import { syncSettingsControls } from './settings-page';
 import { AppState, generateJobId } from './state';
@@ -327,20 +335,31 @@ If you need more info, respond ONLY with this JSON (no extra text):
 const createJobUpload = { fileName: null, text: null, file: null };
 
 function navigateToSubtab(subtabId) {
-  AppState.activeTab = 'settings';
+  // Derive the parent tab from the subtab id's own prefix ('settings-general' ->
+  // 'settings', 'platform-overview' -> 'platform') instead of hardcoding 'settings' —
+  // this only works because every has-sub parent tab id today is a single word with
+  // no internal hyphen; if that ever changes, this needs a real lookup table instead.
+  const parentTab = subtabId.split('-')[0];
+  AppState.activeTab = parentTab;
   AppState.activeSubtab = subtabId;
 
   const SUBTAB_URLS = {
     'settings-general': '/dashboard/settings/general',
+    'platform-overview': '/dashboard/platform/overview',
+    'platform-organisations': '/dashboard/platform/organisations',
+    'platform-users': '/dashboard/platform/users',
+    'platform-jobs': '/dashboard/platform/jobs',
+    'platform-interviews': '/dashboard/platform/interviews',
+    'platform-audit': '/dashboard/platform/audit',
   };
   const url = SUBTAB_URLS[subtabId];
   if (url) {
     pushUrl(url);
   }
 
-  // Make sure settings parent menu node is visually highlighted and open
+  // Make sure the parent menu node is visually highlighted and open
   document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
-    if (item.getAttribute('data-tab') === 'settings') {
+    if (item.getAttribute('data-tab') === parentTab) {
       item.classList.add('active');
       item.classList.add('open');
     } else {
@@ -375,6 +394,48 @@ function navigateToSubtab(subtabId) {
     subText.textContent = 'Manage your account, notifications, and preferences';
     document.getElementById('view-settings-general').classList.add('active-view');
     syncSettingsControls();
+    soundEngine.playChime([261.63, 293.66, 329.63], 0.1, 0.08);
+  } else if (subtabId === 'platform-overview') {
+    breadcrumb.textContent = 'Platform';
+    mainTitle.textContent = 'Platform Overview';
+    subText.textContent = 'Counts and recent activity across every organisation';
+    document.getElementById('view-platform-overview').classList.add('active-view');
+    renderPlatformOverview();
+    soundEngine.playChime([261.63, 293.66, 329.63], 0.1, 0.08);
+  } else if (subtabId === 'platform-organisations') {
+    breadcrumb.textContent = 'Platform';
+    mainTitle.textContent = 'All Organisations';
+    subText.textContent = 'Every organisation on the platform';
+    document.getElementById('view-platform-organisations').classList.add('active-view');
+    renderPlatformOrganisations();
+    soundEngine.playChime([261.63, 293.66, 329.63], 0.1, 0.08);
+  } else if (subtabId === 'platform-users') {
+    breadcrumb.textContent = 'Platform';
+    mainTitle.textContent = 'All Users';
+    subText.textContent = 'Every user across every organisation';
+    document.getElementById('view-platform-users').classList.add('active-view');
+    renderPlatformUsers();
+    soundEngine.playChime([261.63, 293.66, 329.63], 0.1, 0.08);
+  } else if (subtabId === 'platform-jobs') {
+    breadcrumb.textContent = 'Platform';
+    mainTitle.textContent = 'All Jobs';
+    subText.textContent = 'Every job across every organisation';
+    document.getElementById('view-platform-jobs').classList.add('active-view');
+    renderPlatformJobs();
+    soundEngine.playChime([261.63, 293.66, 329.63], 0.1, 0.08);
+  } else if (subtabId === 'platform-interviews') {
+    breadcrumb.textContent = 'Platform';
+    mainTitle.textContent = 'All Interviews';
+    subText.textContent = 'Every interview session across every organisation';
+    document.getElementById('view-platform-interviews').classList.add('active-view');
+    renderPlatformInterviews();
+    soundEngine.playChime([261.63, 293.66, 329.63], 0.1, 0.08);
+  } else if (subtabId === 'platform-audit') {
+    breadcrumb.textContent = 'Platform';
+    mainTitle.textContent = 'Audit Log';
+    subText.textContent = 'Every action taken from this Platform tab';
+    document.getElementById('view-platform-audit').classList.add('active-view');
+    renderPlatformAuditLog();
     soundEngine.playChime([261.63, 293.66, 329.63], 0.1, 0.08);
   }
 }

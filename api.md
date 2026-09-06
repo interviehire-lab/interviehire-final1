@@ -6,6 +6,8 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-06** — **`get_current_user` (`backend/app/utils/auth.py`) now revokes access mid-session, not just at login — a shared-dependency behavior change affecting EVERY authenticated route in the API, not only the new Platform routes documented in the entry directly below.** Two new checks run on **every** authenticated request (not just `/api/auth/login`): (a) **403** `"This account has been suspended."` when the resolved `User.status == UserStatus.inactive`; (b) for a user who belongs to an organisation and is **not** a `super_admin`, **403** `"This organisation has been suspended."` when that org's `Organisation.status == OrganisationStatus.suspended` (super_admins are exempt from check (b) — they may carry an incidental `organisation_id` but are never blocked by their own org's status). Because both checks run inside `get_current_user` itself (the dependency nearly every route depends on), suspending a user or their whole organisation via the new `PATCH /api/platform/users/{user_id}/status` / `PATCH /api/platform/organisations/{org_id}` routes below **revokes an already-issued session immediately** — the very next request 403s, mid-cookie-lifetime — rather than only blocking a future login; reactivating (status flipped back to `active`) is likewise picked up on the next request with no re-login required. Verified live: an existing session was blocked mid-request in both the user-suspended and org-suspended cases, then recovered without re-login on reactivation. **No request/response schema changed on any existing route** — this only adds two new possible 403 outcomes to the shared auth dependency.
+- **2026-09-06** — **New super_admin-only Platform Admin surface: `backend/app/routers/platform.py`, mounted in `main.py` as `app.include_router(platform.router, prefix="/api/platform", tags=["Platform"])`** — the real, fleshed-out replacement for the `GET /api/admin/overview` placeholder added and then pulled back out earlier the same day (two entries below); documented in full below under a new `backend/app/routers/platform.py` section (placed near `organisation.py`/`team.py`). Every route is gated by a new `require_super_admin` dependency (`backend/app/utils/auth.py`: wraps `get_current_user`, **403** `{"detail": "Only Super Admins can access this."}` when `current_user.user_type != UserType.super_admin`). Every **list** route is paginated — `limit` (query, default 50, clamped to `[1, 200]` via the module's `_clamp_limit()`) and `offset` (query, default 0, **not** clamped) — and returns `{total, limit, offset, <items key>: [...]}`. **New routes:** **GET /api/platform/overview** (platform-wide counts + a per-org table — the one view that aggregates across every organisation at once); **GET /api/platform/organisations** (paginated cross-org list with `job_count`/`user_count` per org — **deliberately separate from, and NOT a replacement for, the pre-existing `GET /api/auth/organisations`**, which stays a bare unpaginated list feeding only the super_admin org-switcher dropdown and carries no counts); **PATCH /api/platform/organisations/{org_id}?status=active|suspended** (the only new organisation field — see below); **GET /api/platform/users** (paginated cross-org user list, joined to organisation name; role/invite/removal stay on the existing org-scoped Team tab); **PATCH /api/platform/users/{user_id}/status?status=active|inactive** (a super_admin cannot change their own status — **400**); **GET /api/platform/jobs** (paginated cross-org job list with organisation name + per-job applicant count); **GET /api/platform/interviews** (paginated cross-org interview/session list — **read-only**, deliberately does NOT replicate `usage.py`'s `/candidates-table` mutating `InterviewSession`→`Applicant` sync loop platform-wide; it reads whatever's already synced onto `Applicant` plus a read-only `InterviewSession` lookup for `session_status`); **GET /api/platform/audit-log** (paginated read of `ComplianceAuditLog` filtered to `actor_type == 'admin'` — the read-side companion to the two PATCH routes' `record_audit()` calls, `action="platform.organisation.status_changed"` / `"platform.user.status_changed"`). **New model field:** `Organisation.status` (`backend/app/models/organisation.py`), backed by a new `OrganisationStatus` enum (`active | suspended` — **no `deleted`**: an org cascades to jobs/users/applicants/sessions across three services, so there is no soft-delete concept for organisations anywhere in this codebase). The column is added via `main.py:init_db()` as a plain **VARCHAR** (`ALTER TABLE organisations ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'active';`), not a native Postgres enum type — same precedent and reasoning as the existing `jobs.job_kind` column (avoids an `ALTER TYPE`/`CREATE TYPE` dependency on already-deployed databases); the SQLAlchemy model still declares it `Column(Enum(OrganisationStatus), ...)` for ORM-level typing, same as `job_kind`. Setting `status=suspended` here is enforced immediately, not just at next login — see the `get_current_user` entry directly above. **Dashboard plumbing (not a backend route):** `dashboard/next.config.js`'s `BACKEND_API_PREFIXES` gained `'platform'`, so the dashboard's relative-`NEXT_PUBLIC_API_URL` local-dev proxy forwards `/api/platform/*` to the backend like every other prefix.
 - **2026-09-06** — **Removed GET /api/admin/overview and the whole `backend/app/routers/admin.py` router** (added earlier the same day, entry directly below) — the user asked for it to be pulled back out pending more design work before a superadmin dashboard ships for real. `main.py` no longer imports or mounts `admin`; the frontend's `/admin` page, `AdminShell.js`, and `apiGetAdminOverview()` are removed too, along with the header's "Super Admin" nav link and its `next.config.js` proxy-allowlist entry. The underlying `super_admin` role and the pre-existing `GET /api/auth/organisations` / `POST /api/auth/switch-context` endpoints (which predate this session) are untouched — only the new platform-overview endpoint added below is gone.
 - **2026-09-06** — **Documentation-only fix: `INTERVIEW_ROOM_URL`'s doc-comment in `backend/app/config.py` was stale.** The comment above the setting still described the link as built as `{INTERVIEW_ROOM_URL}/interview?sessionId=…`, left over from before the candidate-room path was renamed; the actual code (here and in `app/routers/public.py`'s reschedule/confirm link-building) has built it as `{INTERVIEW_ROOM_URL}/interviewcandidateroom?sessionId=…` for a while. Comment corrected to match; **no route path, default value, or response schema changed** — do not read this as a route rename.
 - **2026-09-06** — **New super_admin-only platform overview endpoint.** Added **GET /api/admin/overview** (new `backend/app/routers/admin.py`, mounted in `main.py` at prefix `/api/admin`) — no existing endpoint aggregated stats across every organisation (the regular dashboard, and even a super_admin's own view via `get_active_org_id`, is always scoped to one organisation at a time). Gated by the same `user_type != UserType.super_admin` → **403** check already used by `GET /api/auth/organisations`/`POST /api/auth/switch-context`. Returns platform-wide counts (organisations/users/jobs/published jobs/applicants), a per-organisation table (id/name/created_at/job_count), and the 10 most-recently-created users. Documented below under a new `backend/app/routers/admin.py` section.
@@ -67,7 +69,7 @@
 - **Backend — FastAPI** runs on **port `8000`**; all HTTP routes are mounted under the **`/api`** prefix (e.g. `/api/auth`, `/api/jobs`). Its WebSocket route (`/ws`) is mounted with **no prefix** (root).
 - **Interview Engine — Fastify** runs on **port `4000`** (host `0.0.0.0`, `PORT` env override). Per-module prefixes: `companyRoutes → /api/company`, `interviewRoutes → /api/interview`, `transcriptRoutes → /api/interviews`, `assistantRoutes → /api/assistant`. The health check (`/health`) and the WebSocket gateway (`/ws`) are at the **root** (no `/api` prefix).
 - **Dashboard — Next route handlers** run on **port `3000`**, under `dashboard/app/api/*` (e.g. `/api/parse-file`, `/api/fetch-doc`, `/api/deepseek`).
-- **Auth model:** Backend authentication uses a **JWT in an httpOnly cookie** named `token`, valid for **7 days** (`max_age=604800s`). The token may also be supplied via an `Authorization: Bearer <jwt>` header. Super Admins additionally carry an `active_org_id` cookie that selects the active organisation context. Interview-engine and dashboard routes are largely public (no user auth); they rely on global rate limiting and/or server-side API keys.
+- **Auth model:** Backend authentication uses a **JWT in an httpOnly cookie** named `token`, valid for **7 days** (`max_age=604800s`). The token may also be supplied via an `Authorization: Bearer <jwt>` header. Super Admins additionally carry an `active_org_id` cookie that selects the active organisation context. Interview-engine and dashboard routes are largely public (no user auth); they rely on global rate limiting and/or server-side API keys. **(2026-09-06)** `get_current_user` also re-checks, on every authenticated request, that the user isn't suspended (`User.status == inactive` → 403) and — for non-super_admins — that their organisation isn't suspended (`Organisation.status == suspended` → 403); see the changelog entry for details. `require_super_admin` (`backend/app/utils/auth.py`) wraps `get_current_user` and additionally gates on `user_type == UserType.super_admin`, else 403 `{"detail": "Only Super Admins can access this."}` — used by `GET /api/auth/organisations`, `POST /api/auth/switch-context`, and every route in `backend/app/routers/platform.py`.
 - **WebSocket endpoints** are denoted with the pseudo-method **`WS`** and collected in the final **WebSocket Endpoints** section. All WS frames are JSON text.
 
 ---
@@ -1411,6 +1413,268 @@ Response:
 Status codes: 200 OK; 401 (from get_current_user); 400 'No active organisation context.' (no resolvable org_id); 422 validation error (missing file).
 
 Notes: Plain dict (no response_model). File written to UPLOAD_DIR='uploads/logos' as `{UPLOAD_DIR}/{file.filename}` via shutil.copyfileobj — original client filename used verbatim (no sanitization/uniqueness; same-named uploads overwrite). If org row exists, org.logo_url set and committed; if not, file saved + path returned but nothing persisted (silent no-op). Returned logo_url is a local relative server path, not a public URL.
+
+### `backend/app/routers/platform.py`
+
+Super_admin-only, platform-wide (cross-organisation) admin surface — added **2026-09-06**, mounted in `main.py` at prefix `/api/platform`. Every route below requires `Depends(require_super_admin)` (`backend/app/utils/auth.py`): **401** if not authenticated at all (from the underlying `get_current_user`), **403** `{"detail": "Only Super Admins can access this."}` if authenticated but `current_user.user_type != UserType.super_admin`. All handlers return plain dicts (no `response_model`). Every **list** route below shares the same pagination convention: query params `limit` (default `50`, clamped via `_clamp_limit()` to `max(1, min(limit, 200))` — so an out-of-range `limit` is silently clamped, never rejected) and `offset` (default `0`, **not** clamped — passed straight through to the SQL `OFFSET`); the response always wraps its item list as `{"total": <int>, "limit": <int>, "offset": <int>, "<items_key>": [...]}`, where `total` is a separate unpaginated `COUNT`, not `len(items)`.
+
+#### GET /api/platform/overview
+
+Platform-wide counts plus a per-organisation table — the one view that isn't scoped to a single organisation at a time (every other view, including a super_admin's own via `get_active_org_id`, is scoped to exactly one org).
+
+- **Auth:** `require_super_admin` (see above).
+- **Path params:** none
+- **Query params:** none (this route is **not** paginated — `organisations` below always returns every org in one shot)
+
+Request: none
+
+Response:
+```json
+{
+  "organisation_count": 0,
+  "user_count": 0,
+  "job_count": 0,
+  "published_job_count": 0,
+  "applicant_count": 0,
+  "organisations": [
+    {
+      "id": "uuid",
+      "name": "string",
+      "status": "active | suspended",
+      "created_at": "datetime ISO8601 | null",
+      "job_count": 0
+    }
+  ]
+}
+```
+
+Status codes: 200 OK; 401 (not authenticated); 403 (authenticated, not super_admin).
+
+Notes: `organisation_count`/`user_count`/`job_count`/`applicant_count` are plain `COUNT(*)` over the whole table; `published_job_count` filters `Job.status == "published"`. `organisations` is every org (no limit/offset), ordered by `created_at DESC`, with `job_count` = count of distinct `Job` rows outer-joined on `organisation_id` (0 for an org with no jobs). `status` is read off `Organisation.status` and falls back to the literal string `"active"` if the column value is falsy (defensive against a pre-migration NULL row); the raw column is an `OrganisationStatus` enum member, unwrapped via `.value`.
+
+#### GET /api/platform/organisations
+
+Paginated cross-org organisation list with `job_count`/`user_count` per org.
+
+- **Auth:** `require_super_admin`.
+- **Path params:** none
+- **Query params:** `limit` (int, optional, default 50), `offset` (int, optional, default 0) — see pagination convention above.
+
+**Distinction from `GET /api/auth/organisations` (documented above, under `auth.py`):** that route predates this one, stays a bare unpaginated list (no `job_count`/`user_count`/`status`/`contact_email`) feeding **only** the super_admin org-switcher dropdown, and is **not replaced or duplicated** by this route — this one is the richer, paginated, admin-table view.
+
+Request: none
+
+Response:
+```json
+{
+  "total": 0,
+  "limit": 50,
+  "offset": 0,
+  "organisations": [
+    {
+      "id": "uuid",
+      "name": "string",
+      "status": "active | suspended",
+      "contact_email": "string | null",
+      "created_at": "datetime ISO8601 | null",
+      "job_count": 0,
+      "user_count": 0
+    }
+  ]
+}
+```
+
+Status codes: 200 OK; 401; 403.
+
+Notes: `total` = unpaginated `COUNT(Organisation.id)`. Rows outer-join both `Job` and `User` on `organisation_id` and `GROUP BY Organisation.id` to get `job_count`/`user_count` in one query, ordered by `created_at DESC`, then `LIMIT`/`OFFSET`. `status` normalized the same way as `GET /api/platform/overview` (`.value` if it's an enum member, else the raw value, falling back to `"active"` if falsy).
+
+#### PATCH /api/platform/organisations/{org_id}
+
+Set an organisation's status — the only platform-level organisation field; every other org field (logo, career page, application questions) already has its own validated edit surface at `PUT /api/organisation` and is not duplicated here.
+
+- **Auth:** `require_super_admin`.
+- **Path params:** `org_id: UUID` (required)
+- **Query params:** `status: str` (required — FastAPI `Query(..., pattern="^(active|suspended)$")`; any other value → 422)
+
+Request: none (status is a query param, not a body)
+
+Response:
+```json
+{
+  "id": "uuid",
+  "status": "active | suspended"
+}
+```
+
+Status codes: 200 OK; 401; 403; 404 `"Organisation not found."` (no `Organisation` row for `org_id`); 422 (missing/invalid `status`).
+
+Notes: writes `org.status = OrganisationStatus(status)` and commits, then calls `record_audit(db, action="platform.organisation.status_changed", actor_type=AuditActorType.admin, actor_id=str(current_user.id), organisation_id=org_id, entity_type="organisation", entity_id=org_id, detail={"old_status", "new_status"})` (see `GET /api/platform/audit-log` below for how this surfaces). There is deliberately no `"deleted"` value — organisations have no soft-delete concept anywhere in this codebase (an org cascades to jobs/users/applicants/sessions across all three services). Setting `status=suspended` takes effect immediately, not just at next login: `get_current_user` (`backend/app/utils/auth.py`) checks `Organisation.status` on every authenticated request for non-super_admin members of that org and 403s them mid-session (see the **2026-09-06** changelog entry / the Conventions "Auth model" note above) — reverting to `active` restores access on the member's very next request, no re-login needed.
+
+#### GET /api/platform/users
+
+Paginated cross-org user list, joined to organisation name.
+
+- **Auth:** `require_super_admin`.
+- **Path params:** none
+- **Query params:** `limit` (default 50), `offset` (default 0).
+
+Request: none
+
+Response:
+```json
+{
+  "total": 0,
+  "limit": 50,
+  "offset": 0,
+  "users": [
+    {
+      "id": "uuid",
+      "name": "string",
+      "email": "string",
+      "user_type": "super_admin | org_admin | member | null",
+      "status": "active | invited | inactive | null",
+      "organisation_id": "uuid | null",
+      "organisation_name": "string | null",
+      "created_at": "datetime ISO8601 | null"
+    }
+  ]
+}
+```
+
+Status codes: 200 OK; 401; 403.
+
+Notes: `total` = unpaginated `COUNT(User.id)` (every user, all orgs). Rows outer-join `Organisation` on `User.organisation_id`, ordered by `User.created_at DESC`. `user_type`/`status` are `.value`-unwrapped enums, `null` if the column itself is null. Role changes, invites, and removal stay on the existing org-scoped Team tab (`backend/app/routers/team.py`, requires switching active-org context first) — this route (plus the status PATCH below) is the only cross-org user surface.
+
+#### PATCH /api/platform/users/{user_id}/status
+
+Set a user's status to active or inactive.
+
+- **Auth:** `require_super_admin`.
+- **Path params:** `user_id: UUID` (required)
+- **Query params:** `status: str` (required — `Query(..., pattern="^(active|inactive)$")`; note this endpoint does **not** accept `"invited"`, only toggling `active`/`inactive`)
+
+Request: none (status is a query param, not a body)
+
+Response:
+```json
+{
+  "id": "uuid",
+  "status": "active | inactive"
+}
+```
+
+Status codes: 200 OK; 401; 403; 400 `"You cannot change your own status."` (`user_id == current_user.id`); 404 `"User not found."`; 422 (missing/invalid `status`).
+
+Notes: writes `user.status = UserStatus(status)` and commits, then `record_audit(db, action="platform.user.status_changed", actor_type=AuditActorType.admin, actor_id=str(current_user.id), organisation_id=user.organisation_id, entity_type="user", entity_id=user_id, detail={"old_status", "new_status", "email"})`. Same immediate-revocation behavior as the organisation PATCH above: setting `status=inactive` is enforced by `get_current_user` on the very next request from that user's existing session (403 `"This account has been suspended."`), not just at next login.
+
+#### GET /api/platform/jobs
+
+Paginated cross-org job list with organisation name and applicant count.
+
+- **Auth:** `require_super_admin`.
+- **Path params:** none
+- **Query params:** `limit` (default 50), `offset` (default 0).
+
+Request: none
+
+Response:
+```json
+{
+  "total": 0,
+  "limit": 50,
+  "offset": 0,
+  "jobs": [
+    {
+      "id": "uuid",
+      "title": "string",
+      "role_name": "string",
+      "status": "published | draft | archived | null",
+      "organisation_id": "uuid | null",
+      "organisation_name": "string | null",
+      "applicant_count": 0,
+      "created_at": "datetime ISO8601 | null"
+    }
+  ]
+}
+```
+
+Status codes: 200 OK; 401; 403.
+
+Notes: `total` = unpaginated `COUNT(Job.id)` (every job, all orgs). Rows outer-join `Organisation`, ordered by `Job.created_at DESC`, then `LIMIT`/`OFFSET`. `applicant_count` is computed in a **second** query, grouped `COUNT(Applicant.id)` by `job_id`, restricted to only the job ids on the current page (not a global per-job count across all pages) — jobs with no applicants get `0` via a dict `.get(job.id, 0)` default. Read-only: editing a job (blueprints, pipeline config) stays behind switch-context on that org's own Jobs tab — deliberately not duplicated as a second edit surface here.
+
+#### GET /api/platform/interviews
+
+Paginated cross-org interview/session list — read-only, no write-back.
+
+- **Auth:** `require_super_admin`.
+- **Path params:** none
+- **Query params:** `limit` (default 50), `offset` (default 0).
+
+Request: none
+
+Response:
+```json
+{
+  "total": 0,
+  "limit": 50,
+  "offset": 0,
+  "interviews": [
+    {
+      "applicant_id": "uuid",
+      "candidate_name": "string",
+      "candidate_email": "string",
+      "job_title": "string",
+      "organisation_id": "uuid | null",
+      "organisation_name": "string | null",
+      "screening_status": "pending | scheduled | completed | slot_missed | incomplete | null",
+      "screening_score": "float | null",
+      "functional_status": "pending | scheduled | completed | slot_missed | incomplete | null",
+      "functional_score": "float | null",
+      "session_status": "SCHEDULED | IN_PROGRESS | COMPLETED | EVALUATED | CANCELLED | null",
+      "attempted_at": "datetime ISO8601 | null"
+    }
+  ]
+}
+```
+
+Status codes: 200 OK; 401; 403.
+
+Notes: base query joins `Applicant` to `Job` (inner) and `Organisation` (outer), filtered to `Applicant.screening_status IS NOT NULL OR Applicant.functional_status IS NOT NULL`, ordered by `Applicant.attempted_at DESC NULLS LAST`. **`total` is computed from that same filter before test-applicant exclusion**, while the returned page additionally drops test applicants (`_is_test_applicant`, imported from `app/routers/jobs.py`) **after** the `LIMIT`/`OFFSET` slice — so on a page that happens to contain a test applicant, the returned `interviews` array can be shorter than `limit`, and `total` can be slightly higher than the true count of real applicants (same caveat applies wherever this pattern of post-slice filtering is used elsewhere in the codebase). `session_status` is a **read-only** lookup into the interview-engine's shared `InterviewSession` table, keyed by `InterviewSession.id == str(Applicant.id)` (the same session-id-equals-applicant-id shared-table pattern documented in `CLAUDE.md`) — unlike `usage.py`'s `/candidates-table`, this route does **not** sync/write back onto `Applicant`, to avoid racing that route's own sync loop platform-wide.
+
+#### GET /api/platform/audit-log
+
+Paginated read of the compliance audit log, filtered to admin-actor entries.
+
+- **Auth:** `require_super_admin`.
+- **Path params:** none
+- **Query params:** `limit` (default 50), `offset` (default 0).
+
+Request: none
+
+Response:
+```json
+{
+  "total": 0,
+  "limit": 50,
+  "offset": 0,
+  "entries": [
+    {
+      "id": "uuid",
+      "action": "string",
+      "actor_id": "string | null",
+      "organisation_id": "uuid | null",
+      "entity_type": "string | null",
+      "entity_id": "string | null",
+      "detail": "object | null",
+      "created_at": "datetime ISO8601 | null"
+    }
+  ]
+}
+```
+
+Status codes: 200 OK; 401; 403.
+
+Notes: queries `ComplianceAuditLog` filtered to `actor_type == AuditActorType.admin` only — this is the read-side companion to the two PATCH routes above (`record_audit()` already wrote those rows to the pre-existing DPDP-compliance audit log; other actor types — `candidate`/`recruiter`/`system` — are excluded here, not just admin-filtered incidentally). `total` = unpaginated `COUNT` of that filtered query; rows ordered by `created_at DESC`. `detail` is the raw `JSONB` column value (whatever dict `record_audit` was called with, e.g. `{"old_status", "new_status"[, "email"]}`).
 
 ### `backend/app/routers/usage.py`
 

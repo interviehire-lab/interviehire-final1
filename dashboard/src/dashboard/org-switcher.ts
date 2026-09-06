@@ -120,3 +120,13 @@ export async function initOrgSwitcher() {
     showPremiumToast((err && err.message) || 'Could not load organisations.', 'error');
   }
 }
+
+// Same one-time hide-then-reveal pattern as initOrgSwitcher above, for the
+// Platform sidebar tab. Called eagerly (hides by default, before /me resolves)
+// and re-invoked once user.user_type is actually known — see mount.ts and
+// DashboardShell.js for both call sites.
+export function initPlatformTabVisibility(): void {
+  const navItem = document.getElementById('nav-item-platform');
+  if (!navItem) return;
+  navItem.style.display = window.IH_USER_TYPE === 'super_admin' ? '' : 'none';
+}

@@ -16,7 +16,7 @@ if (backendOrigin && !/^https?:\/\//i.test(backendOrigin)) {
 
 const BACKEND_API_PREFIXES = [
   'auth', 'jobs', 'team', 'organisation', 'usage', 'settings', 'public', 'leaderboard',
-  'talent-finder', 'privacy', 'invites',
+  'talent-finder', 'privacy', 'invites', 'platform',
 ];
 
 // The interview room lives on the `interview.interviehire.com` subdomain, but

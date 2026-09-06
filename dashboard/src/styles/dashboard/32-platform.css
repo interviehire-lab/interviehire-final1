@@ -1,0 +1,45 @@
+/* Superadmin "Platform" tab — overview stat cards + row-action buttons shared
+   across the organisations/users/jobs/interviews sub-tabs. */
+
+.platform-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.platform-stat-card {
+  padding: 16px 18px;
+}
+.platform-stat-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+.platform-stat-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.platform-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.platform-row-actions .btn-remarks {
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.platform-audit-detail {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 320px;
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+}

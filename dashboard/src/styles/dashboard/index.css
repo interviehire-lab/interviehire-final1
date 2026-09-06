@@ -29,6 +29,7 @@
 @import './29-blueprint-studio.css';
 @import './30-candidate-intelligence.css';
 @import './31-test-interview.css';
+@import './32-platform.css';
 
 /* Dummy CSS to prevent Turbopack parser EOF issue */
 .dashboard-turbopack-fix { content: ''; }

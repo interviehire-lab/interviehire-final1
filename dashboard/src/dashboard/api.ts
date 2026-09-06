@@ -723,3 +723,30 @@ export async function apiUpdatePreferences(data) {
     return null;
   }
 }
+
+// ── Platform (superadmin-only, 403s server-side otherwise) ─────────────────
+// backend/app/routers/platform.py. Every list is cross-org and paginated.
+export async function apiGetPlatformOverview() {
+  return request('/platform/overview');
+}
+export async function apiGetPlatformOrganisations(limit = 50, offset = 0) {
+  return request(`/platform/organisations?limit=${limit}&offset=${offset}`);
+}
+export async function apiSetPlatformOrganisationStatus(orgId: string, status: 'active' | 'suspended') {
+  return request(`/platform/organisations/${orgId}?status=${encodeURIComponent(status)}`, { method: 'PATCH' });
+}
+export async function apiGetPlatformUsers(limit = 50, offset = 0) {
+  return request(`/platform/users?limit=${limit}&offset=${offset}`);
+}
+export async function apiSetPlatformUserStatus(userId: string, status: 'active' | 'inactive') {
+  return request(`/platform/users/${userId}/status?status=${encodeURIComponent(status)}`, { method: 'PATCH' });
+}
+export async function apiGetPlatformJobs(limit = 50, offset = 0) {
+  return request(`/platform/jobs?limit=${limit}&offset=${offset}`);
+}
+export async function apiGetPlatformInterviews(limit = 50, offset = 0) {
+  return request(`/platform/interviews?limit=${limit}&offset=${offset}`);
+}
+export async function apiGetPlatformAuditLog(limit = 50, offset = 0) {
+  return request(`/platform/audit-log?limit=${limit}&offset=${offset}`);
+}

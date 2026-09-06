@@ -21,7 +21,7 @@ import { initSourcing, navigateToSourcing, showPremiumToast } from './sourcing';
 import { renderSpotlightResults, SpotlightCommands, spotlightUi, toggleSpotlightModal } from './spotlight';
 import { AppState, generateJobId } from './state';
 import { apiCreateJob, apiPatchJobParameters, apiDeleteJob, apiUpdateJobStatus, apiSetJobListed, apiDuplicateJob, apiPatchJobSettings, apiGetOrganisation, apiUpdateOrganisation, apiInviteMember, isApiMode, getDataSource } from './api';
-import { initOrgSwitcher } from './org-switcher';
+import { initOrgSwitcher, initPlatformTabVisibility } from './org-switcher';
 import { initSettingsPage, syncSettingsControls } from './settings-page';
 import { renderCareerJobs } from './career-panel';
 import { renderOrgApplicationQuestions } from './application-questions-editor';
@@ -40,6 +40,9 @@ function initMountBindings() {
   // it once /me has set the role globals, and try once now (no-op until known).
   window.__ihInitOrgSwitcher = initOrgSwitcher;
   initOrgSwitcher();
+  // Same pattern for the Platform sidebar tab.
+  window.__ihInitPlatformTabVisibility = initPlatformTabVisibility;
+  initPlatformTabVisibility();
   // Lets DashboardShell refresh the settings email/toggles once /me sets the globals,
   // even when the settings view is already open on initial load.
   window.__ihSyncSettings = syncSettingsControls;
@@ -72,8 +75,9 @@ function initMountBindings() {
     item.addEventListener('click', (e) => {
       const tabId = item.getAttribute('data-tab');
       
-      // If clicking settings, toggle subnav but don't navigate directly unless subnav is clicked
-      if (tabId === 'settings') {
+      // If clicking a tab with its own sub-nav (Settings, Platform), toggle it open
+      // instead of navigating directly — navigation happens when a sub-item is clicked.
+      if (item.classList.contains('has-sub')) {
         e.stopPropagation();
         item.classList.toggle('open');
         soundEngine.playClick();

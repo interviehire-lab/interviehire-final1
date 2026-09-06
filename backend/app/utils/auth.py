@@ -8,7 +8,7 @@ from uuid import UUID
 
 from app.config import settings
 from app.database import get_db
-from app.models.user import User, UserType
+from app.models.user import User, UserStatus, UserType
 
 import bcrypt
 
@@ -84,7 +84,36 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    # A superadmin can suspend a user OR their whole organisation mid-session (see
+    # platform.py) — either must actually revoke access, not just block a future
+    # login, or an already-issued cookie would keep working for up to
+    # ACCESS_TOKEN_EXPIRE_DAYS regardless. Checked here (every authenticated
+    # request), not just at login.
+    if user.status == UserStatus.inactive:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been suspended.",
+        )
+    # super_admins have no organisation_id (or one only incidentally), so this
+    # never blocks them.
+    if user.organisation_id and user.user_type != UserType.super_admin:
+        from app.models.organisation import Organisation, OrganisationStatus
+        org = db.query(Organisation).filter(Organisation.id == user.organisation_id).first()
+        if org and org.status == OrganisationStatus.suspended:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This organisation has been suspended.",
+            )
     return user
+
+
+def require_super_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.user_type != UserType.super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Admins can access this.",
+        )
+    return current_user
 
 
 def get_active_org_id(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Optional[UUID]:

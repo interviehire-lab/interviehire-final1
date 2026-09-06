@@ -127,7 +127,17 @@ function navigateToPath(path) {
 		}
 	} else if (sub === "settings") {
 		window.navigateToSubtab?.("settings-general");
-	} else if (["analytics", "swarm", "talent", "team", "career"].includes(sub)) {
+	} else if (sub === "platform") {
+		// Platform has six sub-tabs (unlike Settings' one), so the third path
+		// segment picks which one — /dashboard/platform/organisations etc.
+		const validSubtabs = ["overview", "organisations", "users", "jobs", "interviews", "audit"];
+		const subSub = segments[2];
+		const subtabId = validSubtabs.includes(subSub) ? `platform-${subSub}` : "platform-overview";
+		window.navigateToSubtab?.(subtabId);
+	} else if (["analytics", "talent", "team", "career", "data-rights"].includes(sub)) {
+		// "data-rights" was previously missing here (hard refresh silently fell
+		// through to the default Jobs view); "swarm" was stale, left over from
+		// the already-removed AI Swarm tab — both fixed while touching this array.
 		window.navigateToTab?.(sub);
 	}
 }
@@ -265,6 +275,9 @@ export default function DashboardShell({ children }) {
 		// is known. Guarded: the vanilla engine registers this once mount.js runs.
 		if (typeof window.__ihInitOrgSwitcher === "function")
 			window.__ihInitOrgSwitcher();
+		// Same for the Platform sidebar tab's visibility.
+		if (typeof window.__ihInitPlatformTabVisibility === "function")
+			window.__ihInitPlatformTabVisibility();
 
 		// Personalise the "Created By" defaults so they show the signed-in user.
 		const creatorInput = document.getElementById("job-creator-input");
