@@ -17,14 +17,19 @@ class Settings(BaseSettings):
     APP_NAME: str = "Hiring Dashboard"
  
     # CORS — the recruiter dashboard origin
-    FRONTEND_URL: str = "https://interviehire.com"
+    # Interim: app.interviehire.com is stuck on an inaccessible Vercel account
+    # (custom domain claimed there, not reachable from this team) — falls back
+    # to the raw Vercel URL until the domain is recovered or replaced.
+    FRONTEND_URL: str = "https://interviehire-final1.vercel.app"
 
     # The candidate interview room BASE URL (the engine web app). The link is
     # built as `{INTERVIEW_ROOM_URL}/interviewcandidateroom?sessionId=…`, so this
     # is the origin only. The emailed calendar invite's "Enter Interview Room"
     # link points here, so it opens the SAME AI interview room that "Run test
-    # interview" uses. Local: :3001.  Production: https://interviehire.com
-    INTERVIEW_ROOM_URL: str = "https://interview.interviehire.com"
+    # interview" uses. Local: :3001. Interim production: the raw Vercel URL —
+    # see the FRONTEND_URL comment above for why interview.interviehire.com
+    # isn't used here.
+    INTERVIEW_ROOM_URL: str = "https://interviehire-interview.vercel.app"
 
     # Per-candidate unique interview invite links (`/i/{token}`).
     # INVITE_LINK_BASE is the origin that serves `GET /i/{token}` — this backend,

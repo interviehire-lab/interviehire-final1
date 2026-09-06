@@ -232,9 +232,15 @@ app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in str(settings.FRONTEND_URL).split(",") if o.strip()] + [
+        # interviehire.com / app. / interview. are stuck on an inaccessible
+        # Vercel account — see FRONTEND_URL's comment in config.py. Kept here
+        # in case that account is recovered later; the .vercel.app origins
+        # below are what's actually live.
         "https://interviehire.com",
         "https://app.interviehire.com",
         "https://interview.interviehire.com",
+        "https://interviehire-final1.vercel.app",
+        "https://interviehire-interview.vercel.app",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
         "http://127.0.0.1:3001",
