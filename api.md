@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-07** — **Added the first IntervieHire V2 Core API surface under `v2/apps/core-api` (Bun + Elysia + Effect v3): `GET /health`, `GET /v2/jobs/{id}/board`, `GET /v2/applications/{id}`, `POST /v2/applications/{id}/transitions`, `POST /v2/applications/{id}/resume-analysis`, `GET /v2/async-jobs/{id}`, and `POST /v2/applications/{id}/schedule`.** V2 recruiter routes use explicit `x-tenant-id` and `x-correlation-id` headers; commands additionally require `idempotency-key`, and recruiter-authored transition/schedule commands require `x-actor-id`. Pipeline stages are strictly `resume_analysis | recruiter_screening | functional_interview`; hiring decisions are separate. Resume analysis responds 202 with a durable job reference and uses a source-domain transactional outbox. Scheduling delegates session creation through an Interview service port, then stores an explicit application/session mapping; IDs need not be equal. Full schemas and status codes are documented in the V2 section below.
 - **2026-09-07** — **Fixed `POST /api/jobs/{job_id}/applicants/upload-resumes` to actually honor its `source` query parameter for stage placement, matching `add_applicant`/`add_applicants_bulk`.** Since the 2026-09-06 change directly below, `source` was accepted and enum-validated but silently ignored — every newly-created applicant was forced to `source="bulk_upload"` with both `screening_status`/`functional_status` left `null`, so uploaded resumes always landed in Resume Analysis regardless of what the caller passed. This broke the dashboard's "Schedule AI Interviews" tab and the inline "+Add Applicants" panel on the Recruiter Screening/Functional Interview tabs, which upload resumes expecting them to land directly in those stages. `upload_resumes` (`backend/app/routers/jobs.py`) now applies the same source→stage mapping already used by the two sibling routes to each **newly-created** applicant: `source=scheduled` → `screening_status=pending` (Recruiter Screening); `source=functional` or `source=exit` → `functional_status=pending` (Functional Interview); `source` omitted or any other value → defaults to `bulk_upload` as before, both statuses stay `null` (Resume Analysis) — this default path is unchanged, so callers that don't pass `source` see no behavior change. The **existing-applicant match/update branch is untouched** — re-uploading a resume for an already-existing candidate (matched by email or name) still never changes that candidate's `source`, `screening_status`, or `functional_status`. Request (`multipart/form-data`) and response (`List[ApplicantOut]`) schemas are unchanged.
 - **2026-09-06** — **Interview recordings now upload to Backblaze B2 (S3-compatible object storage) instead of Google Drive.** `backend/app/routers/public.py`'s **POST /api/public/interview-session/{session_id}/recording** (`upload_interview_recording`, called server-to-server by the engine after each recording capture) now uploads via the new `upload_recording_to_b2` (`backend/app/utils/backblaze.py`, boto3 S3 client against `B2_ENDPOINT`) instead of `google_drive.upload_recording`. Its success response shape changed from `{"ok": true, "driveFileId": string, "driveUrl": string}` to **`{"ok": true, "b2Key": string}`** — `driveFileId`/`driveUrl` are no longer returned by this route; the object key is `recordings/{session_id}/{candidate name - job title - session_id}.webm`. The `{"ok": false, "simulated": true}` failure-path response (B2 credentials unconfigured) is unchanged. Because B2 is a private bucket, playback now needs a freshly-minted presigned URL per read (new `get_presigned_recording_url`, TTL `B2_PRESIGNED_URL_TTL_SECONDS`, default 14400s/4h) rather than a stored public Drive link — so **GET /api/jobs/applicants/{applicant_id}/functional-report** (`ai_sync.get_applicant_full_report`) gains two new fields in BOTH its not-yet-evaluated and evaluated response branches: `recordingPlaybackUrl` (string|null — presigned fresh on every request from the new `InterviewSession.recordingB2Key` column, `null` if that column is unset) and `recordingStartedAt` (ISO-8601 string|null, from `InterviewSession.startedAt`, UTC-normalized — the dashboard uses it as the recording's t=0 to place proctoring-violation markers on the video timeline). The existing `recordingUrl`/`recordingDriveFileId` fields on that route are UNCHANGED and still returned, as a backward-compat fallback for recordings uploaded before this switch. `InterviewSession.recordingB2Key` (nullable string) is a new column on both the engine's Prisma model (`interview-engine/apps/api/prisma/schema.prisma`) and the backend's mirrored SQLAlchemy model (`backend/app/models/ai_integration.py`), alongside the pre-existing `recordingDriveFileId`/`recordingDriveUrl`. No routes added or removed.
 - **2026-09-06** — **Removed the per-job `conversationalInterview` toggle entirely — voice (LiveKit) is now the only interview mode, unconditionally.** The dashboard's "Conversational AI voice interview" toggle and `InterviewSession.settings.conversationalInterview` are gone system-wide; there is no more text/legacy interview mode to fall back to. Two engine routes in `interview-engine/apps/api/src/routes/interview.routes.ts` change as a result: **POST /api/interview/sessions/:id/livekit-token** no longer checks `settings.conversationalInterview` at all — the **409** `{"error":"This interview is not configured for conversational voice.","code":"LIVEKIT_NOT_ENABLED"}` response is removed outright (its other status codes, including the **503** `LIVEKIT_NOT_CONFIGURED` env-var gate, are unchanged). **POST /api/interview/voice-test-session** no longer force-sets `settings.conversationalInterview = true` on the demo session before returning — the `prisma.interviewSession.update()` call that merged that field in is deleted, so the route is now just `getOrCreateDemoSession()` followed by `return { sessionId: session.id }`, identical in shape to before but with no side-effecting settings write; its response remains `{ sessionId: string }` only (still narrower than `GET /demo-session`, which also returns `companyId`/`roleId`/`candidateId`).
@@ -80,6 +81,154 @@
 - **Dashboard — Next route handlers** run on **port `3000`**, under `dashboard/app/api/*` (e.g. `/api/parse-file`, `/api/fetch-doc`, `/api/deepseek`).
 - **Auth model:** Backend authentication uses a **JWT in an httpOnly cookie** named `token`, valid for **7 days** (`max_age=604800s`). The token may also be supplied via an `Authorization: Bearer <jwt>` header. Super Admins additionally carry an `active_org_id` cookie that selects the active organisation context. Interview-engine and dashboard routes are largely public (no user auth); they rely on global rate limiting and/or server-side API keys. **(2026-09-06)** `get_current_user` also re-checks, on every authenticated request, that the user isn't suspended (`User.status == inactive` → 403) and — for non-super_admins — that their organisation isn't suspended (`Organisation.status == suspended` → 403); see the changelog entry for details. `require_super_admin` (`backend/app/utils/auth.py`) wraps `get_current_user` and additionally gates on `user_type == UserType.super_admin`, else 403 `{"detail": "Only Super Admins can access this."}` — used by `GET /api/auth/organisations`, `POST /api/auth/switch-context`, and every route in `backend/app/routers/platform.py`.
 - **WebSocket endpoints** are denoted with the pseudo-method **`WS`** and collected in the final **WebSocket Endpoints** section. All WS frames are JSON text.
+
+---
+
+## V2 Core API — Elysia (`/v2/*`)
+
+V2 runs as a separate Bun/Elysia application. The current migration slice injects the
+authenticated tenant/actor context through headers; the legacy JWT compatibility adapter
+is not yet mounted. All responses are JSON. Elysia validation failures return 422.
+
+### GET /health
+
+- **Auth:** none
+- **Request:** no body, path params, or required headers
+- **200 response:** `{ "status": "ok", "service": "core-api" }`
+
+### GET /v2/jobs/{id}/board
+
+- **Required headers:** `x-tenant-id: string`, `x-correlation-id: string`
+- **Path:** `id: string` (job ID)
+- **Request body:** none
+- **200 response:**
+
+```json
+{
+  "jobId": "string",
+  "columns": [
+    {
+      "stage": "resume_analysis | recruiter_screening | functional_interview",
+      "label": "Resume Analysis | Recruiter Screening | Functional Interview",
+      "applications": [
+        {
+          "id": "string",
+          "jobId": "string",
+          "tenantId": "string",
+          "candidateName": "string",
+          "stage": "resume_analysis | recruiter_screening | functional_interview",
+          "decision": "active | hired | rejected | withdrawn",
+          "source": "string | null",
+          "asyncStatus": "not_requested | queued | running | ready | failed"
+        }
+      ]
+    }
+  ],
+  "correlationId": "string"
+}
+```
+
+`columns` always contains exactly the three stages above in that order. Decisions remain
+on application cards and never create additional board columns.
+
+### GET /v2/applications/{id}
+
+- **Required headers:** `x-tenant-id`, `x-correlation-id` (non-empty strings)
+- **Path:** `id: string` (application ID)
+- **Request body:** none
+- **200 response:** application object with the same fields as a board application plus
+  `correlationId`.
+- **404 response:** `{ "code": "NOT_FOUND", "message": "Application not found.", "correlationId": "string" }`
+
+A record in another tenant is deliberately indistinguishable from a missing record.
+
+### POST /v2/applications/{id}/transitions
+
+- **Required headers:** `x-tenant-id`, `x-actor-id`, `x-correlation-id`,
+  `idempotency-key` (non-empty strings)
+- **Path:** `id: string` (application ID)
+- **Request:**
+
+```json
+{
+  "to": "resume_analysis | recruiter_screening | functional_interview",
+  "occurredAt": "ISO-8601 date-time string"
+}
+```
+
+- **200 success:** `{ "ok": true, "applicationId": "string", "from": "stage", "to": "stage", "replayed"?: true, "correlationId": "string" }`
+- **404:** `{ "ok": false, "code": "NOT_FOUND", "message": "Application not found.", "correlationId": "string" }`
+- **409:** typed domain failure with `code` = `ILLEGAL_TRANSITION | RESUME_ANALYSIS_INCOMPLETE | INTERVIEW_INCOMPLETE | APPLICATION_INACTIVE`.
+- **422:** invalid body/header/path, including passing `hired`, `rejected`, or `withdrawn` as `to`.
+
+Stage, history, and `application.stage_changed.v1` outbox event commit atomically.
+
+### POST /v2/applications/{id}/resume-analysis
+
+- **Required headers:** `x-tenant-id`, `x-correlation-id`, `idempotency-key`
+- **Path:** `id: string` (application ID)
+- **Request:** `{ "resumeRevision": "positive integer" }`
+- **202:** `{ "ok": true, "asyncJobId": "string", "status": "queued", "replayed": "boolean", "correlationId": "string" }`
+- **404:** `{ "ok": false, "code": "NOT_FOUND", "message": "Application not found.", "correlationId": "string" }`
+- **422:** validation error.
+
+The request returns after committing the run, application async state, and
+`resume-analysis.requested.v1` outbox event. Resume text is not included in Redis.
+
+### GET /v2/async-jobs/{id}
+
+- **Required headers:** `x-tenant-id`, `x-correlation-id`
+- **Path:** `id: string` (resume-analysis run ID)
+- **Request body:** none
+- **200:**
+
+```json
+{
+  "id": "string",
+  "applicationId": "string",
+  "tenantId": "string",
+  "status": "not_requested | queued | running | ready | failed",
+  "attempt": "integer",
+  "idempotencyKey": "string",
+  "correlationId": "string",
+  "resumeRevision": "integer",
+  "result": "object | null",
+  "errorCode": "string | null",
+  "createdAt": "ISO-8601 date-time string",
+  "updatedAt": "ISO-8601 date-time string"
+}
+```
+
+- **404:** `{ "code": "NOT_FOUND", "message": "Async job not found.", "correlationId": "string" }`
+
+The lookup is tenant scoped; worker results remain readable after process restarts.
+
+### POST /v2/applications/{id}/schedule
+
+- **Required headers:** `x-tenant-id`, `x-actor-id`, `x-correlation-id`,
+  `idempotency-key`
+- **Path:** `id: string` (application ID)
+- **Request:**
+
+```json
+{
+  "interviewStage": "recruiter_screening | functional_interview",
+  "scheduledAt": "ISO-8601 date-time string",
+  "timeZone": "non-empty IANA timezone string",
+  "deliveryMethods": ["email | whatsapp | robocall"]
+}
+```
+
+- **201:** `{ "ok": true, "applicationId": "string", "interviewSessionId": "string", "interviewStage": "recruiter_screening | functional_interview", "scheduledAt": "ISO-8601 date-time string", "replayed": "boolean", "correlationId": "string" }`
+- **404:** application not found.
+- **409:** `ILLEGAL_TRANSITION` or `APPLICATION_INACTIVE` domain failure.
+- **422:** validation error.
+- **503:** `{ "ok": false, "code": "UNAVAILABLE", "message": "Scheduling is unavailable.", "correlationId": "string" }` when no Interview provisioner is configured.
+- **500:** Interview provisioner or persistence failure.
+
+Core calls an Interview service port; it does not import or write Interview-owned tables.
+Only after provisioning succeeds does the Core transaction persist its explicit mapping,
+stage, history, and outbox event. `applicationId` and `interviewSessionId` may differ.
 
 ---
 
