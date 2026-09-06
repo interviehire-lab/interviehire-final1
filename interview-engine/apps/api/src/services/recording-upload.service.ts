@@ -1,14 +1,14 @@
 import fs from 'node:fs';
 
 // Forwards a locally-saved interview recording to the FastAPI backend, which uploads it
-// into the shared Google Drive "Recordings" folder. Fire-and-forget from the caller —
-// this must never throw into a candidate-facing response.
-export async function uploadRecordingToDrive(
+// into the shared Backblaze B2 "proctoring-videos" bucket (see backend/app/utils/backblaze.py).
+// Fire-and-forget from the caller — this must never throw into a candidate-facing response.
+export async function uploadRecordingToStorage(
   sessionId: string,
   filePath: string,
   filename: string,
   mimeType: string,
-): Promise<{ driveFileId: string; driveUrl: string } | null> {
+): Promise<{ b2Key: string } | null> {
   const backendUrl = process.env.BACKEND_URL;
   if (!backendUrl) return null;
 
@@ -23,10 +23,10 @@ export async function uploadRecordingToDrive(
   });
 
   if (!res.ok) {
-    throw new Error(`Drive upload forward failed: ${res.status} ${await res.text()}`);
+    throw new Error(`Recording upload forward failed: ${res.status} ${await res.text()}`);
   }
 
   const data = await res.json();
-  if (!data?.ok || !data?.driveUrl) return null;
-  return { driveFileId: data.driveFileId, driveUrl: data.driveUrl };
+  if (!data?.ok || !data?.b2Key) return null;
+  return { b2Key: data.b2Key };
 }

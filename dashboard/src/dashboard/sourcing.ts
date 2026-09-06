@@ -19,11 +19,40 @@ import { saveStateToLocalStorage } from './ai-api';
 let sourcingQueue = [];
 let csvParsedCandidates = [];
 let uploadedFiles = [];
-let currentSourcingMode = 'schedule';
+let currentSourcingMode = 'analyse';
 let currentSourcingTab = 'csv';
 // The stage the user was on when they clicked '+ Add Applicants'.
 // 'resume' | 'screening' | 'functional' | null (pipeline start)
 let currentTargetStage = null;
+
+// currentTargetStage only ever gets set from an explicit deep link (e.g. the
+// Screening/Functional tab's own '+ Add Applicants' button — see
+// navigateToSourcing). Landing here the normal way (sidebar/job-flow "Sourcing"
+// link, no deep link) leaves it null even while "Schedule AI Interviews" mode
+// — the DEFAULT mode on this page — is showing, silently falling through to
+// Resume Analysis for every intake type. "Schedule AI Interviews" promises
+// candidates get scheduled, so default it to Recruiter Screening instead;
+// "Analyse Candidate Resumes" mode keeps its own no-stage-commitment meaning.
+function effectiveTargetStage() {
+  return currentTargetStage || (currentSourcingMode === 'schedule' ? 'screening' : null);
+}
+
+// Reflects effectiveTargetStage() in the "Adding to: X" banner so a recruiter
+// always sees where their import will actually land, even in the implicit
+// (no deep link) 'schedule'-mode-defaults-to-screening case above.
+function updateStageBanner() {
+  const stageCtx = document.getElementById('sourcing-stage-context');
+  const stageLabel = document.getElementById('sourcing-stage-label');
+  if (!stageCtx || !stageLabel) return;
+  const stage = effectiveTargetStage();
+  if (stage) {
+    const stageNames = { resume: 'Resume Analysis', screening: 'Recruiter Screening', functional: 'Functional Interview' };
+    stageLabel.textContent = stageNames[stage] || stage;
+    stageCtx.style.display = 'flex';
+  } else {
+    stageCtx.style.display = 'none';
+  }
+}
 
 function initSourcing() {
   // Bind click on '+ Add Applicants' in the job-detail top bar.
@@ -468,18 +497,7 @@ function navigateToSourcing(jobId, targetStage = null) {
     srcBcJobname.textContent = shortName;
   }
 
-  // Stage context banner
-  const stageCtx = document.getElementById('sourcing-stage-context');
-  const stageLabel = document.getElementById('sourcing-stage-label');
-  if (stageCtx && stageLabel) {
-    if (targetStage) {
-      const stageNames = { resume: 'Resume Analysis', screening: 'Recruiter Screening', functional: 'Functional Interview' };
-      stageLabel.textContent = stageNames[targetStage] || targetStage;
-      stageCtx.style.display = 'flex';
-    } else {
-      stageCtx.style.display = 'none';
-    }
-  }
+  updateStageBanner();
 
   // Switch view section visibility
   document.querySelectorAll('.dashboard-view').forEach(v => v.classList.remove('active-view'));
@@ -505,8 +523,12 @@ function navigateToSourcing(jobId, targetStage = null) {
   const fileRes = document.getElementById('input-file-resumes');
   if (fileRes) fileRes.value = '';
 
-  // Default mode & tab
-  switchSourcingMode('schedule');
+  // Default mode & tab — 'analyse' unless a specific stage was explicitly
+  // requested (e.g. the Screening/Functional tab's own '+ Add Applicants'),
+  // in which case 'schedule' mode keeps CSV/Manual intake available too
+  // (analyse mode hides those cards, which would otherwise silently take
+  // away the intake method the recruiter came here to use).
+  switchSourcingMode(targetStage ? 'schedule' : 'analyse');
 
   setTimeout(updateAllSlidingPills, 50);
   soundEngine.playChime([329.63, 392.00, 523.25], 0.15, 0.08);
@@ -514,6 +536,7 @@ function navigateToSourcing(jobId, targetStage = null) {
 
 function switchSourcingMode(mode) {
   currentSourcingMode = mode;
+  updateStageBanner();
 
   // Toggle active class on pills
   const modeButtons = document.querySelectorAll('.mode-toggle-btn');
@@ -673,12 +696,13 @@ async function importCsvCandidates() {
   // 'screening' stage → source='scheduled' (screening_status=pending on backend)
   // 'functional' stage → source='functional' (functional_status=pending on backend)
   // null / 'resume' → source='bulk_upload' (resume analysis stage)
+  const targetStage = effectiveTargetStage();
   const sourceMap = { screening: 'scheduled', functional: 'functional', resume: 'bulk_upload' };
-  const apiSource = sourceMap[currentTargetStage] || 'bulk_upload';
+  const apiSource = sourceMap[targetStage] || 'bulk_upload';
 
   const localIds = [];
   csvParsedCandidates.forEach(cand => {
-    const candId = addCandidateToAppState(cand.name, cand.email, cand.phone, activeJob, null, currentTargetStage);
+    const candId = addCandidateToAppState(cand.name, cand.email, cand.phone, activeJob, null, targetStage);
     if (candId) localIds.push(candId);
   });
 
@@ -699,7 +723,7 @@ async function importCsvCandidates() {
   }).catch(() => {});
 
   soundEngine.playChime([392.00, 523.25, 659.25], 0.2, 0.08);
-  const stageLabel = currentTargetStage ? { screening: 'Recruiter Screening', functional: 'Functional Interview', resume: 'Resume Analysis' }[currentTargetStage] : activeJob.roleName;
+  const stageLabel = { screening: 'Recruiter Screening', functional: 'Functional Interview', resume: 'Resume Analysis' }[targetStage];
   showPremiumToast(`Successfully imported ${csvParsedCandidates.length} candidate(s) into "${escapeHTML(stageLabel || activeJob.roleName)}".`, 'success');
 
   // Reset
@@ -880,6 +904,15 @@ async function importResumesCandidates() {
   const activeJob = AppState.jobs.find(j => j.id === AppState.activeJobId);
   if (!activeJob) return;
 
+  // Same stage routing as importCsvCandidates/importManualQueue: this route
+  // persists the actual uploaded file + extracted text itself (see
+  // upload_resumes in backend/app/routers/jobs.py), so a 'screening'/'functional'
+  // target here always has a real CV on file — no CV_REQUIRED risk in honoring
+  // the recruiter's chosen target stage instead of always landing in Resume Analysis.
+  const targetStage = effectiveTargetStage();
+  const sourceMap = { screening: 'scheduled', functional: 'functional', resume: 'bulk_upload' };
+  const apiSource = sourceMap[targetStage] || 'bulk_upload';
+
   const importedCandIds = [];
   const resumeFiles = [];
   uploadedFiles.forEach(file => {
@@ -888,10 +921,7 @@ async function importResumesCandidates() {
     const name = identity.name || fallbackName;
     const email = identity.email || createPlaceholderEmail(name);
     const phone = identity.phone || '';
-    // Uploading a resume is intake, never an implicit stage decision. Even when
-    // the recruiter opened Sourcing from Screening/Functional, the candidate
-    // must remain in Resume Analysis until explicitly advanced.
-    const candId = addCandidateToAppState(name, email, phone, activeJob, file.textContent, 'resume');
+    const candId = addCandidateToAppState(name, email, phone, activeJob, file.textContent, targetStage);
     importedCandIds.push(candId);
     resumeFiles.push(file.file);
   });
@@ -922,7 +952,7 @@ async function importResumesCandidates() {
 
   // Persist first so the candidates survive the hydrate (no manual refresh), then
   // analyse against their real backend ids (the resume caches were re-keyed).
-  const backendIds = await persistImportedCandidates(importedCandIds, activeJob, resumeFiles);
+  const backendIds = await persistImportedCandidates(importedCandIds, activeJob, resumeFiles, apiSource);
   navigateToJobDetail(AppState.activeJobId);
 
   if (currentSourcingMode === 'analyse' && !currentTargetStage) {
@@ -1160,12 +1190,13 @@ async function importManualQueue() {
   if (!activeJob) return;
 
   // Determine ApplicantSource for backend based on targetStage
+  const targetStage = effectiveTargetStage();
   const sourceMap = { screening: 'scheduled', functional: 'functional', resume: 'bulk_upload' };
-  const apiSource = sourceMap[currentTargetStage] || 'bulk_upload';
+  const apiSource = sourceMap[targetStage] || 'bulk_upload';
 
   const localIds = [];
   sourcingQueue.forEach(cand => {
-    const candId = addCandidateToAppState(cand.name, cand.email, cand.phone, activeJob, null, currentTargetStage);
+    const candId = addCandidateToAppState(cand.name, cand.email, cand.phone, activeJob, null, targetStage);
     if (candId) localIds.push(candId);
   });
 
@@ -1186,7 +1217,7 @@ async function importManualQueue() {
   }).catch(() => {});
 
   soundEngine.playChime([392.00, 523.25, 659.25], 0.2, 0.08);
-  const stageLabel = currentTargetStage ? { screening: 'Recruiter Screening', functional: 'Functional Interview', resume: 'Resume Analysis' }[currentTargetStage] : activeJob.roleName;
+  const stageLabel = { screening: 'Recruiter Screening', functional: 'Functional Interview', resume: 'Resume Analysis' }[targetStage];
   showPremiumToast(`Successfully imported ${sourcingQueue.length} candidate(s) into "${escapeHTML(stageLabel || activeJob.roleName)}".`, 'success');
 
   sourcingQueue = [];
@@ -1277,18 +1308,17 @@ function addCandidateToAppState(name, email, phone, job, resumeText?, targetStag
 // jobId === job.id, which the next hydrate then wipes — so rather than leave an
 // invisible ghost (silent loss), we drop the failed rows and tell the recruiter
 // exactly who failed and why, so they can fix and re-import.
-async function persistImportedCandidates(localIds, job, resumeFiles = []) {
+async function persistImportedCandidates(localIds, job, resumeFiles = [], source = null) {
   if (!isApiMode() || !job || !job._backend) return localIds;
 
-  // Resume intake must send the original File objects to the backend and always
-  // enter Resume Analysis. The old
-  // path parsed them in the browser, then called the JSON-only applicant route;
-  // scheduling therefore produced a real candidate with no persisted CV and
-  // the interview engine correctly (but confusingly) rejected it as CV_REQUIRED.
+  // Resume intake sends the original File objects to the backend, which persists
+  // the actual file + extracted text itself (see upload_resumes in
+  // backend/app/routers/jobs.py) — so honoring `source` here to route straight to
+  // Screening/Functional carries no CV_REQUIRED risk (a real CV is always on file).
   if (resumeFiles.length > 0) {
     const localIdSet = new Set(localIds);
     try {
-      const uploaded = await apiUploadResumes(job.id, resumeFiles, null);
+      const uploaded = await apiUploadResumes(job.id, resumeFiles, source);
       const backendIds = new Set(uploaded.map((candidate) => candidate.id));
 
       // Replace the temporary CAN-* rows with the authoritative backend rows.

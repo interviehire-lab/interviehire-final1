@@ -727,6 +727,13 @@ function mapFullReportToCandidateReport(data: any): CandidateReport | null {
     // panel without a second fetch. Read via an `any` cast at call sites.
     (report as any).recordingUrl = data.recordingUrl || null;
     (report as any).recordingDriveFileId = data.recordingDriveFileId || null;
+    // recordingPlaybackUrl is a freshly-presigned Backblaze B2 URL (minted
+    // per request, never cached) — a real playable <video src>, unlike the
+    // Drive fields above which only support the iframe-embed fallback for
+    // pre-B2 recordings. recordingStartedAt anchors violation timestamps to
+    // the video's t=0 for the marker rail.
+    (report as any).recordingPlaybackUrl = data.recordingPlaybackUrl || null;
+    (report as any).recordingStartedAt = data.recordingStartedAt || null;
     (report as any).transcript = Array.isArray(data.transcript) ? data.transcript : [];
     return report;
   }

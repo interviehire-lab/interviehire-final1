@@ -235,9 +235,16 @@ function sanitizeJSONResponse(text) {
 }
 
 // Best-effort repair for the JSON errors DeepSeek most commonly emits:
-// trailing commas and an unbalanced number of closing braces/brackets.
+// trailing commas, a missing comma between one-element-per-line array/object
+// entries ("Expected ',' or ']' after array element"), and an unbalanced
+// number of closing braces/brackets.
 function repairJSONString(text) {
   let s = text.replace(/,(\s*[}\]])/g, '$1');
+  // Insert a comma where the model dropped one between two values on
+  // separate lines, e.g. `"first"\n  "second"` or `}\n  {` — matched only
+  // across a newline (never mid-line) and only when no comma is already
+  // there, so already-valid JSON is left untouched.
+  s = s.replace(/("|\}|\]|true|false|null|-?\d+(?:\.\d+)?)([ \t]*\n[ \t]*)("|\{|\[)/g, '$1,$2$3');
   const balance = (open, close) => {
     const o = (s.match(new RegExp('\\' + open, 'g')) || []).length;
     const c = (s.match(new RegExp('\\' + close, 'g')) || []).length;

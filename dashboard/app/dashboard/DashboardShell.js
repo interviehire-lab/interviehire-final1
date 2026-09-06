@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, notFound } from "next/navigation";
 import { initDashboardPage } from "../../src/dashboard/index";
 import { STAGE_SLUG_TO_TAB } from "../../src/dashboard/job-stages";
 import { html } from "../../src/html/dashboard-crystal";
@@ -351,6 +351,24 @@ export default function DashboardShell({ children }) {
 	if (pathname === "/dashboard/random") return children;
 
 	if (phase !== "authed") return <VerifyingScreen />;
+
+	// /dashboard/platform/* is a real backend-enforced (require_super_admin)
+	// section, but every route under it always renders here client-side
+	// regardless of role — navigateToPath's "platform" branch has no role
+	// check, so a non-super-admin used to see an inline "Could not load:
+	// Only available to Super Admins" error instead of a 404, revealing the
+	// section exists. Match the bare /dashboard/platform/ path's behavior
+	// (a genuine 404, since it has no page.js) for every subpath too, once
+	// the role is actually known — `user` can still be null here on a
+	// backend hiccup with an optimistic session, so don't 404 on an unknown
+	// role, only a confirmed non-super-admin one.
+	if (
+		pathname.startsWith("/dashboard/platform") &&
+		user &&
+		user.user_type !== "super_admin"
+	) {
+		notFound();
+	}
 
 	return (
 		<>

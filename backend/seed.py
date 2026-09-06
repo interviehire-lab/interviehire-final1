@@ -51,11 +51,11 @@ def seed():
         print("Seeding Super Admin user...")
         super_admin = User(
             name="Super Admin",
-            email="admin@interviehire.com",
-            designation="Super Admin",
-            user_type=UserType.super_admin,
+            email="org_admin@interviehire.com",
+            designation="Org. Admin",
+            user_type=UserType.org_admin,
             status=UserStatus.active,
-            hashed_password=get_password_hash("adminpassword"),
+            hashed_password=get_password_hash("org_adminpassword"),
             organisation_id=None
         )
         db.add(super_admin)

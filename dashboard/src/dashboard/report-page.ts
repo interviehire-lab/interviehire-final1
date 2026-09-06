@@ -15,6 +15,11 @@ import { API_BASE } from '../auth-client';
 // CANDIDATE REPORT — FULL PAGE VIEW
 // ==========================================
 
+// Tracks the current report page's recording-marker resize listener so a
+// re-navigation swaps it out instead of stacking a new one — see
+// bindReportPage's recording marker rail block.
+let recordingMarkerResizeListener = null;
+
 const INSIGHT_PRESETS = [
   'Suggest next round questions for this candidate',
   'Find overall red flags of this candidate',
@@ -532,6 +537,48 @@ function renderInterviewAnalysisPane(candidate, report) {
   `;
 }
 
+// Violation offsets (seconds from recording start) are computed here, at
+// render time, from occurredAt/recordingStartedAt — both known already.
+// Their on-screen *position* (a % of the rail's width) can't be computed
+// until the video's duration is known, which only happens client-side once
+// its metadata loads — see the loadedmetadata handler in bindReportPage.
+function buildRecordingCard(recordingPlaybackUrl, recordingFileId, recordingStartedAt, violations) {
+  if (!recordingPlaybackUrl && !recordingFileId) return '';
+  if (recordingPlaybackUrl) {
+    const startedAtMs = recordingStartedAt ? Date.parse(recordingStartedAt) : NaN;
+    const markers = (Array.isArray(violations) ? violations : [])
+      .map(v => {
+        const occurredMs = v.occurredAt ? Date.parse(v.occurredAt) : NaN;
+        if (!Number.isFinite(startedAtMs) || !Number.isFinite(occurredMs)) return null;
+        const offsetSec = (occurredMs - startedAtMs) / 1000;
+        if (!Number.isFinite(offsetSec) || offsetSec < 0) return null;
+        return { offsetSec, severity: v.severity, eventType: v.eventType, occurredAt: v.occurredAt };
+      })
+      .filter(Boolean);
+    return `
+      <div class="rp-card rp-recording-card">
+        <h4 class="rp-card-title">🎥 Interview Recording</h4>
+        <video class="rp-recording-video" src="${escapeHTML(recordingPlaybackUrl)}" controls playsinline preload="metadata"></video>
+        ${markers.length ? `
+        <div class="rp-recording-marker-rail">
+          ${markers.map(m => `<button type="button" class="rp-recording-marker ${sevTone(m.severity)}" data-offset-sec="${m.offsetSec}" title="${escapeHTML(String(m.eventType || 'Event').replace(/_/g, ' '))} — ${escapeHTML(new Date(m.occurredAt).toLocaleTimeString())}"></button>`).join('')}
+        </div>
+        <p class="rp-recording-marker-hint">Markers show proctoring events — click one to jump to that moment.</p>
+        ` : ''}
+      </div>
+    `;
+  }
+  // Legacy fallback — sessions recorded before the Backblaze B2 switch only
+  // have a Drive file id, which only embeds via Drive's /preview iframe (no
+  // scriptable timeline, so no marker rail is possible here).
+  return `
+    <div class="rp-card rp-recording-card">
+      <h4 class="rp-card-title">🎥 Interview Recording</h4>
+      <iframe class="rp-recording-video" src="https://drive.google.com/file/d/${encodeURIComponent(recordingFileId)}/preview" allow="autoplay" allowfullscreen></iframe>
+    </div>
+  `;
+}
+
 function renderProctoringPane(candidate, report) {
   const s = getStructuredReport(report);
   // Prefer REAL proctoring violations from the interview engine when present.
@@ -543,17 +590,17 @@ function renderProctoringPane(candidate, report) {
       ? Object.entries(bySev).map(([sev, n]) => `<div class="rp-proc-row"><div><strong>${escapeHTML(sev)}</strong></div><span class="rp-proc-count ${sev === 'LOW' ? 'ok' : 'bad'}">${n}</span></div>`).join('')
       : '<p class="rp-muted">No severity buckets.</p>';
     const violations = Array.isArray(p.violations) ? p.violations : [];
-    // Drive's webViewLink (recordingUrl) is a viewer *page*, not a raw media
-    // URL — it can't be used as a <video src>. Its own file-id embeds fine in
-    // an iframe via Drive's dedicated /preview path, which is what this uses.
+    // Backblaze B2 (private bucket) gives back a real, freshly-presigned
+    // media URL — unlike Drive's webViewLink (a viewer *page*, not raw
+    // media), this drops straight into a native <video>, which is what
+    // makes the marker rail below possible (an iframe exposes no seekable/
+    // scriptable timeline). Falls back to the legacy Drive iframe embed for
+    // sessions recorded before this switch.
+    const recordingPlaybackUrl = report && (report as any).recordingPlaybackUrl;
     const recordingFileId = report && (report as any).recordingDriveFileId;
+    const recordingStartedAt = report && (report as any).recordingStartedAt;
     return `
-      ${recordingFileId ? `
-      <div class="rp-card rp-recording-card">
-        <h4 class="rp-card-title">🎥 Interview Recording</h4>
-        <iframe class="rp-recording-video" src="https://drive.google.com/file/d/${encodeURIComponent(recordingFileId)}/preview" allow="autoplay" allowfullscreen></iframe>
-      </div>
-      ` : ''}
+      ${buildRecordingCard(recordingPlaybackUrl, recordingFileId, recordingStartedAt, violations)}
       <div class="rp-proc-stats">
         <div class="rp-proc-stat ${tone}"><span>🛡 Integrity Score</span><strong>${Math.round(p.integrityScore)}</strong></div>
         <div class="rp-proc-stat ${p.penalty > 0 ? 'missed' : 'met'}"><span>➖ Score Penalty</span><strong>−${Math.round(p.penalty)}</strong></div>
@@ -1018,6 +1065,40 @@ function bindReportPage(candidate, job, analysis, root, initialTab = 'overview')
     updateCandidateStatus(candidate.id, next);
     openCandidateReportPage(candidate.id);
   });
+
+  // Recording marker rail — each button already carries data-offset-sec
+  // (computed at render time from occurredAt/recordingStartedAt), but its
+  // on-screen position depends on the video's duration, which is only known
+  // once its metadata has loaded. Re-positions on resize since the rail's
+  // pixel width (and so each marker's % offset) can change.
+  const recordingVideo = root.querySelector('.rp-recording-video');
+  if (recordingVideo && recordingVideo.tagName === 'VIDEO') {
+    const markers = root.querySelectorAll('.rp-recording-marker');
+    const positionMarkers = () => {
+      const duration = recordingVideo.duration;
+      if (!Number.isFinite(duration) || duration <= 0) return;
+      markers.forEach((m) => {
+        const offsetSec = parseFloat(m.dataset.offsetSec);
+        const pct = Math.min(100, Math.max(0, (offsetSec / duration) * 100));
+        m.style.left = `${pct}%`;
+      });
+    };
+    recordingVideo.addEventListener('loadedmetadata', positionMarkers);
+    // Swap out the previous visit's resize listener rather than stacking a
+    // new one on every navigation to a report page (this is the only
+    // window-level listener in this file, so a small module-level ref is
+    // simpler here than importing the signal-scoped bind-guard pattern used
+    // for document-level listeners elsewhere in the dashboard).
+    if (recordingMarkerResizeListener) window.removeEventListener('resize', recordingMarkerResizeListener);
+    recordingMarkerResizeListener = positionMarkers;
+    window.addEventListener('resize', positionMarkers);
+    markers.forEach((m) => {
+      m.addEventListener('click', () => {
+        const offsetSec = parseFloat(m.dataset.offsetSec);
+        if (Number.isFinite(offsetSec)) recordingVideo.currentTime = offsetSec;
+      });
+    });
+  }
 }
 
 export { openCandidateReportPage };

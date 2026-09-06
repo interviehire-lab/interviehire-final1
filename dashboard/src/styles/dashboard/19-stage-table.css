@@ -10,6 +10,28 @@
   min-width: 0;
 }
 
+/* Screening/Functional candidate tables specifically (not the compact
+   .stage-table-container reuses in job-flow.ts's preview or the Resume
+   Analysis pane, which shouldn't grow) — fills the pane's leftover
+   vertical space instead of shrink-wrapping to just the row count, so a
+   1-2-candidate table doesn't leave a wall of empty space beneath it. As
+   a side effect this also gives the row kebab menu (.row-kebab-dropdown)
+   much more room to open into before it can hit this container's bottom
+   edge — see the CSS overflow-x/overflow-y coupling note below. */
+#jd-pane-screening.active .stage-table-container,
+#jd-pane-functional.active .stage-table-container {
+  min-height: 60vh;
+}
+
+/* Set by job-detail-panes.ts's .btn-row-kebab click handler when there's
+   more room above the trigger than below it in the viewport. */
+.row-kebab-dropdown.open-upward {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
 .stage-table-filters {
   display: flex;
   align-items: center;

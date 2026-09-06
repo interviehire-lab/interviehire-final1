@@ -91,6 +91,7 @@ def init_db():
         conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS applications_close_at TIMESTAMP WITH TIME ZONE;"))
         conn.execute(text('ALTER TABLE "InterviewSession" ADD COLUMN IF NOT EXISTS "recordingDriveFileId" VARCHAR;'))
         conn.execute(text('ALTER TABLE "InterviewSession" ADD COLUMN IF NOT EXISTS "recordingDriveUrl" VARCHAR;'))
+        conn.execute(text('ALTER TABLE "InterviewSession" ADD COLUMN IF NOT EXISTS "recordingB2Key" VARCHAR;'))
         # Pre-interview reminder job (email + WhatsApp + robocall, ~REMINDER_MINUTES_BEFORE
         # start): per-stage "already sent" markers so app/jobs/reminders.py never re-fires.
         conn.execute(text("ALTER TABLE applicants ADD COLUMN IF NOT EXISTS screening_reminder_sent_at TIMESTAMP WITH TIME ZONE;"))

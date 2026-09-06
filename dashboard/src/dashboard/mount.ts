@@ -67,6 +67,23 @@ function initMountBindings() {
     });
   }
 
+  // Sidebar logo: role-aware home, not a hard navigation to BASE_URL (which
+  // would drop the SPA and hit the marketing/login page). Super admins land
+  // on Platform (their home state, same as a bare /dashboard for them — see
+  // navigateToPath in DashboardShell.js); everyone else lands on Jobs.
+  const logoLink = document.querySelector('.logo-area');
+  if (logoLink) {
+    logoLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (window.IH_USER_TYPE === 'super_admin') {
+        navigateToSubtab('platform-overview');
+      } else {
+        navigateToTab('jobs');
+      }
+      soundEngine.playClick();
+    });
+  }
+
   // Recalculate job pipelines based on initial state
   recalculateJobPipelines();
 

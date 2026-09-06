@@ -81,6 +81,21 @@ class Settings(BaseSettings):
     GOOGLE_DRIVE_FOLDER_NAME: str = "Recordings"
     WEBHOOK_SECRET: str = "super-secret-webhook-key"
 
+    # Backblaze B2 (S3-compatible) — interview proctoring-recording storage.
+    # Replaces Google Drive for NEW uploads only (see app/utils/backblaze.py);
+    # old sessions already on Drive keep working via recordingDriveFileId.
+    # B2_BUCKET_NAME is the bucket's actual name (not its internal Bucket ID —
+    # B2's console only shows the ID; resolve the name once via
+    # client.list_buckets() against the same key/appKey).
+    B2_KEY_ID: str | None = None
+    B2_APPLICATION_KEY: str | None = None
+    B2_ENDPOINT: str = "https://s3.us-east-005.backblazeb2.com"
+    B2_REGION: str = "us-east-005"
+    B2_BUCKET_NAME: str | None = None
+    # How long a presigned recording-playback URL stays valid — regenerated
+    # fresh on every report read, so this only needs to outlast one viewing.
+    B2_PRESIGNED_URL_TTL_SECONDS: int = 14400
+
     # API Keys
     GROQ_API_KEY: str | None = None
     GROK_API_KEY: str | None = None

@@ -8,7 +8,7 @@ import nodemailer from 'nodemailer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { processRecordingForSession, transcribeUploadedFile } from '../services/transcription.service.js';
-import { uploadRecordingToDrive } from '../services/drive-upload.service.js';
+import { uploadRecordingToStorage } from '../services/recording-upload.service.js';
 import { handleCandidateTranscript } from '../services/interview-conversation.service.js';
 import {
   deadlineFor,
@@ -693,21 +693,22 @@ export async function interviewRoutes(app: FastifyInstance) {
       await prisma.interviewSession.update({ where: { id: req.params.id }, data: { transcript: updated as any } });
       // kick off transcription and question-fit processing (async)
       processRecordingForSession(req.params.id, filename).catch((err) => app.log.error('Transcription error', err));
-      // Forward to the backend, which uploads it into the Drive "Recordings" folder
-      // (fire-and-forget — the candidate-facing response above must not wait on this).
-      // Stored on dedicated InterviewSession columns rather than inside the
-      // transcript JSON: finalizeTranscript() rewrites that field to a clean
-      // dialogue-only projection (often within seconds of this upload, on
-      // /complete), which would silently wipe a driveUrl merged into it.
-      uploadRecordingToDrive(req.params.id, dest, filename, part.mimetype || 'video/webm')
-        .then(async (drive) => {
-          if (!drive) return;
+      // Forward to the backend, which uploads it into the Backblaze B2
+      // "proctoring-videos" bucket (fire-and-forget — the candidate-facing
+      // response above must not wait on this). Stored on a dedicated
+      // InterviewSession column rather than inside the transcript JSON:
+      // finalizeTranscript() rewrites that field to a clean dialogue-only
+      // projection (often within seconds of this upload, on /complete),
+      // which would silently wipe a key merged into it.
+      uploadRecordingToStorage(req.params.id, dest, filename, part.mimetype || 'video/webm')
+        .then(async (uploaded) => {
+          if (!uploaded) return;
           await prisma.interviewSession.update({
             where: { id: req.params.id },
-            data: { recordingDriveFileId: drive.driveFileId, recordingDriveUrl: drive.driveUrl },
+            data: { recordingB2Key: uploaded.b2Key },
           });
         })
-        .catch((err) => app.log.error(err, 'drive upload failed'));
+        .catch((err) => app.log.error(err, 'recording upload failed'));
       return { url: `/uploads/${filename}`, entry };
     }
 

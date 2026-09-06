@@ -1950,10 +1950,13 @@ def upload_resumes(
     db: Session = Depends(get_db)
 ):
     job = _verify_job_access(job_id, current_user, active_org_id, db)
-    # Resume upload is intake only. The legacy `source` query parameter remains
-    # accepted for client compatibility, but it must never make a stage decision;
-    # recruiters advance candidates explicitly after reviewing the resume.
-        
+    # `source` drives stage placement exactly like add_applicant/add_applicants_bulk
+    # below (scheduled -> screening pending, functional/exit -> functional pending).
+    # This route persists the actual resume file + extracted text itself (see
+    # resume_url/resume_text below), so — unlike an older client-side-parse-then-JSON
+    # path this once had to work around — a scheduled candidate here always has a
+    # real CV on file; there's no CV_REQUIRED risk in honoring the caller's source.
+
     resume_dir = "uploads/resumes"
     _ensure_upload_dir(resume_dir)
 
@@ -2066,13 +2069,17 @@ def upload_resumes(
                 name=parsed_name or "Candidate",
                 email=email_val,
                 phone=parsed_phone or "+1 555-0199",
-                source=ApplicantSource.bulk_upload,
+                source=source or ApplicantSource.bulk_upload,
                 entry_method="bulk_upload",
                 resume_url=file_path,
                 resume_text=resume_text or None,
                 job_id=job_id,
                 resume_analysed=False
             )
+            if applicant.source == ApplicantSource.scheduled:
+                applicant.screening_status = InterviewStatus.pending
+            elif applicant.source in (ApplicantSource.functional, ApplicantSource.exit):
+                applicant.functional_status = InterviewStatus.pending
             db.add(applicant)
             created_applicants.append(applicant)
         

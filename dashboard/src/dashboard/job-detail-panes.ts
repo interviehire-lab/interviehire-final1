@@ -723,6 +723,18 @@ function renderJobDetailPanes(job) {
 				const wasOpen = dropdown.classList.contains("open");
 				closeAllRowKebabs();
 				if (!wasOpen) {
+					// Flip to open upward when there isn't room below in the
+					// viewport — otherwise a row near the bottom of a long table
+					// opens a dropdown that gets visually clipped (the container's
+					// overflow-x: auto forces overflow-y to compute as auto too,
+					// per the CSS overflow spec, even though it's authored as
+					// visible — see .stage-table-container in 19-stage-table.css).
+					// visibility:hidden (not display:none) while closed, so its
+					// real height is already measurable here.
+					const btnRect = btn.getBoundingClientRect();
+					const spaceBelow = window.innerHeight - btnRect.bottom;
+					const fitsAbove = dropdown.offsetHeight <= btnRect.top;
+					dropdown.classList.toggle("open-upward", dropdown.offsetHeight > spaceBelow && fitsAbove);
 					dropdown.classList.add("open");
 					btn.closest("tr")?.classList.add("kebab-open");
 				}
@@ -1765,7 +1777,7 @@ function buildAddApplicantsPanel(paneKey, count) {
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
           <div>
             <h4 style="margin:0;font-size:0.9rem;font-weight:700;color:var(--color-text-primary);font-family:var(--font-display);">Upload Applicant Resumes</h4>
-			<p style="margin:4px 0 0;font-size:0.75rem;color:var(--color-text-muted);">Upload PDF, DOCX, or ZIP files — candidates enter Resume Analysis for review</p>
+			<p style="margin:4px 0 0;font-size:0.75rem;color:var(--color-text-muted);">Upload PDF, DOCX, or ZIP files — candidates enter ${label} directly</p>
           </div>
           <button id="btn-add-panel-close-${paneKey}" style="background:none;border:none;color:var(--color-text-faint);cursor:pointer;padding:4px;border-radius:6px;display:flex;align-items:center;">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -1781,7 +1793,7 @@ function buildAddApplicantsPanel(paneKey, count) {
           <div style="font-size:0.78rem;color:var(--color-text-muted);margin-bottom:8px;"><span id="files-count-${paneKey}">0</span> file(s) selected</div>
           <div id="files-list-${paneKey}" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;"></div>
           <div style="display:flex;gap:10px;margin-top:14px;">
-			<button id="btn-import-${paneKey}" disabled style="flex:1;padding:9px 16px;border-radius:9px;border:1px solid rgba(var(--color-gold-rgb),0.3);background:rgba(var(--color-gold-rgb),0.1);color:var(--color-gold);font-size:0.82rem;font-weight:600;cursor:pointer;font-family:var(--font-body);transition:all 0.2s ease;">Import to Resume Analysis</button>
+			<button id="btn-import-${paneKey}" disabled style="flex:1;padding:9px 16px;border-radius:9px;border:1px solid rgba(var(--color-gold-rgb),0.3);background:rgba(var(--color-gold-rgb),0.1);color:var(--color-gold);font-size:0.82rem;font-weight:600;cursor:pointer;font-family:var(--font-body);transition:all 0.2s ease;">Import to ${label}</button>
             <button id="btn-cancel-${paneKey}" style="padding:9px 16px;border-radius:9px;border:1px solid var(--glass-border);background:rgba(255,255,255,0.04);color:var(--color-text-muted);font-size:0.82rem;cursor:pointer;font-family:var(--font-body);transition:all 0.2s ease;">Cancel</button>
           </div>
         </div>
@@ -1878,10 +1890,15 @@ function bindAddApplicantsPanel(job, paneKey) {
 		importBtn.textContent = "Importing…";
 
 		try {
+			// Same stage routing as sourcing.ts's importResumesCandidates — this
+			// route persists the actual uploaded file + extracted text itself
+			// (see upload_resumes in backend/app/routers/jobs.py), so a
+			// screening/functional pane here always has a real CV on file.
+			const sourceMap = { screening: "scheduled", functional: "functional" };
 			const newCands = await apiUploadResumes(
 				job.id,
 				uploadedFiles.map((f) => f.file),
-				null,
+				sourceMap[paneKey] || null,
 			);
 			// Merge new candidates into AppState without losing others
 			const others = (AppState.candidates || []).filter(

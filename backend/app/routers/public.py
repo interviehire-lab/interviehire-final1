@@ -23,7 +23,7 @@ from app.config import settings
 from app.schemas import OutgoingMessage
 from app.websocket_manager import manager
 from app.utils.google_calendar import create_calendar_event, update_calendar_event
-from app.utils.google_drive import upload_recording
+from app.utils.backblaze import upload_recording_to_b2
 from app.utils.email_sender import send_ical_invitation_email
 from app.utils.resume_parser import extract_text_from_file
 from app.utils.uploads import ensure_upload_dir, safe_upload_path
@@ -1014,16 +1014,19 @@ def upload_interview_recording(
     candidate_name = applicant.name if applicant else str(session_id)
     filename = f"{candidate_name} - {job_title} - {session_id}.webm"
 
+    # session_id as the key prefix guarantees no collisions even if two
+    # candidates share a name; the human-readable filename stays in the key
+    # so the object is still identifiable from a bucket browser.
+    b2_key = f"recordings/{session_id}/{filename}"
+
     tmp = tempfile.NamedTemporaryFile(suffix=".webm", delete=False)
     try:
         shutil.copyfileobj(file.file, tmp)
         tmp.close()
-        result = upload_recording(
+        result = upload_recording_to_b2(
             tmp.name,
-            filename,
+            b2_key,
             mime_type=file.content_type or "video/webm",
-            recruiter_id=job.created_by_id if job else None,
-            db=db,
         )
     finally:
         try:
@@ -1033,7 +1036,7 @@ def upload_interview_recording(
 
     if not result:
         return {"ok": False, "simulated": True}
-    return {"ok": True, "driveFileId": result["id"], "driveUrl": result["webViewLink"]}
+    return {"ok": True, "b2Key": result}
 
 
 # Maps the engine's aviral-eval recommendation onto the fit vocabulary the dashboard

@@ -136,6 +136,10 @@ class InterviewSession(Base):
     # backend's Drive-upload webhook (see routers/public.py upload_interview_recording).
     recordingDriveFileId = Column(String, nullable=True)
     recordingDriveUrl = Column(String, nullable=True)
+    # B2 (S3-compatible) object key — replaces the two Drive columns above for
+    # new recordings (see app/utils/backblaze.py). Not a URL: the bucket is
+    # private, so playback needs a presigned URL minted fresh per read.
+    recordingB2Key = Column(String, nullable=True)
     # Per-candidate invite token (shared with the engine). When set, the engine
     # requires a matching token to fetch the session + register on the WS, so only
     # the invited candidate can enter. Null = open (legacy/scheduled/demo path).

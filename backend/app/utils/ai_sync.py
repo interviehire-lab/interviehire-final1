@@ -1,11 +1,13 @@
 import json
 import logging
+from datetime import timezone
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from app.models.applicant import Applicant
 from app.models.job import Job, JobType
 from app.models.organisation import Organisation
 from app.models.ai_integration import Company, Candidate, JobRole, Question, InterviewSession, ProctoringLog, RoleType, SessionStatus, Severity, Difficulty
+from app.utils.backblaze import get_presigned_recording_url
 
 logger = logging.getLogger(__name__)
 
@@ -642,6 +644,23 @@ def get_applicant_full_report(db: Session, applicant_id: str) -> Dict[str, Any]:
     if not session:
         return {"status": "not_scheduled", "evaluated": False, "report": None}
     transcript_turns = session.transcript if isinstance(session.transcript, list) else []
+    # B2 playback URL is minted fresh here (never stored — the bucket is
+    # private and presigned URLs expire), so this read always reflects a
+    # currently-valid link. Falls back to nothing (None) for sessions without
+    # a B2 upload — the dashboard then falls back to the legacy Drive iframe
+    # via recordingDriveFileId, if that's set instead.
+    recording_playback_url = get_presigned_recording_url(session.recordingB2Key)
+    # session.startedAt is a TIMESTAMPTZ column (always UTC in Postgres), but
+    # some driver/session states hand back a naive datetime after a fresh
+    # read — .isoformat() on that omits the UTC offset entirely, which
+    # JavaScript's Date.parse() then silently misinterprets as LOCAL time
+    # (not UTC), throwing marker-rail offsets off by the browser's UTC
+    # offset. Attach UTC explicitly before serializing so this always comes
+    # out unambiguous, matching how ProctoringLog.occurredAt is serialized.
+    started_at = session.startedAt
+    if started_at is not None and started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    recording_started_at = started_at.isoformat() if started_at else None
     if not session.evaluation:
         return {
             "status": session.status.value,
@@ -649,6 +668,8 @@ def get_applicant_full_report(db: Session, applicant_id: str) -> Dict[str, Any]:
             "report": None,
             "recordingUrl": session.recordingDriveUrl,
             "recordingDriveFileId": session.recordingDriveFileId,
+            "recordingPlaybackUrl": recording_playback_url,
+            "recordingStartedAt": recording_started_at,
             "transcript": transcript_turns,
         }
     return {
@@ -658,6 +679,8 @@ def get_applicant_full_report(db: Session, applicant_id: str) -> Dict[str, Any]:
         "reportUrl": session.reportUrl,
         "recordingUrl": session.recordingDriveUrl,
         "recordingDriveFileId": session.recordingDriveFileId,
+        "recordingPlaybackUrl": recording_playback_url,
+        "recordingStartedAt": recording_started_at,
         "transcript": transcript_turns,
     }
 
