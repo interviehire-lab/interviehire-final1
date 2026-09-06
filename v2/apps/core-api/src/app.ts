@@ -10,6 +10,7 @@ import {
   type DecisionService,
   type DeepAnalysisService,
 } from "@interviehire/domain-hiring";
+import type { LegacyGateway } from "./compatibility";
 
 export interface CoreAppDependencies {
   readonly applicationRepository: ApplicationRepository;
@@ -18,6 +19,7 @@ export interface CoreAppDependencies {
   readonly scheduling?: SchedulingService;
   readonly decisions?: DecisionService;
   readonly deepAnalysis?: DeepAnalysisService;
+  readonly legacyGateway?: LegacyGateway;
 }
 
 export function createCoreApp(dependencies: CoreAppDependencies) {
@@ -41,6 +43,10 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
 
   return new Elysia({ name: "interviehire-v2-core" })
     .get("/health", () => ({ status: "ok", service: "core-api" }))
+    .all("/compat/*", ({ request, params, set }) => {
+      if (!dependencies.legacyGateway) { set.status = 503; return { code: "UNAVAILABLE", message: "Legacy compatibility gateway is unavailable." }; }
+      return dependencies.legacyGateway.forward(request, params["*"]);
+    })
     .get("/v2/jobs/:id/board", async ({ headers, params }) => {
       const applications = await Effect.runPromise(Effect.tryPromise(() =>
         queries.listForJob(headers["x-tenant-id"], params.id),

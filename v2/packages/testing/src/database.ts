@@ -20,4 +20,4 @@ export async function resetInterviewDb(_url: string): Promise<void> {
   finally { await sql.end(); }
 }
 
-export async function resetOpsDb(url: string): Promise<void> { const sql = postgres(url, { max: 1 }); try { await sql`TRUNCATE v2_notification_deliveries`; } finally { await sql.end(); } }
+export async function resetOpsDb(url: string): Promise<void> { const sql = postgres(url, { max: 1 }); try { await sql`TRUNCATE v2_notification_deliveries, v2_automation_runs`; } finally { await sql.end(); } }

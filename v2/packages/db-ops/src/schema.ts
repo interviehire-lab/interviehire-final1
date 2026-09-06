@@ -1,4 +1,6 @@
-import { integer, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { integer, jsonb, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 export const notificationChannel = pgEnum("v2_notification_channel", ["email", "whatsapp", "robocall"]);
 export const notificationStatus = pgEnum("v2_notification_status", ["running", "sent", "failed"]);
+export const automationStatus = pgEnum("v2_automation_status", ["running", "complete", "failed"]);
 export const notificationDeliveries = pgTable("v2_notification_deliveries", { id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), channel: notificationChannel("channel").notNull(), status: notificationStatus("status").notNull(), attempt: integer("attempt").notNull().default(0), providerMessageId: text("provider_message_id"), errorCode: text("error_code"), startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }).notNull(), completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }) });
+export const automationRuns = pgTable("v2_automation_runs", { id: text("id").primaryKey(), status: automationStatus("status").notNull(), attempt: integer("attempt").notNull().default(0), result: jsonb("result").$type<Readonly<Record<string, unknown>>>(), errorCode: text("error_code"), startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }).notNull(), completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }) });

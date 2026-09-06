@@ -20,11 +20,12 @@
 | Voice | Start/timing/access policy | `interview-policy.ts`, public and internal start routes | V2 synchronous Interview service | MIGRATED | domain/API tests for 5/25-minute timing and access gates |
 | Voice | Turn idempotency | `voice-agent/src/engine-client.ts` idempotency key | V2 synchronous Interview service | MIGRATED | unit/API/PostgreSQL restart replay tests |
 | Voice | Durable completion | legacy complete routes and evaluation poller | Interview transaction + outbox | MIGRATED | PostgreSQL state/event/replay test |
-| Privacy | DSAR/export/retention | `backend/tests/test_data_rights.py`, `test_retention.py` | compatibility gateway | PENDING MIGRATION | Proxy smoke pending |
-| Talent | Search/dedupe/ranking/compliance | `backend/tests/test_talent_finder.py` | compatibility gateway | PENDING MIGRATION | Proxy smoke pending |
+| Privacy | DSAR/export | `backend/tests/test_data_rights.py` | `/compat/*` anti-corruption gateway | PROXIED | method/path/query proxy test |
+| Privacy | Retention | `test_retention.py`, internal retention endpoint | daily `automations` scheduler -> compatibility client | PROXIED | retry/idempotency test |
+| Talent | Search/dedupe/ranking/compliance | `backend/tests/test_talent_finder.py` | `/compat/*` anti-corruption gateway | PROXIED | in-process proxy contract test |
 | Evaluation | Holistic/report + structured/Aviral evaluators | poller, transcript routes, `aviral-eval` | `ai.interview` worker with independent durable results | MIGRATED | unit + real PostgreSQL/Redis retry/merge test |
 | Evaluation | Deterministic fallback | `interview-engine/apps/api/src/lib/openrouter.ts` | resilient evaluator adapter | MIGRATED | primary-failure fallback test |
 | Evaluation | Tenant-scoped durable report read | legacy report routes | `GET /internal/v2/sessions/:id/evaluation` | MIGRATED | in-process API contract test |
 | Notifications | Schedule confirmations and reminders | legacy email/Twilio scheduling paths, `reminders.py` | reference-only `notifications` jobs + Ops ledger | MIGRATED | unit/PostgreSQL idempotency and scheduling event tests |
 | Notifications | Application decision email | legacy recruiter/candidate mail paths | `notification.requested.v1` | MIGRATED | decision transaction test |
-| Automation | Retention | `backend/app/jobs/retention.py` | `automations` queue | PENDING MIGRATION | Legacy tests located |
+| Automation | Retention scheduling | `backend/app/jobs/retention.py` | BullMQ Job Scheduler + Ops ledger + legacy engine | PROXIED | processor replay test |

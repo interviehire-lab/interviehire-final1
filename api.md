@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-07** — **Added V2 `ALL /compat/*` as the explicit anti-corruption proxy for secondary legacy APIs.** The gateway preserves method, query, headers, and body while forwarding to the configured legacy backend; V2 code does not import or write legacy schemas. The `automations` queue now uses a BullMQ daily Job Scheduler and an Ops-owned idempotent run ledger to invoke the existing shared-secret retention engine safely under retries.
 - **2026-09-07** — **V2 scheduling and decision transactions now emit reference-only `notification.requested.v1` work for email, WhatsApp, and robocall delivery.** Schedule commands create immediate confirmation and 30-minute-before reminder events for each selected channel; decisions create email work. Recipient PII remains in Hiring storage and is loaded only after dequeue. Ops owns an idempotent per-channel delivery ledger. No HTTP route shape changed.
 - **2026-09-07** — **Added recruiter-facing V2 `GET /v2/applications/{id}/deep-analysis` and `POST /v2/applications/{id}/decisions`.** Deep Analysis resolves the explicit Core-owned application/session mapping and reads the tenant-scoped durable Interview report. Decisions accept only `hired | rejected`, remain separate from the three operational stages, and atomically write the application decision, audit history, and `application.decision-recorded.v1` outbox event.
 - **2026-09-07** — **Added asynchronous dual interview evaluation and `GET /internal/v2/sessions/{id}/evaluation`.** `interview.completed.v1` is dispatched to `ai.interview`; the holistic/report and structured/Aviral provider ports persist separate run status/results, retry only incomplete work, and merge into the durable session report after both are ready. A resilient provider wrapper retains deterministic fallback behavior. The internal read is service-secret protected and tenant scoped.
@@ -94,6 +95,16 @@
 V2 runs as a separate Bun/Elysia application. The current migration slice injects the
 authenticated tenant/actor context through headers; the legacy JWT compatibility adapter
 is not yet mounted. All responses are JSON. Elysia validation failures return 422.
+
+### ALL /compat/{legacyPath...}
+
+- **Auth/request/response:** preserved from the target legacy route.
+- **503:** `{ "code": "UNAVAILABLE", "message": "Legacy compatibility gateway is unavailable." }` when not configured.
+
+The suffix after `/compat/` is forwarded to the configured legacy backend with method,
+query, headers, and body intact. This is the anti-corruption boundary for secondary
+features such as Talent Finder, privacy/DSAR, platform admin, and invites; V2 packages
+do not gain direct access to legacy-owned database tables.
 
 ### GET /health
 

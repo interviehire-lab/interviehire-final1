@@ -83,12 +83,19 @@ delivery and reminder scheduling are persistently idempotent with isolated failu
 Completed with reference-only confirmation/reminder events, delayed-delivery metadata,
 tenant-scoped contact lookup, provider ports, and an Ops-owned attempt ledger.
 
-## DOING — Retention automation and compatibility proxies
+## DONE — Retention automation and compatibility proxies
 
 RED: a scheduled retention scan is safe under retries and secondary legacy surfaces are
 reachable through an explicit compatibility boundary without shared-schema writes.
 
+Completed with a daily BullMQ Job Scheduler, durable Ops run claims, a shared-secret
+retention client, and a method/body/query-preserving Core compatibility gateway.
+
+## DOING — Recruiter Web and deterministic demo
+
+RED: three-column accessible board, application sheet, schedule/decision actions, async
+status, Deep Analysis, deterministic seed, and golden-path browser coverage.
+
 ## TODO
 
-- Recruiter Web, Deep Analysis, deterministic demo seed, and Playwright golden path
-- Retention automation and compatibility proxies
+- Recruiter Web, deterministic seed, Playwright golden path, and service bootstraps
