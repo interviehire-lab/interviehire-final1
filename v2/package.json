@@ -1,0 +1,25 @@
+{
+  "name": "interviehire-v2",
+  "private": true,
+  "packageManager": "bun@1.3.14",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "test": "bun test packages/*/src apps/*/src tests",
+    "test:unit": "bun test packages/contracts/src packages/domain-hiring/src packages/testing/src",
+    "test:integration": "bun test tests/integration",
+    "typecheck": "bunx tsc -b",
+    "build": "bunx tsc -b",
+    "infra:up": "docker compose -f compose.test.yml up -d --wait",
+    "infra:down": "docker compose -f compose.test.yml down",
+    "db:migrate:test": "bun run packages/db-hiring/src/migrate.ts"
+  },
+  "devDependencies": {
+    "@interviehire/db-hiring": "workspace:*",
+    "@interviehire/domain-hiring": "workspace:*",
+    "@interviehire/testing": "workspace:*",
+    "@types/bun": "latest",
+    "bullmq": "^5.58.5",
+    "drizzle-orm": "^0.44.5",
+    "typescript": "^5.9.2"
+  }
+}

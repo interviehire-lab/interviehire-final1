@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/contracts" },
+    { "path": "packages/testing" },
+    { "path": "packages/domain-hiring" },
+    { "path": "packages/db-hiring" },
+    { "path": "packages/queue" },
+    { "path": "apps/core-api" }
+  ]
+}

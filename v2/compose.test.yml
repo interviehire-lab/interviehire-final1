@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: interviehire_v2_test
+      POSTGRES_USER: interviehire
+      POSTGRES_PASSWORD: interviehire_test
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U interviehire -d interviehire_v2_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    tmpfs: [/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    tmpfs: [/data]

@@ -1,0 +1,12 @@
+{
+  "name": "@interviehire/db-hiring",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@interviehire/contracts": "workspace:*",
+    "@interviehire/domain-hiring": "workspace:*",
+    "drizzle-orm": "^0.44.5",
+    "postgres": "^3.4.7"
+  },
+  "exports": "./src/index.ts"
+}

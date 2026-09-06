@@ -1,0 +1,7 @@
+{
+  "name": "@interviehire/testing",
+  "private": true,
+  "type": "module",
+  "dependencies": { "bullmq": "^5.58.5", "postgres": "^3.4.7" },
+  "exports": "./src/index.ts"
+}

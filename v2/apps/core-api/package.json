@@ -1,0 +1,11 @@
+{
+  "name": "@interviehire/core-api",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@interviehire/contracts": "workspace:*",
+    "@interviehire/domain-hiring": "workspace:*",
+    "effect": "^3.17.14",
+    "elysia": "^1.4.13"
+  }
+}

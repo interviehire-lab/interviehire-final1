@@ -1,0 +1,7 @@
+{
+  "name": "@interviehire/domain-hiring",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@interviehire/contracts": "workspace:*" },
+  "exports": "./src/index.ts"
+}
