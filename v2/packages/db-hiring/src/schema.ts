@@ -48,12 +48,20 @@ export const applicationStageHistory = pgTable("v2_application_stage_history", {
 
 export const applicationInterviewRefs = pgTable("v2_application_interview_refs", {
   applicationId: text("application_id").notNull().references(() => applications.id),
+  tenantId: text("tenant_id"),
   interviewSessionId: text("interview_session_id").notNull(),
   stage: interviewStage("interview_stage").notNull(),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true, mode: "string" }),
+  timeZone: text("time_zone"),
+  deliveryMethods: jsonb("delivery_methods").$type<readonly ("email" | "whatsapp" | "robocall")[]>(),
+  correlationId: text("correlation_id"),
+  idempotencyKey: text("idempotency_key"),
+  actorId: text("actor_id"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
 }, (table) => [
   uniqueIndex("v2_application_interview_stage_idx").on(table.applicationId, table.stage),
   uniqueIndex("v2_interview_session_ref_idx").on(table.interviewSessionId),
+  uniqueIndex("v2_schedule_idempotency_idx").on(table.tenantId, table.idempotencyKey),
 ]);
 
 export const hiringOutbox = pgTable("v2_hiring_outbox", {

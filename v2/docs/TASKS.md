@@ -34,10 +34,19 @@ provider failures remain retryable.
 Completed through domain, API, PostgreSQL atomicity, real BullMQ success/retry/duplicate,
 reference-only payload, and durable read-after-worker-restart tests.
 
-## DOING — Scheduling and Interview API bridge
+## DONE — Core scheduling orchestration
 
 RED: scheduling provisions an independently generated session ID, persists an explicit
 application/session mapping, and does not move stage when provisioning fails.
+
+Completed with domain/API/PostgreSQL tests. Core sees only an `InterviewProvisioner`
+port; its transaction stores mapping, stage history, and outbox without importing
+Interview-owned storage.
+
+## DOING — Interview API session provisioning
+
+RED: provision endpoint creates a distinct session ID, validates stage/timing inputs,
+is tenant/idempotency scoped, and can be called through the Core adapter.
 
 ## TODO
 

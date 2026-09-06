@@ -6,12 +6,14 @@ import {
   type ApplicationQueryRepository,
   type ApplicationRepository,
   type ResumeAnalysisService,
+  type SchedulingService,
 } from "@interviehire/domain-hiring";
 
 export interface CoreAppDependencies {
   readonly applicationRepository: ApplicationRepository;
   readonly applicationQueries?: ApplicationQueryRepository;
   readonly resumeAnalysis?: ResumeAnalysisService;
+  readonly scheduling?: SchedulingService;
 }
 
 export function createCoreApp(dependencies: CoreAppDependencies) {
@@ -29,6 +31,7 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
     findJob: async () => undefined,
   };
   const resumeAnalysis = dependencies.resumeAnalysis ?? unavailableResumeAnalysis;
+  const scheduling = dependencies.scheduling;
 
   return new Elysia({ name: "interviehire-v2-core" })
     .get("/health", () => ({ status: "ok", service: "core-api" }))
@@ -87,6 +90,39 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
       return { ...run, correlationId: headers["x-correlation-id"] };
     }, {
       headers: readHeaders,
+      params: t.Object({ id: t.String({ minLength: 1 }) }),
+    })
+    .post("/v2/applications/:id/schedule", async ({ body, headers, params, set }) => {
+      if (!scheduling) {
+        set.status = 503;
+        return { ok: false as const, code: "UNAVAILABLE" as const, message: "Scheduling is unavailable.", correlationId: headers["x-correlation-id"] };
+      }
+      const result = await Effect.runPromise(Effect.tryPromise(() => scheduling.schedule({
+        applicationId: params.id,
+        tenantId: headers["x-tenant-id"],
+        actorId: headers["x-actor-id"],
+        correlationId: headers["x-correlation-id"],
+        idempotencyKey: headers["idempotency-key"],
+        interviewStage: body.interviewStage,
+        scheduledAt: body.scheduledAt,
+        timeZone: body.timeZone,
+        deliveryMethods: body.deliveryMethods,
+      })));
+      set.status = result.ok ? 201 : result.code === "NOT_FOUND" ? 404 : 409;
+      return { ...result, correlationId: headers["x-correlation-id"] };
+    }, {
+      body: t.Object({
+        interviewStage: t.Union([t.Literal("recruiter_screening"), t.Literal("functional_interview")]),
+        scheduledAt: t.String({ format: "date-time" }),
+        timeZone: t.String({ minLength: 1 }),
+        deliveryMethods: t.Array(t.Union([t.Literal("email"), t.Literal("whatsapp"), t.Literal("robocall")]), { minItems: 1 }),
+      }),
+      headers: t.Object({
+        "x-tenant-id": t.String({ minLength: 1 }),
+        "x-actor-id": t.String({ minLength: 1 }),
+        "x-correlation-id": t.String({ minLength: 1 }),
+        "idempotency-key": t.String({ minLength: 1 }),
+      }, { additionalProperties: true }),
       params: t.Object({ id: t.String({ minLength: 1 }) }),
     })
     .post("/v2/applications/:id/transitions", async ({ body, headers, params, set }) => {
