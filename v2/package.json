@@ -8,7 +8,11 @@
     "test:unit": "bun test packages/contracts/src packages/domain-hiring/src packages/testing/src",
     "test:integration": "bun test --max-concurrency 1 tests/integration",
     "typecheck": "bunx tsc -b",
-    "build": "bunx tsc -b",
+    "build": "bunx tsc -b && bun run --cwd apps/recruiter-web build",
+    "dev:core": "bun run --cwd apps/core-api dev",
+    "dev:interview": "bun run --cwd apps/interview-api dev",
+    "dev:web": "bun run --cwd apps/recruiter-web dev",
+    "seed:demo": "bun run scripts/seed-demo.ts",
     "infra:up": "docker compose -f compose.test.yml up -d --wait",
     "infra:down": "docker compose -f compose.test.yml down",
     "db:migrate:test": "bun run packages/db-hiring/src/migrate.ts && bun run packages/db-interview/src/migrate.ts && bun run packages/db-ops/src/migrate.ts"

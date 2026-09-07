@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-07** — **Added V2 candidate intake at `POST /v2/jobs/{id}/applications`.** The tenant-scoped JSON command accepts candidate identity/contact fields, source, and extracted resume text, creates a new application in `resume_analysis` with a separate generated ID, an `active` decision, and `not_requested` async status, and returns 201. Resume analysis remains an explicit asynchronous follow-up command.
 - **2026-09-07** — **Added V2 `ALL /compat/*` as the explicit anti-corruption proxy for secondary legacy APIs.** The gateway preserves method, query, headers, and body while forwarding to the configured legacy backend; V2 code does not import or write legacy schemas. The `automations` queue now uses a BullMQ daily Job Scheduler and an Ops-owned idempotent run ledger to invoke the existing shared-secret retention engine safely under retries.
 - **2026-09-07** — **V2 scheduling and decision transactions now emit reference-only `notification.requested.v1` work for email, WhatsApp, and robocall delivery.** Schedule commands create immediate confirmation and 30-minute-before reminder events for each selected channel; decisions create email work. Recipient PII remains in Hiring storage and is loaded only after dequeue. Ops owns an idempotent per-channel delivery ledger. No HTTP route shape changed.
 - **2026-09-07** — **Added recruiter-facing V2 `GET /v2/applications/{id}/deep-analysis` and `POST /v2/applications/{id}/decisions`.** Deep Analysis resolves the explicit Core-owned application/session mapping and reads the tenant-scoped durable Interview report. Decisions accept only `hired | rejected`, remain separate from the three operational stages, and atomically write the application decision, audit history, and `application.decision-recorded.v1` outbox event.
@@ -146,6 +147,18 @@ do not gain direct access to legacy-owned database tables.
 
 `columns` always contains exactly the three stages above in that order. Decisions remain
 on application cards and never create additional board columns.
+
+### POST /v2/jobs/{id}/applications
+
+- **Required headers:** `x-tenant-id`, `x-correlation-id`
+- **Path:** `id: string` (job ID)
+- **Request:** `{ "candidateName": "string", "candidateEmail": "email", "candidatePhone": "string | null", "source": "string", "resumeText": "non-empty string" }`
+- **201:** the created application with `stage: "resume_analysis"`, `decision: "active"`, `asyncStatus: "not_requested"`, `createdAt`, and `correlationId`.
+- **422:** invalid headers, path, or body.
+- **503:** `{ "code": "UNAVAILABLE", "message": "Candidate intake is unavailable.", "correlationId": "string" }` when the intake service is not configured.
+
+Candidate intake never advances a stage or starts AI work implicitly. The recruiter must
+request resume analysis through the dedicated asynchronous command.
 
 ### GET /v2/applications/{id}
 

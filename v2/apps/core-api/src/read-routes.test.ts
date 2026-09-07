@@ -57,3 +57,40 @@ describe("Core API read routes", () => {
     expect(await response.json()).toMatchObject({ code: "NOT_FOUND" });
   });
 });
+
+test("POST job application starts a candidate in Resume Analysis", async () => {
+  const app = createCoreApp({
+    ...dependencies(),
+    intake: {
+      create: async (input) => ({
+        id: "app_new",
+        ...input,
+        stage: "resume_analysis",
+        decision: "active",
+        asyncStatus: "not_requested",
+        createdAt: "2026-09-07T11:00:00.000Z",
+      }),
+    },
+  });
+  const response = await app.handle(new Request("http://localhost/v2/jobs/job_1/applications", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-tenant-id": "org_1",
+      "x-correlation-id": "corr",
+    },
+    body: JSON.stringify({
+      candidateName: "Asha",
+      candidateEmail: "asha@example.test",
+      candidatePhone: null,
+      source: "direct_link",
+      resumeText: "TypeScript engineer",
+    }),
+  }));
+  expect(response.status).toBe(201);
+  expect(await response.json()).toMatchObject({
+    id: "app_new",
+    stage: "resume_analysis",
+    decision: "active",
+  });
+});

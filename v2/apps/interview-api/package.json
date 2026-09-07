@@ -1,4 +1,5 @@
 {
   "name": "@interviehire/interview-api", "private": true, "type": "module",
-  "dependencies": { "@interviehire/domain-interview": "workspace:*", "effect": "^3.17.14", "elysia": "^1.4.13" }
+  "dependencies": { "@interviehire/domain-interview": "workspace:*", "@interviehire/db-interview": "workspace:*", "effect": "^3.17.14", "elysia": "^1.4.13" },
+  "scripts": { "dev": "bun --watch src/server.ts", "start": "bun src/server.ts" }
 }

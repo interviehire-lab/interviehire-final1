@@ -5,7 +5,9 @@
   "dependencies": {
     "@interviehire/contracts": "workspace:*",
     "@interviehire/domain-hiring": "workspace:*",
+    "@interviehire/db-hiring": "workspace:*",
     "effect": "^3.17.14",
     "elysia": "^1.4.13"
-  }
+  },
+  "scripts": { "dev": "bun --watch src/server.ts", "start": "bun src/server.ts" }
 }

@@ -4,3 +4,5 @@ dist/
 .env
 .env.*
 !.env.test.example
+.playwright-cli/
+output/

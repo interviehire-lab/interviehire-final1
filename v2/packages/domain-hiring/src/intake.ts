@@ -1,0 +1,5 @@
+import type { ApplicationView } from "./board";
+export interface NewApplication extends ApplicationView { readonly candidateEmail: string; readonly candidatePhone: string | null; readonly resumeText: string; readonly createdAt: string }
+export interface ApplicationIntakeRepository { create(application: NewApplication): Promise<void> }
+export interface ApplicationIntakeService { create(input: { readonly tenantId:string; readonly jobId:string; readonly candidateName:string; readonly candidateEmail:string; readonly candidatePhone:string|null; readonly source:string; readonly resumeText:string }): Promise<NewApplication> }
+export function createApplicationIntakeService(repository:ApplicationIntakeRepository,newId:()=>string,now:()=>string):ApplicationIntakeService { return {async create(input){const application:NewApplication={id:newId(),...input,stage:"resume_analysis",decision:"active",asyncStatus:"not_requested",createdAt:now()};await repository.create(application);return application}} }

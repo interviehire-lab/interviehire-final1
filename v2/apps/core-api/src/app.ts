@@ -9,6 +9,7 @@ import {
   type SchedulingService,
   type DecisionService,
   type DeepAnalysisService,
+  type ApplicationIntakeService,
 } from "@interviehire/domain-hiring";
 import type { LegacyGateway } from "./compatibility";
 
@@ -20,6 +21,7 @@ export interface CoreAppDependencies {
   readonly decisions?: DecisionService;
   readonly deepAnalysis?: DeepAnalysisService;
   readonly legacyGateway?: LegacyGateway;
+  readonly intake?: ApplicationIntakeService;
 }
 
 export function createCoreApp(dependencies: CoreAppDependencies) {
@@ -59,6 +61,10 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
       headers: readHeaders,
       params: t.Object({ id: t.String({ minLength: 1 }) }),
     })
+    .post("/v2/jobs/:id/applications", async ({ body, headers, params, set }) => {
+      if (!dependencies.intake) { set.status=503; return {code:"UNAVAILABLE",message:"Candidate intake is unavailable.",correlationId:headers["x-correlation-id"]}; }
+      const result=await dependencies.intake.create({tenantId:headers["x-tenant-id"],jobId:params.id,...body});set.status=201;return {...result,correlationId:headers["x-correlation-id"]};
+    },{params:t.Object({id:t.String({minLength:1})}),headers:readHeaders,body:t.Object({candidateName:t.String({minLength:1}),candidateEmail:t.String({format:"email"}),candidatePhone:t.Union([t.String(),t.Null()]),source:t.String({minLength:1}),resumeText:t.String({minLength:1})})})
     .get("/v2/applications/:id", async ({ headers, params, set }) => {
       const application = await Effect.runPromise(Effect.tryPromise(() =>
         queries.findForTenant(headers["x-tenant-id"], params.id),

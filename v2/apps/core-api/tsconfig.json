@@ -5,6 +5,7 @@
   "exclude": ["src/**/*.test.ts"],
   "references": [
     { "path": "../../packages/contracts" },
-    { "path": "../../packages/domain-hiring" }
+    { "path": "../../packages/domain-hiring" },
+    { "path": "../../packages/db-hiring" }
   ]
 }

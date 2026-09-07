@@ -6,3 +6,4 @@ export * from "./resume-analysis";
 export * from "./scheduling";
 export * from "./decision";
 export * from "./deep-analysis";
+export * from "./intake";
