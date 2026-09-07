@@ -10,6 +10,8 @@ import { soundEngine } from './sound';
 import { AppState } from './state';
 import { getDataSource, apiUpdateApplicant, apiFetchCandidateReport } from './api';
 import { API_BASE } from '../auth-client';
+import videojs from 'video.js';
+import 'videojs-markers';
 
 // ==========================================
 // CANDIDATE REPORT — FULL PAGE VIEW
@@ -18,7 +20,11 @@ import { API_BASE } from '../auth-client';
 // Tracks the current report page's recording-marker resize listener so a
 // re-navigation swaps it out instead of stacking a new one — see
 // bindReportPage's recording marker rail block.
-let recordingMarkerResizeListener = null;
+// The report page is rebuilt (innerHTML replaced) on every visit rather than
+// unmounted/remounted, so there's no lifecycle hook to dispose the previous
+// video.js instance automatically — this ref is how bindReportPage does it
+// manually before creating the next one.
+let recordingPlayer = null;
 
 const INSIGHT_PRESETS = [
   'Suggest next round questions for this candidate',
@@ -546,25 +552,33 @@ function buildRecordingCard(recordingPlaybackUrl, recordingFileId, recordingStar
   if (!recordingPlaybackUrl && !recordingFileId) return '';
   if (recordingPlaybackUrl) {
     const startedAtMs = recordingStartedAt ? Date.parse(recordingStartedAt) : NaN;
+    // video.js's markers plugin renders these directly on its seek bar (not a
+    // separate rail below it) — each needs a `time` in seconds and a `class`
+    // for severity coloring; `text` becomes the hover tooltip.
     const markers = (Array.isArray(violations) ? violations : [])
       .map(v => {
         const occurredMs = v.occurredAt ? Date.parse(v.occurredAt) : NaN;
         if (!Number.isFinite(startedAtMs) || !Number.isFinite(occurredMs)) return null;
-        const offsetSec = (occurredMs - startedAtMs) / 1000;
-        if (!Number.isFinite(offsetSec) || offsetSec < 0) return null;
-        return { offsetSec, severity: v.severity, eventType: v.eventType, occurredAt: v.occurredAt };
+        const time = (occurredMs - startedAtMs) / 1000;
+        if (!Number.isFinite(time) || time < 0) return null;
+        return {
+          time,
+          class: `vjs-marker-${sevTone(v.severity)}`,
+          text: `${String(v.eventType || 'Event').replace(/_/g, ' ')} — ${new Date(v.occurredAt).toLocaleTimeString()}`,
+        };
       })
       .filter(Boolean);
     return `
       <div class="rp-card rp-recording-card">
         <h4 class="rp-card-title">🎥 Interview Recording</h4>
-        <video class="rp-recording-video" src="${escapeHTML(recordingPlaybackUrl)}" controls playsinline preload="metadata"></video>
-        ${markers.length ? `
-        <div class="rp-recording-marker-rail">
-          ${markers.map(m => `<button type="button" class="rp-recording-marker ${sevTone(m.severity)}" data-offset-sec="${m.offsetSec}" title="${escapeHTML(String(m.eventType || 'Event').replace(/_/g, ' '))} — ${escapeHTML(new Date(m.occurredAt).toLocaleTimeString())}"></button>`).join('')}
-        </div>
-        <p class="rp-recording-marker-hint">Markers show proctoring events — click one to jump to that moment.</p>
-        ` : ''}
+        <video
+          class="rp-recording-video video-js vjs-big-play-centered"
+          data-recording-url="${escapeHTML(recordingPlaybackUrl)}"
+          data-markers="${escapeHTML(JSON.stringify(markers))}"
+          preload="metadata"
+          playsinline
+        ></video>
+        ${markers.length ? `<p class="rp-recording-marker-hint">Colored ticks on the seek bar mark proctoring events — click one to jump to that moment.</p>` : ''}
       </div>
     `;
   }
@@ -1066,36 +1080,32 @@ function bindReportPage(candidate, job, analysis, root, initialTab = 'overview')
     openCandidateReportPage(candidate.id);
   });
 
-  // Recording marker rail — each button already carries data-offset-sec
-  // (computed at render time from occurredAt/recordingStartedAt), but its
-  // on-screen position depends on the video's duration, which is only known
-  // once its metadata has loaded. Re-positions on resize since the rail's
-  // pixel width (and so each marker's % offset) can change.
+  // Recording player — video.js (instead of the bare browser <video> chrome)
+  // so proctoring-event markers can render directly on its seek bar via the
+  // videojs-markers plugin. Dispose the previous visit's player first: video.js
+  // takes over the <video> element it's given, so re-initializing on top of an
+  // already-enhanced element (e.g. navigating between two candidates' reports)
+  // would leak players and duplicate DOM.
+  if (recordingPlayer) {
+    recordingPlayer.dispose();
+    recordingPlayer = null;
+  }
   const recordingVideo = root.querySelector('.rp-recording-video');
   if (recordingVideo && recordingVideo.tagName === 'VIDEO') {
-    const markers = root.querySelectorAll('.rp-recording-marker');
-    const positionMarkers = () => {
-      const duration = recordingVideo.duration;
-      if (!Number.isFinite(duration) || duration <= 0) return;
-      markers.forEach((m) => {
-        const offsetSec = parseFloat(m.dataset.offsetSec);
-        const pct = Math.min(100, Math.max(0, (offsetSec / duration) * 100));
-        m.style.left = `${pct}%`;
-      });
-    };
-    recordingVideo.addEventListener('loadedmetadata', positionMarkers);
-    // Swap out the previous visit's resize listener rather than stacking a
-    // new one on every navigation to a report page (this is the only
-    // window-level listener in this file, so a small module-level ref is
-    // simpler here than importing the signal-scoped bind-guard pattern used
-    // for document-level listeners elsewhere in the dashboard).
-    if (recordingMarkerResizeListener) window.removeEventListener('resize', recordingMarkerResizeListener);
-    recordingMarkerResizeListener = positionMarkers;
-    window.addEventListener('resize', positionMarkers);
-    markers.forEach((m) => {
-      m.addEventListener('click', () => {
-        const offsetSec = parseFloat(m.dataset.offsetSec);
-        if (Number.isFinite(offsetSec)) recordingVideo.currentTime = offsetSec;
+    const url = recordingVideo.dataset.recordingUrl;
+    let markers = [];
+    try { markers = JSON.parse(recordingVideo.dataset.markers || '[]'); } catch { markers = []; }
+    const player = videojs(recordingVideo, {
+      controls: true,
+      preload: 'metadata',
+      fluid: false,
+      sources: url ? [{ src: url }] : [],
+    });
+    recordingPlayer = player;
+    player.ready(() => {
+      (player as any).markers({
+        markerTip: { display: true, text: (m) => m.text },
+        markers,
       });
     });
   }

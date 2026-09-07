@@ -1,0 +1,5 @@
+/* video.js base skin + the videojs-markers plugin's marker/tooltip styles —
+   the proctoring recording player in report-page.ts (.rp-recording-video).
+   Project-specific color overrides live in 27-report-page.css. */
+@import 'video.js/dist/video-js.css';
+@import 'videojs-markers/dist/videojs.markers.css';

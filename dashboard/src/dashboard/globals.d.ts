@@ -16,3 +16,12 @@ declare global {
     [key: string]: any;
   }
 }
+
+// videojs-markers has no published types — it's a small, stable UMD plugin
+// (registers a `markers()` method on video.js's Player via `videojs.registerPlugin`)
+// used by report-page.ts for the proctoring-recording seek-bar markers. The
+// call site casts the player to `any` for this method rather than augmenting
+// video.js's own `Player` type, since that type isn't published from a path
+// module augmentation can target (it's imported internally from a relative
+// submodule, not re-exported by name from the `video.js` package root).
+declare module 'videojs-markers';

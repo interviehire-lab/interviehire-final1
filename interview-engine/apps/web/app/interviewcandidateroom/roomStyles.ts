@@ -142,7 +142,11 @@ export const roomStyles = `
     box-shadow: 0 24px 90px rgba(0, 0, 0, .28);
   }
 
-  .avatar-panel { position: relative; min-height: 0; overflow: hidden; border-radius: 30px; }
+  /* Lina and the candidate each get an equal half of the panel, side by side,
+     instead of the candidate camera floating as a small PiP over Lina. */
+  .avatar-panel { position: relative; min-height: 0; overflow: hidden; border-radius: 30px; display: flex; }
+
+  .lina-panel { position: relative; flex: 1 1 50%; min-width: 0; overflow: hidden; }
 
   /* orb-ui's <Orb theme="cloud"> replaces the legacy CSS blob/sphere/wave
      visualization entirely (one visual system everywhere, no CSS-orb
@@ -222,25 +226,18 @@ export const roomStyles = `
 
   .right-stack { display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr); gap: 30px; }
 
-  /* Candidate camera = small picture-in-picture in the bottom-right corner of
-     Lina's avatar panel (Google-Meet style), so the right column is entirely
-     free for the question text. */
+  /* Candidate camera = the other half of the panel, equal size to Lina's side. */
   .candidate-panel {
-    position: absolute; z-index: 4; right: 22px; bottom: 22px;
-    width: clamp(168px, 19vw, 248px); aspect-ratio: 16 / 10;
-    overflow: hidden; border-radius: 16px; background: #020617;
-    border: 1px solid rgba(255, 255, 255, .2);
-    box-shadow: 0 12px 34px rgba(0, 0, 0, .55);
-    transition: box-shadow .12s ease, border-color .12s ease;
+    position: relative; flex: 1 1 50%; min-width: 0;
+    overflow: hidden; background: #020617;
+    border-left: 1px solid rgba(255, 255, 255, .14);
+    transition: box-shadow .12s ease;
   }
-  .candidate-panel .you-pill { top: 8px; left: 8px; padding: 4px 9px; font-size: 10px; letter-spacing: .16em; }
-  .candidate-panel .candidate-footer { padding: 8px 10px; }
 
   /* Lights up while the candidate's own voice is actually detected — see the
      AnalyserNode-based check in page.tsx. Answers "is my mic picking me up?". */
   .candidate-panel.speaking {
-    border-color: var(--lime);
-    box-shadow: 0 12px 34px rgba(0, 0, 0, .55), 0 0 0 3px rgba(212, 255, 0, .45), 0 0 22px rgba(212, 255, 0, .35);
+    box-shadow: inset 0 0 0 3px rgba(212, 255, 0, .45), inset 0 0 26px rgba(212, 255, 0, .3);
   }
 
   /* Demo/debug-only live-caption strip — proves browser STT is actually hearing
@@ -506,7 +503,8 @@ export const roomStyles = `
     .room { position: absolute; height: auto; min-height: 100vh; overflow: visible; }
     .topbar, .content { grid-template-columns: 1fr; }
     .connection { justify-content: flex-start; flex-wrap: wrap; }
-    .avatar-panel { min-height: 620px; }
+    .avatar-panel { min-height: 620px; flex-direction: column; }
+    .candidate-panel { border-left: none; border-top: 1px solid rgba(255, 255, 255, .14); }
     .controlbar { padding-right: 32px; }
   }
 `;

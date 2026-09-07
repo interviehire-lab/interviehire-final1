@@ -30,6 +30,7 @@
 @import './30-candidate-intelligence.css';
 @import './31-test-interview.css';
 @import './32-platform.css';
+@import './33-video-player.css';
 
 /* Dummy CSS to prevent Turbopack parser EOF issue */
 .dashboard-turbopack-fix { content: ''; }

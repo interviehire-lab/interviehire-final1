@@ -576,34 +576,38 @@
   border-radius: 10px;
   margin-top: 10px;
   background: #000;
+  overflow: hidden;
 }
 
-/* Proctoring-event markers under the recording — position (left: %) is set
-   at bind time in report-page.ts once the video's duration is known. Colors
-   match .rp-verdict-pill's existing severity tones (partial/missed) so a
-   marker and its matching Violations-table row read as the same signal. */
-.rp-recording-marker-rail {
-  position: relative;
-  height: 10px;
-  margin-top: 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+/* video.js chrome, restyled to match the report page's dark glass surface
+   instead of its default all-black skin. */
+.rp-recording-video.video-js .vjs-control-bar {
+  background: rgba(15, 15, 26, 0.82);
+  backdrop-filter: blur(6px);
 }
-.rp-recording-marker {
-  position: absolute;
-  top: 50%;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  border: 2px solid var(--glass-bg-solid, #1a1a2e);
-  padding: 0;
+.rp-recording-video.video-js .vjs-play-progress,
+.rp-recording-video.video-js .vjs-volume-level { background: var(--accent, #7c5cff); }
+.rp-recording-video.video-js .vjs-big-play-button {
+  background: rgba(15, 15, 26, 0.72);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* Proctoring-event markers, rendered by videojs-markers directly on the seek
+   bar itself (data-markers attribute in report-page.ts, wired up at bind
+   time). Colors match .rp-verdict-pill's existing severity tones (partial/
+   missed) so a marker and its matching Violations-table row read as the
+   same signal. */
+.rp-recording-video .vjs-marker {
+  top: 0;
+  height: 100%;
+  border-radius: 0;
   cursor: pointer;
   transition: transform 0.15s ease;
+  z-index: 2;
 }
-.rp-recording-marker:hover { transform: translate(-50%, -50%) scale(1.35); }
-.rp-recording-marker.partial { background: #f59e0b; }
-.rp-recording-marker.missed { background: #f43f5e; }
+.rp-recording-video .vjs-marker:hover { transform: scaleX(2.5); }
+.rp-recording-video .vjs-marker-partial { background: #f59e0b !important; }
+.rp-recording-video .vjs-marker-missed { background: #f43f5e !important; }
 .rp-recording-marker-hint {
   margin: 6px 0 0;
   font-size: 0.7rem;

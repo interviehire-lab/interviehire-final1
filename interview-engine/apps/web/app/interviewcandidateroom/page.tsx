@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { RemoteAudioTrack } from 'livekit-client';
 import { WS_URL, API_URL } from '@/lib/api';
 import { GazeCalibration } from '@/hooks/GazeCalibration';
 import { useProctoring, getBestViolationRecordingMimeType } from '@/hooks/useProctoring';
@@ -437,10 +438,36 @@ export default function Interview() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const [recordingStatus, setRecordingStatus] = useState('Idle');
-  // Full-interview recording mix: candidate mic + Lina's tab audio, combined via Web
+  // Full-interview recording mix: candidate mic + Lina's voice, combined via Web
   // Audio API so the uploaded file has both voices alongside the shared-screen video.
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioMixCtxRef = useRef<AudioContext | null>(null);
+  const audioMixDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  // Lina's voice is a LiveKit RemoteAudioTrack, not tab/system audio — screen-
+  // share audio capture is unreliable across browsers/OSes (e.g. unsupported
+  // for screen capture on macOS Chrome) and was why interviewer audio was
+  // missing from recordings. Tapping the same track the room already plays
+  // through <audio> is reliable regardless of OS audio-sharing support.
+  const agentAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+
+  const connectAgentAudioToMix = useCallback((track: RemoteAudioTrack | null) => {
+    agentAudioSourceRef.current?.disconnect();
+    agentAudioSourceRef.current = null;
+    const ctx = audioMixCtxRef.current;
+    const dest = audioMixDestRef.current;
+    const mediaTrack = track?.mediaStreamTrack;
+    if (!ctx || !dest || !mediaTrack) return;
+    const source = ctx.createMediaStreamSource(new MediaStream([mediaTrack]));
+    source.connect(dest);
+    agentAudioSourceRef.current = source;
+  }, []);
+
+  // The agent usually joins a few seconds after recording starts (dispatch is
+  // triggered by the early room.connect(), not by this effect) — so the mix
+  // must pick the track up whenever it (re)appears, not only at start time.
+  useEffect(() => {
+    connectAgentAudioToMix(voice.agentAudioTrack);
+  }, [voice.agentAudioTrack, connectAgentAudioToMix]);
 
   async function startRecording() {
     try {
@@ -460,15 +487,22 @@ export default function Interview() {
         if (micStream) ctx.createMediaStreamSource(micStream).connect(dest);
         if (screenAudio) ctx.createMediaStreamSource(screenAudio).connect(dest);
         audioMixCtxRef.current = ctx;
+        audioMixDestRef.current = dest;
+        connectAgentAudioToMix(voice.agentAudioTrack);
 
         recordStream = new MediaStream([...screenVideo.getVideoTracks(), ...dest.stream.getAudioTracks()]);
       } else if (original) {
         // Fallback: screen share unavailable for some reason — keep the old
-        // webcam recording behavior and include the already-granted mic.
-        recordStream = new MediaStream([
-          ...original.getVideoTracks(),
-          ...(micStream?.getAudioTracks() || []),
-        ]);
+        // webcam recording behavior and include the already-granted mic, mixed
+        // with Lina's voice the same way as the screen-share path above.
+        const ctx = new AudioContext();
+        const dest = ctx.createMediaStreamDestination();
+        if (micStream) ctx.createMediaStreamSource(micStream).connect(dest);
+        audioMixCtxRef.current = ctx;
+        audioMixDestRef.current = dest;
+        connectAgentAudioToMix(voice.agentAudioTrack);
+
+        recordStream = new MediaStream([...original.getVideoTracks(), ...dest.stream.getAudioTracks()]);
       }
 
       if (!recordStream) {
@@ -508,6 +542,9 @@ export default function Interview() {
     recorderRef.current?.stop();
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
+    agentAudioSourceRef.current?.disconnect();
+    agentAudioSourceRef.current = null;
+    audioMixDestRef.current = null;
     audioMixCtxRef.current?.close().catch(() => {});
     audioMixCtxRef.current = null;
   }
@@ -1306,21 +1343,24 @@ export default function Interview() {
 
         <main className="content content--conversational">
           <section className="avatar-panel">
-            <AIVisualAssistant
-              mode={assistantMode}
-              voiceActive={voiceActive && micOn}
-              room={voice.room}
-            />
-            <div className="avatar-overlay" />
-            <div className="identity">
-              <div className="identity-icon">✦</div>
-              <div>
-                <strong>Lina</strong>
-                <span>AI Interviewer</span>
+            <div className="lina-panel">
+              <AIVisualAssistant
+                mode={assistantMode}
+                voiceActive={voiceActive && micOn}
+                room={voice.room}
+              />
+              <div className="avatar-overlay" />
+              <div className="identity">
+                <div className="identity-icon">✦</div>
+                <div>
+                  <strong>Lina</strong>
+                  <span>AI Interviewer</span>
+                </div>
               </div>
             </div>
-            {/* Candidate camera as a Google-Meet-style PiP in the corner of Lina's
-                panel, so the right column is free to show the full question. */}
+
+            {/* Candidate camera as an equal-width half of the panel, next to
+                Lina — was previously a small corner PiP over her panel. */}
             <section className={`candidate-panel${voiceActive && micOn ? ' speaking' : ''}`}>
               <video
                 ref={videoRef}
