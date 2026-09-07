@@ -628,7 +628,16 @@
 .rp-proc-count.bad { color: #f43f5e; }
 
 /* ---------- Transcript ---------- */
-.rp-transcript { margin-top: 14px; }
+/* .transcript-chat-flow (16-shine.css) caps at max-height:180px + scroll —
+   fine for a small inline preview, but this is the dedicated, full-page
+   Transcript tab, which should show the whole conversation without an
+   inner scrollbar cutting it off. It's the only element carrying both
+   classes, so this override is scoped to just this tab. */
+.rp-transcript.transcript-chat-flow {
+  margin-top: 14px;
+  max-height: none;
+  overflow-y: visible;
+}
 
 /* ---------- Remarks ---------- */
 .rp-notes-area {
