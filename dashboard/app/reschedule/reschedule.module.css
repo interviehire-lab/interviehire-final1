@@ -72,7 +72,13 @@
   background: #000000;
   border: 1px solid rgba(255, 255, 255, 0.06);
   padding: 44px 40px;
-  overflow: hidden;
+  /* Not overflow:hidden — the date-time picker's popover (.dtPop) is an
+     absolutely-positioned child that can extend past the card's own
+     height once the calendar grid renders (6 rows for a month starting
+     late in the week). overflow:hidden here clipped it, hiding the time
+     input and everything below the visible day grid. Safe to drop: .card
+     has square corners (no border-radius), so there was never anything
+     for overflow:hidden to actually clip. */
   animation: cardAppear 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .card::before {
