@@ -8,10 +8,10 @@ import { API_BASE } from '../../src/auth-client';
 import styles from './reschedule.module.css';
 
 // Candidate-facing interview reschedule page. Linked from every interview
-// invite/reminder email as `{FRONTEND_URL}/reschedule?token=...` (previously
-// a static public/reschedule.html — rebuilt here as a proper route so the
-// date/time picker can be a real component instead of the bare browser
-// <input type="datetime-local">).
+// invite/reminder email as `{FRONTEND_URL}/reschedule?token=...`. Styled to
+// match src/styles/auth.css (login/signup) — same standalone-public-page
+// language (black bg, ambient teal orbs, sharp bottom-emphasis inputs,
+// solid-teal sheen-sweep CTA) rather than a one-off theme.
 //   GET  {API}/public/schedule/{token}    -> current interview details
 //   POST {API}/public/reschedule/{token}  -> set a new time (updates the
 //                                             calendar event + emails a
@@ -45,6 +45,26 @@ function fmtIST(iso?: string | null): string {
   );
 }
 
+// "in 2 days", "in 4 hours", "in 20 minutes" — lets a candidate gauge their
+// current slot at a glance instead of doing date math against an absolute
+// timestamp.
+function relativeFromNow(iso?: string | null): string | null {
+  if (!iso) return null;
+  const target = new Date(iso).getTime();
+  if (Number.isNaN(target)) return null;
+  const diffMs = target - Date.now();
+  const past = diffMs < 0;
+  const abs = Math.abs(diffMs);
+  const minutes = Math.round(abs / 60000);
+  const hours = Math.round(abs / 3600000);
+  const days = Math.round(abs / 86400000);
+  let phrase: string;
+  if (minutes < 60) phrase = `${minutes} min`;
+  else if (hours < 48) phrase = `${hours} hr`;
+  else phrase = `${days} day${days === 1 ? '' : 's'}`;
+  return past ? `${phrase} ago` : `in ${phrase}`;
+}
+
 function gcalUrl(iso: string, title: string): string {
   const start = new Date(iso);
   const end = new Date(start.getTime() + 30 * 60000);
@@ -58,6 +78,30 @@ function gcalUrl(iso: string, title: string): string {
     `&details=${encodeURIComponent('Your IntervieHire interview. Join link was sent to your email.')}`
   );
 }
+
+// Small inline icons matching this app's existing convention of hand-rolled
+// SVGs for one-off UI needs (see AuthShell.jsx's EyeOpen/EyeClosed) rather
+// than pulling in an icon library for four glyphs.
+const IconUser = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="7" r="4" />
+  </svg>
+);
+const IconBriefcase = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+  </svg>
+);
+const IconTag = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42Z" /><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none" />
+  </svg>
+);
+const IconCalendar = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
+  </svg>
+);
 
 function RescheduleForm() {
   const searchParams = useSearchParams();
@@ -76,6 +120,7 @@ function RescheduleForm() {
 
   const now = () => new Date();
   const maxDate = new Date(Date.now() + MAX_WINDOW_MS);
+  const currentRelative = relativeFromNow(ctx.scheduled_at);
 
   useEffect(() => {
     if (!token) {
@@ -94,8 +139,7 @@ function RescheduleForm() {
         // Default the picker to the current scheduled time, or +1 day at
         // 1pm IST if none is set yet — timeZone="Asia/Kolkata" below means
         // react-datepicker displays/edits this in IST regardless of the
-        // candidate's own device timezone, same guarantee the old hand-
-        // rolled IST math gave, now handled by the library.
+        // candidate's own device timezone.
         let base = data.scheduled_at ? new Date(data.scheduled_at) : null;
         if (!base || Number.isNaN(base.getTime())) {
           base = new Date();
@@ -158,11 +202,17 @@ function RescheduleForm() {
   }, [picked, token, ctx]);
 
   return (
-    <div className={styles.body}>
+    <main className={styles.screen}>
+      <div className={`${styles.orb} ${styles.orbA}`} aria-hidden="true" />
+      <div className={`${styles.orb} ${styles.orbB}`} aria-hidden="true" />
+
       <div className={styles.card}>
-        <div className={styles.brand}>
-          <span className={styles.brandDot} /> IntervieHire
-        </div>
+        <a href="/" className={styles.brand} aria-label="IntervieHire home">
+          <span className={styles.logoMark} aria-hidden="true" />
+          <span className={styles.wordmark}>
+            Intervie<span className={styles.wordmarkAccent}>Hire</span>
+          </span>
+        </a>
 
         {status === 'loading' && (
           <>
@@ -178,75 +228,95 @@ function RescheduleForm() {
               Pick a new time that works for you. We&apos;ll update your calendar invite and email you a fresh
               confirmation.
             </p>
-            <div className={styles.info}>
-              <div className={styles.infoRow}>
-                <span className={styles.infoKey}>Candidate</span>
-                <span className={styles.infoValue}>{ctx.candidate_name || '—'}</span>
+
+            <div className={styles.summary}>
+              <div className={styles.summaryRow}>
+                <span className={styles.summaryIcon}><IconUser /></span>
+                <div className={styles.summaryText}>
+                  <span className={styles.summaryLabel}>Candidate</span>
+                  <span className={styles.summaryValue}>{ctx.candidate_name || '—'}</span>
+                </div>
               </div>
-              <div className={styles.infoRow}>
-                <span className={styles.infoKey}>Role</span>
-                <span className={styles.infoValue}>{ctx.job_title || '—'}</span>
+              <div className={styles.summaryRow}>
+                <span className={styles.summaryIcon}><IconBriefcase /></span>
+                <div className={styles.summaryText}>
+                  <span className={styles.summaryLabel}>Role</span>
+                  <span className={styles.summaryValue}>{ctx.job_title || '—'}</span>
+                </div>
               </div>
-              <div className={styles.infoRow}>
-                <span className={styles.infoKey}>Stage</span>
-                <span className={styles.infoValue}>{ctx.stage || '—'}</span>
+              <div className={styles.summaryRow}>
+                <span className={styles.summaryIcon}><IconTag /></span>
+                <div className={styles.summaryText}>
+                  <span className={styles.summaryLabel}>Stage</span>
+                  <span className={styles.summaryValue}>{ctx.stage || '—'}</span>
+                </div>
               </div>
-              <div className={styles.infoRow}>
-                <span className={styles.infoKey}>Current time</span>
-                <span className={styles.infoValue}>{fmtIST(ctx.scheduled_at)}</span>
+              <div className={styles.summaryRow}>
+                <span className={styles.summaryIcon}><IconCalendar /></span>
+                <div className={styles.summaryText}>
+                  <span className={styles.summaryLabel}>Current time</span>
+                  <span className={styles.summaryValue}>
+                    {fmtIST(ctx.scheduled_at)}
+                    {currentRelative && <span className={styles.summaryRelative}> · {currentRelative}</span>}
+                  </span>
+                </div>
               </div>
             </div>
 
-            <label className={styles.label} htmlFor="newtime">
-              New date &amp; time (IST)
-            </label>
-            <DatePicker
-              id="newtime"
-              selected={picked}
-              onChange={(date) => setPicked(date)}
-              timeZone={IST_TIME_ZONE}
-              showTimeSelect
-              timeIntervals={15}
-              dateFormat="MMM d, yyyy · h:mm aa"
-              minDate={now()}
-              maxDate={maxDate}
-              wrapperClassName={styles.pickerWrap}
-              className={styles.pickerInput}
-              popperPlacement="bottom-start"
-            />
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="newtime">New date &amp; time (IST)</label>
+              <DatePicker
+                id="newtime"
+                selected={picked}
+                onChange={(date) => setPicked(date)}
+                timeZone={IST_TIME_ZONE}
+                showTimeSelect
+                timeIntervals={15}
+                dateFormat="MMM d, yyyy · h:mm aa"
+                minDate={now()}
+                maxDate={maxDate}
+                wrapperClassName={styles.pickerWrap}
+                className={styles.pickerInput}
+                popperPlacement="bottom-start"
+              />
+            </div>
 
-            <button className={styles.btn} onClick={submit} disabled={submitting}>
+            {picked && ctx.scheduled_at && picked.getTime() !== new Date(ctx.scheduled_at).getTime() && (
+              <p className={styles.recap}>
+                Moving from <span className={styles.recapValue}>{fmtIST(ctx.scheduled_at)}</span>
+                <span className={styles.recapArrow}>→</span>
+                <span className={styles.recapValue}>{fmtIST(picked.toISOString())}</span>
+              </p>
+            )}
+
+            <button className={styles.submit} onClick={submit} disabled={submitting}>
               {submitting ? 'Rescheduling…' : 'Confirm new time'}
             </button>
-            {error && <div className={`${styles.msg} ${styles.msgErr}`}>{error}</div>}
+            {error && <div className={`${styles.banner} ${styles.bannerErr}`}>{error}</div>}
           </>
         )}
 
         {status === 'done' && (
           <div className={styles.center}>
-            <h1 className={styles.title} style={{ color: '#10b981' }}>
-              Interview rescheduled ✓
-            </h1>
-            <p className={styles.sub}>{doneText}</p>
+            <h1 className={styles.title}>Interview rescheduled</h1>
+            <div className={`${styles.banner} ${styles.bannerOk}`}>{doneText}</div>
             <a className={styles.gcal} href={gcalHref} target="_blank" rel="noopener noreferrer">
-              📅 Add to Google Calendar
+              <IconCalendar /> Add to Google Calendar
             </a>
             <p className={styles.sub} style={{ marginTop: 18 }}>
-              A new calendar invitation has been emailed to you.
+              A new calendar invitation has been emailed to you. You can close this tab now.
             </p>
           </div>
         )}
 
         {status === 'fatal' && (
           <div className={styles.center}>
-            <h1 className={styles.title} style={{ color: '#f87171' }}>
-              Link not valid
-            </h1>
-            <p className={styles.sub}>{fatalText}</p>
+            <h1 className={styles.title}>Link not valid</h1>
+            <div className={`${styles.banner} ${styles.bannerErr}`}>{fatalText}</div>
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -254,11 +324,11 @@ export default function ReschedulePage() {
   return (
     <Suspense
       fallback={
-        <div className={styles.body}>
+        <main className={styles.screen}>
           <div className={styles.card}>
             <div className={styles.spinner} />
           </div>
-        </div>
+        </main>
       }
     >
       <RescheduleForm />

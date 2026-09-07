@@ -1,157 +1,270 @@
-/* Candidate-facing reschedule page — same dark theme as the static page it
-   replaces (dashboard/public/reschedule.html, now removed), reimplemented as
-   a proper Next.js/React route with react-datepicker instead of a bare
-   <input type="datetime-local">. */
+/* Candidate-facing reschedule page — reuses the same design language as
+   src/styles/auth.css (login/signup): black bg, noise grain, ambient teal
+   orbs, sharp-cornered bottom-emphasis inputs, solid-teal sheen-sweep CTA.
+   Values are copied rather than imported so this page has no dependency on
+   the dashboard's own CSS module graph — it's a standalone public route,
+   same as login/signup. */
 
-.body {
-  font-family: 'Segoe UI', system-ui, sans-serif;
-  background: #0b0f19;
-  color: #f3f4f6;
-  margin: 0;
+/* ── Page shell (auth-screen) ─────────────────────────────────────── */
+.screen {
   min-height: 100vh;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 32px 16px;
+  overflow: hidden;
+  background: #000000;
+  color: #F0EBE0;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+.screen::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.80' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  opacity: 0.025;
+  pointer-events: none;
+  z-index: 0;
+}
+.screen::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, rgba(45, 212, 191, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
 }
 
-.card {
-  width: 100%;
-  max-width: 520px;
-  background: linear-gradient(135deg, rgba(15, 23, 42, .95), rgba(30, 41, 59, .85));
-  border: 1px solid rgba(255, 255, 255, .08);
-  border-radius: 18px;
-  padding: 32px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, .6);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  letter-spacing: .02em;
-  margin-bottom: 18px;
-}
-.brandDot {
-  width: 10px;
-  height: 10px;
+.orb {
+  position: fixed;
   border-radius: 50%;
-  background: #38bdf8;
-  box-shadow: 0 0 14px #38bdf8;
+  pointer-events: none;
+  z-index: 0;
+}
+.orbA {
+  width: 700px; height: 700px;
+  top: -320px; left: -250px;
+  background: radial-gradient(circle at 40% 40%, rgba(45, 212, 191, 0.13) 0%, rgba(45, 212, 191, 0.03) 40%, transparent 68%);
+  filter: blur(60px);
+  animation: orbDriftA 22s ease-in-out infinite alternate;
+}
+.orbB {
+  width: 800px; height: 800px;
+  bottom: -380px; right: -300px;
+  background: radial-gradient(circle at 60% 60%, rgba(45, 212, 191, 0.09) 0%, rgba(45, 212, 191, 0.04) 40%, transparent 66%);
+  filter: blur(80px);
+  animation: orbDriftB 28s ease-in-out infinite alternate;
+  animation-delay: -10s;
+}
+@keyframes orbDriftA { from { transform: translate(0, 0) scale(1); } to { transform: translate(40px, 50px) scale(1.06); } }
+@keyframes orbDriftB { from { transform: translate(0, 0) scale(1); } to { transform: translate(-35px, -45px) scale(1.04); } }
+
+/* ── Card ─────────────────────────────────────────────────────────── */
+.card {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 460px;
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 44px 40px;
+  overflow: hidden;
+  animation: cardAppear 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent 0%, #2dd4bf 30%, #5eead4 50%, #2dd4bf 70%, transparent 100%);
+  z-index: 1;
+  animation: topBarShimmer 4s ease-in-out infinite;
+}
+@keyframes topBarShimmer { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; box-shadow: 0 0 16px rgba(45, 212, 191, 0.5); } }
+@keyframes cardAppear { from { opacity: 0; transform: translateY(20px); filter: blur(4px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+
+/* ── Brand ────────────────────────────────────────────────────────── */
+.brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; text-decoration: none; }
+.logoMark { position: relative; width: 26px; height: 26px; flex-shrink: 0; }
+.logoMark::before {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  animation: ringPulse 3s ease-in-out infinite;
+}
+.logoMark::after {
+  content: ''; position: absolute; inset: 7px; border-radius: 50%;
+  background: #2dd4bf; box-shadow: 0 0 10px rgba(45, 212, 191, 0.65);
+  animation: dotGlow 3s ease-in-out infinite;
+}
+@keyframes ringPulse { 0%, 100% { transform: scale(1); opacity: 0.5; } 50% { transform: scale(1.14); opacity: 1; } }
+@keyframes dotGlow { 0%, 100% { box-shadow: 0 0 8px rgba(45, 212, 191, 0.5); } 50% { box-shadow: 0 0 18px rgba(45, 212, 191, 0.9), 0 0 36px rgba(45, 212, 191, 0.25); } }
+.wordmark { font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; font-weight: 600; font-size: 1rem; letter-spacing: -0.02em; color: #F0EBE0; }
+.wordmarkAccent {
+  background: linear-gradient(90deg, #DDDDDD, #2dd4bf);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  font-weight: 700;
 }
 
-.title { font-size: 1.35rem; margin: 0 0 6px; }
-.sub { color: #94a3b8; font-size: .92rem; margin: 0 0 22px; }
+/* ── Heading ──────────────────────────────────────────────────────── */
+.title { font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; color: #F0EBE0; margin: 0 0 6px; }
+.sub { font-size: 0.85rem; color: #7A7770; line-height: 1.55; font-weight: 300; margin: 0 0 22px; }
 .center { text-align: center; }
 
-.info {
-  background: rgba(56, 189, 248, .06);
-  border: 1px solid rgba(56, 189, 248, .18);
-  border-radius: 12px;
-  padding: 14px 16px;
-  margin-bottom: 20px;
+/* ── Interview summary card ──────────────────────────────────────── */
+.summary {
+  border: 1px solid rgba(45, 212, 191, 0.10);
+  border-left: 2px solid #2dd4bf;
+  background: rgba(45, 212, 191, 0.03);
+  padding: 16px 18px;
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
 }
-.infoRow { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: .92rem; }
-.infoKey { color: #94a3b8; }
-.infoValue { font-weight: 600; text-align: right; }
+.summaryRow { display: flex; align-items: flex-start; gap: 10px; }
+.summaryIcon { flex-shrink: 0; margin-top: 1px; color: #2dd4bf; opacity: 0.85; }
+.summaryText { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.summaryLabel { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: #7A7770; }
+.summaryValue { font-size: 0.88rem; color: #F0EBE0; font-weight: 500; }
+.summaryRelative { font-size: 0.72rem; color: #5eead4; font-weight: 500; }
 
-.label { display: block; font-size: .82rem; color: #94a3b8; margin: 0 0 7px; }
+/* ── Form field / picker (auth-field / auth-input) ───────────────── */
+.field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 6px; }
+.label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: #7A7770; }
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  cursor: pointer;
-  border: none;
-  background: linear-gradient(135deg, #38bdf8, #0ea5e9);
-  color: #06121f;
-  font-weight: 700;
-  font-size: 1rem;
-  padding: 13px;
-  border-radius: 11px;
-  margin-top: 18px;
-}
-.btn:disabled { opacity: .55; cursor: not-allowed; }
-
-.msg {
-  margin-top: 16px;
-  font-size: .9rem;
-  padding: 11px 14px;
-  border-radius: 10px;
-}
-.msgErr { background: rgba(248, 113, 113, .1); border: 1px solid rgba(248, 113, 113, .3); color: #f87171; }
-
-.spinner {
-  width: 30px;
-  height: 30px;
-  border: 3px solid rgba(56, 189, 248, .2);
-  border-top-color: #38bdf8;
-  border-radius: 50%;
-  animation: spin .8s linear infinite;
-  margin: 24px auto;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.gcal {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 14px;
-  color: #38bdf8;
-  text-decoration: none;
-  font-weight: 600;
-  font-size: .92rem;
-}
-
-/* ── react-datepicker reskin: its default is a light popup; retint to match
-   this page's dark card instead of maintaining a second light/dark theme. ── */
 .pickerWrap { width: 100%; }
 .pickerInput {
   width: 100%;
-  background: #0f172a;
-  border: 1px solid rgba(255, 255, 255, .08);
-  color: #f3f4f6;
-  border-radius: 10px;
-  padding: 12px 14px;
-  font: inherit;
+  padding: 12px 15px;
+  border: 1px solid rgba(45, 212, 191, 0.10);
+  border-bottom-color: rgba(45, 212, 191, 0.16);
+  background: rgba(255, 255, 255, 0.016);
+  color: #F0EBE0;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 0.9rem;
   outline: none;
+  transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
 }
-.pickerInput:focus { border-color: #38bdf8; }
+.pickerInput:hover { border-color: rgba(45, 212, 191, 0.28); }
+.pickerInput:focus { border-color: rgba(45, 212, 191, 0.5); background: rgba(45, 212, 191, 0.025); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.07); }
 
-/* CSS Modules requires every rule to carry a local class, even ones that
-   exist only to reach into react-datepicker's own global classnames — so
-   each selector below is scoped under .pickerWrap (react-datepicker renders
-   its popup calendar as a DOM sibling inside the wrapper element carrying
-   wrapperClassName, not in a portal, since <DatePicker> isn't given
-   withPortal). */
+/* ── Recap line ───────────────────────────────────────────────────── */
+.recap { font-size: 0.8rem; color: #7A7770; line-height: 1.6; margin: 14px 0 0; }
+.recapArrow { color: #3A3830; margin: 0 6px; }
+.recapValue { color: #F0EBE0; font-weight: 600; }
+
+/* ── Submit button (auth-submit) ──────────────────────────────────── */
+.submit {
+  position: relative;
+  margin-top: 20px; width: 100%;
+  padding: 13px 20px;
+  border: 1px solid #2dd4bf;
+  background: #2dd4bf;
+  color: #060402;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  font-weight: 700; font-size: 0.85rem;
+  letter-spacing: 0.07em; text-transform: uppercase;
+  cursor: pointer; overflow: hidden;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1), background 0.22s ease;
+}
+.submit:hover:not(:disabled) {
+  background: #5eead4; border-color: #5eead4;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 36px -8px rgba(45, 212, 191, 0.55);
+}
+.submit:active:not(:disabled) { transform: translateY(0); }
+.submit:disabled { cursor: not-allowed; opacity: 0.4; transform: none; box-shadow: none; }
+.submit::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -120%; width: 60%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.28) 50%, transparent);
+}
+.submit:hover:not(:disabled)::after { animation: btnSheen 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+@keyframes btnSheen { to { left: 160%; } }
+
+/* ── Error / success banners (auth-error) ────────────────────────── */
+.banner {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 11px 13px; margin-top: 16px;
+  font-size: 0.8rem; line-height: 1.5;
+  animation: bannerIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes bannerIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+.bannerErr {
+  border: 1px solid rgba(255, 70, 100, 0.22);
+  border-left: 3px solid rgba(255, 70, 100, 0.65);
+  background: rgba(255, 70, 100, 0.06);
+  color: #FF8FA3;
+}
+.bannerOk {
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  border-left: 3px solid #2dd4bf;
+  background: rgba(45, 212, 191, 0.06);
+  color: #5eead4;
+}
+
+.gcal {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 16px;
+  color: #5eead4; text-decoration: none;
+  font-weight: 600; font-size: 0.85rem;
+  transition: color 0.2s ease;
+}
+.gcal:hover { color: #2dd4bf; }
+
+/* ── Spinner ──────────────────────────────────────────────────────── */
+.spinner {
+  width: 26px; height: 26px;
+  border: 2px solid rgba(45, 212, 191, 0.18);
+  border-top-color: #2dd4bf;
+  border-radius: 50%;
+  margin: 20px auto;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── react-datepicker reskin — see the CSS Modules note: every rule
+   needs a local class even ones that only reach into react-datepicker's
+   own global classnames, so everything is scoped under .pickerWrap
+   (react-datepicker renders its popup as a DOM sibling inside the
+   wrapper carrying wrapperClassName, not a portal). ── */
 .pickerWrap :global(.react-datepicker) {
-  background: #111827;
-  border: 1px solid rgba(255, 255, 255, .1);
-  border-radius: 12px;
-  font-family: inherit;
-  color: #f3f4f6;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+  background: #050505;
+  border: 1px solid rgba(45, 212, 191, 0.10);
+  border-radius: 0;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  color: #F0EBE0;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7);
 }
 .pickerWrap :global(.react-datepicker__header) {
-  background: #0f172a;
-  border-bottom: 1px solid rgba(255, 255, 255, .08);
-  border-top-left-radius: 12px;
+  background: #000000;
+  border-bottom: 1px solid rgba(45, 212, 191, 0.10);
+  border-top-left-radius: 0;
 }
 .pickerWrap :global(.react-datepicker__current-month),
 .pickerWrap :global(.react-datepicker-time__header),
-.pickerWrap :global(.react-datepicker__day-name) { color: #f3f4f6; }
-.pickerWrap :global(.react-datepicker__day) { color: #cbd5e1; }
-.pickerWrap :global(.react-datepicker__day:hover) { background: rgba(56, 189, 248, .18); }
+.pickerWrap :global(.react-datepicker__day-name) { color: #F0EBE0; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; }
+.pickerWrap :global(.react-datepicker__day) { color: #b8b4ab; }
+.pickerWrap :global(.react-datepicker__day:hover) { background: rgba(45, 212, 191, 0.14); border-radius: 0; }
 .pickerWrap :global(.react-datepicker__day--selected),
-.pickerWrap :global(.react-datepicker__day--keyboard-selected) { background: #38bdf8; color: #06121f; font-weight: 700; }
-.pickerWrap :global(.react-datepicker__day--disabled) { color: #475569; }
-.pickerWrap :global(.react-datepicker__time-container) { border-left: 1px solid rgba(255, 255, 255, .08); }
-.pickerWrap :global(.react-datepicker__time-container .react-datepicker__time) { background: #111827; }
-.pickerWrap :global(.react-datepicker__time-list-item) { color: #cbd5e1 !important; }
-.pickerWrap :global(.react-datepicker__time-list-item:hover) { background: rgba(56, 189, 248, .18) !important; }
-.pickerWrap :global(.react-datepicker__time-list-item--selected) { background: #38bdf8 !important; color: #06121f !important; font-weight: 700; }
-.pickerWrap :global(.react-datepicker__navigation-icon::before) { border-color: #94a3b8; }
+.pickerWrap :global(.react-datepicker__day--keyboard-selected) { background: #2dd4bf; color: #060402; font-weight: 700; border-radius: 0; }
+.pickerWrap :global(.react-datepicker__day--disabled) { color: #3A3830; }
+.pickerWrap :global(.react-datepicker__time-container) { border-left: 1px solid rgba(45, 212, 191, 0.10); }
+.pickerWrap :global(.react-datepicker__time-container .react-datepicker__time) { background: #050505; }
+.pickerWrap :global(.react-datepicker__time-list-item) { color: #b8b4ab !important; }
+.pickerWrap :global(.react-datepicker__time-list-item:hover) { background: rgba(45, 212, 191, 0.14) !important; }
+.pickerWrap :global(.react-datepicker__time-list-item--selected) { background: #2dd4bf !important; color: #060402 !important; font-weight: 700; }
+.pickerWrap :global(.react-datepicker__navigation-icon::before) { border-color: #7A7770; }
 .pickerWrap :global(.react-datepicker__triangle) { display: none; }
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 520px) {
+  .card { padding: 32px 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbA, .orbB, .logoMark::before, .logoMark::after, .card::before, .submit::after, .spinner { animation: none !important; }
+}
