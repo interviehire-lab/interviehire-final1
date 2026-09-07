@@ -1103,6 +1103,28 @@ function bindReportPage(candidate, job, analysis, root, initialTab = 'overview')
     });
     recordingPlayer = player;
     player.ready(() => {
+      // MediaRecorder-produced WebM (how the candidate room captures this
+      // recording) never writes a real duration into the container — every
+      // browser reports it as Infinity until something seeks near the end,
+      // which forces a duration re-scan. Until that happens video.js can't
+      // tell this isn't a live stream (shows a "LIVE" badge instead of the
+      // seek bar), and videojs-markers positions every marker at left:0%
+      // (it divides each marker's time by player.duration() once, on
+      // loadedmetadata, which fires while duration is still Infinity for
+      // these files). One-shot: seek far forward, then snap back to 0 once
+      // the browser reports the real (now-finite) duration, and force the
+      // markers plugin to redo its left-position math against it.
+      const fixInfiniteDuration = () => {
+        if (player.duration() !== Infinity) return;
+        player.currentTime(1e101);
+        player.one('timeupdate', () => {
+          player.currentTime(0);
+          (player as any).markers?.updateTime?.(true);
+        });
+      };
+      fixInfiniteDuration();
+      player.on('durationchange', fixInfiniteDuration);
+
       (player as any).markers({
         markerTip: { display: true, text: (m) => m.text },
         markers,
