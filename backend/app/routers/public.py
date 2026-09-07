@@ -353,6 +353,11 @@ def public_reschedule_interview(
     token: str,
     request: Request,
     new_time: str = Body(..., embed=True),
+    # Set when the candidate is rescheduling to "right now" to start the
+    # interview immediately (app/reschedule's "Start interview now") — an
+    # email/WhatsApp saying "your interview has been moved" is pointless
+    # when they're about to join it in the same breath.
+    skip_notification: bool = Body(False, embed=True),
     db: Session = Depends(get_db)
 ):
     # Unauthenticated state-changing token endpoint — throttle per-IP.
@@ -439,48 +444,56 @@ def public_reschedule_interview(
     interview_link = f"{settings.INTERVIEW_ROOM_URL.rstrip('/')}/interviewcandidateroom?sessionId={applicant.id}{_job_qs}"
     uid = f"interview-{stage.lower().replace(' ', '-')}-{applicant.id}@interviehire.com"
 
-    try:
-        send_ical_invitation_email(
-            candidate_name=applicant.name,
-            candidate_email=applicant.email,
-            job_title=job_title,
-            stage_name=stage,
-            start_time=parsed_time,
-            duration_minutes=30,
-            uid=uid,
-            sequence=applicant.calendar_sequence,
-            organizer_email=organizer_email,
-            reschedule_link=reschedule_link,
-            interview_link=interview_link,
-            organizer_name=organizer_name
-        )
-    except Exception as mail_err:
-        logger.error(f"Failed to send rescheduled confirmation email: {mail_err}")
+    if not skip_notification:
+        try:
+            send_ical_invitation_email(
+                candidate_name=applicant.name,
+                candidate_email=applicant.email,
+                job_title=job_title,
+                stage_name=stage,
+                start_time=parsed_time,
+                duration_minutes=30,
+                uid=uid,
+                sequence=applicant.calendar_sequence,
+                organizer_email=organizer_email,
+                reschedule_link=reschedule_link,
+                interview_link=interview_link,
+                organizer_name=organizer_name
+            )
+        except Exception as mail_err:
+            logger.error(f"Failed to send rescheduled confirmation email: {mail_err}")
 
-    # WhatsApp confirmation — additive alongside the email confirmation above (does
-    # NOT touch or duplicate it). Own try/except so a WhatsApp failure can never
-    # affect the email send or this endpoint's response; no-ops when Twilio isn't
-    # configured or applicant.phone isn't a real number (see twilio_client.py).
-    try:
-        from app.utils.twilio_client import send_schedule_confirmation_whatsapp
-        from app.utils.timezones import to_ist
-        first_name = (applicant.name or "").strip().split(" ")[0] or "there"
-        parsed_time_ist = to_ist(parsed_time)
-        send_schedule_confirmation_whatsapp(
-            phone=applicant.phone,
-            first_name=first_name,
-            stage_name=stage,
-            job_title=job_title,
-            org_name=organizer_name,
-            date_str=parsed_time_ist.strftime("%B %d, %Y"),
-            time_str=parsed_time_ist.strftime("%I:%M %p IST"),
-            interview_link=interview_link,
-            reschedule_link=reschedule_link,
-        )
-    except Exception as wa_err:
-        logger.error(f"Failed to send WhatsApp interview confirmation: {wa_err}")
+        # WhatsApp confirmation — additive alongside the email confirmation above (does
+        # NOT touch or duplicate it). Own try/except so a WhatsApp failure can never
+        # affect the email send or this endpoint's response; no-ops when Twilio isn't
+        # configured or applicant.phone isn't a real number (see twilio_client.py).
+        try:
+            from app.utils.twilio_client import send_schedule_confirmation_whatsapp
+            from app.utils.timezones import to_ist
+            first_name = (applicant.name or "").strip().split(" ")[0] or "there"
+            parsed_time_ist = to_ist(parsed_time)
+            send_schedule_confirmation_whatsapp(
+                phone=applicant.phone,
+                first_name=first_name,
+                stage_name=stage,
+                job_title=job_title,
+                org_name=organizer_name,
+                date_str=parsed_time_ist.strftime("%B %d, %Y"),
+                time_str=parsed_time_ist.strftime("%I:%M %p IST"),
+                interview_link=interview_link,
+                reschedule_link=reschedule_link,
+            )
+        except Exception as wa_err:
+            logger.error(f"Failed to send WhatsApp interview confirmation: {wa_err}")
 
-    return {"status": "success", "new_scheduled_time": parsed_time.isoformat()}
+    return {
+        "status": "success",
+        "new_scheduled_time": parsed_time.isoformat(),
+        # Lets the client build the interview-room link directly (used by the
+        # "Start interview now" flow) without a second round trip.
+        "applicant_id": str(applicant.id),
+        "job_id": str(applicant.job_id) if applicant.job_id else None,
+    }
 
 
 @router.get("/careers/{subdomain}")

@@ -2,9 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import { API_BASE } from '../../src/auth-client';
+import { DateTimeField } from './DateTimeField';
 import styles from './reschedule.module.css';
 
 // Candidate-facing interview reschedule page. Linked from every interview
@@ -15,7 +14,13 @@ import styles from './reschedule.module.css';
 //   GET  {API}/public/schedule/{token}    -> current interview details
 //   POST {API}/public/reschedule/{token}  -> set a new time (updates the
 //                                             calendar event + emails a
-//                                             fresh iCal invite)
+//                                             fresh iCal invite, unless
+//                                             skip_notification is set)
+
+// Reads the env var directly (not via src/dashboard/api.ts's ENGINE_WEB_URL)
+// so this standalone route stays free of the vanilla-JS dashboard module
+// graph — same reasoning as auth-client.ts's own API_BASE.
+const ENGINE_WEB_URL = (process.env.NEXT_PUBLIC_ENGINE_WEB_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 const IST_TIME_ZONE = 'Asia/Kolkata';
 const MIN_LEAD_MS = 60_000;
@@ -114,11 +119,12 @@ function RescheduleForm() {
   const [ctx, setCtx] = useState<ScheduleCtx>({});
   const [picked, setPicked] = useState<Date | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [startingNow, setStartingNow] = useState(false);
   const [error, setError] = useState('');
   const [doneText, setDoneText] = useState('');
   const [gcalHref, setGcalHref] = useState('');
 
-  const now = () => new Date();
+  const minDate = new Date();
   const maxDate = new Date(Date.now() + MAX_WINDOW_MS);
   const currentRelative = relativeFromNow(ctx.scheduled_at);
 
@@ -157,6 +163,28 @@ function RescheduleForm() {
     };
   }, [token]);
 
+  const postReschedule = useCallback(
+    async (newTime: string, skipNotification: boolean) => {
+      const res = await fetch(`${API_BASE}/public/reschedule/${encodeURIComponent(token!)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_time: newTime, skip_notification: skipNotification }),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const d = await res.json();
+          detail = d.detail || detail;
+        } catch {
+          /* body wasn't JSON — keep the HTTP status message */
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<{ new_scheduled_time?: string; applicant_id?: string; job_id?: string | null }>;
+    },
+    [token]
+  );
+
   const submit = useCallback(async () => {
     if (!picked) {
       setError('Please pick a date and time.');
@@ -174,22 +202,7 @@ function RescheduleForm() {
     setSubmitting(true);
     try {
       const newTime = picked.toISOString();
-      const res = await fetch(`${API_BASE}/public/reschedule/${encodeURIComponent(token!)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ new_time: newTime }),
-      });
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`;
-        try {
-          const d = await res.json();
-          detail = d.detail || detail;
-        } catch {
-          /* body wasn't JSON — keep the HTTP status message */
-        }
-        throw new Error(detail);
-      }
-      const out = await res.json();
+      const out = await postReschedule(newTime, false);
       const when = out.new_scheduled_time || newTime;
       setDoneText(`${ctx.stage || 'Your interview'} is now set for ${fmtIST(when)}.`);
       setGcalHref(gcalUrl(when, `${ctx.stage || 'Interview'} · ${ctx.job_title || 'IntervieHire'}`));
@@ -199,7 +212,25 @@ function RescheduleForm() {
     } finally {
       setSubmitting(false);
     }
-  }, [picked, token, ctx]);
+  }, [picked, postReschedule, ctx]);
+
+  // Moves the slot to right now and drops the candidate straight into the
+  // interview room — skips the confirmation email/WhatsApp entirely (see
+  // skip_notification on the backend route) since telling someone "your
+  // interview has moved" is pointless the instant before they join it.
+  const startNow = useCallback(async () => {
+    setError('');
+    setStartingNow(true);
+    try {
+      const out = await postReschedule(new Date().toISOString(), true);
+      if (!out.applicant_id) throw new Error('Could not start the interview — missing session id.');
+      const jobQs = out.job_id ? `&jobId=${encodeURIComponent(out.job_id)}` : '';
+      window.location.href = `${ENGINE_WEB_URL}/interviewcandidateroom?sessionId=${encodeURIComponent(out.applicant_id)}${jobQs}`;
+    } catch (e) {
+      setError(`Could not start the interview: ${e instanceof Error ? e.message : 'please try again.'}`);
+      setStartingNow(false);
+    }
+  }, [postReschedule]);
 
   return (
     <main className={styles.screen}>
@@ -265,20 +296,9 @@ function RescheduleForm() {
 
             <div className={styles.field}>
               <label className={styles.label} htmlFor="newtime">New date &amp; time (IST)</label>
-              <DatePicker
-                id="newtime"
-                selected={picked}
-                onChange={(date) => setPicked(date)}
-                timeZone={IST_TIME_ZONE}
-                showTimeSelect
-                timeIntervals={15}
-                dateFormat="MMM d, yyyy · h:mm aa"
-                minDate={now()}
-                maxDate={maxDate}
-                wrapperClassName={styles.pickerWrap}
-                className={styles.pickerInput}
-                popperPlacement="bottom-start"
-              />
+              {picked && (
+                <DateTimeField id="newtime" value={picked} onChange={setPicked} minDate={minDate} maxDate={maxDate} />
+              )}
             </div>
 
             {picked && ctx.scheduled_at && picked.getTime() !== new Date(ctx.scheduled_at).getTime() && (
@@ -289,9 +309,15 @@ function RescheduleForm() {
               </p>
             )}
 
-            <button className={styles.submit} onClick={submit} disabled={submitting}>
+            <button className={styles.submit} onClick={submit} disabled={submitting || startingNow}>
               {submitting ? 'Rescheduling…' : 'Confirm new time'}
             </button>
+
+            <div className={styles.divider}>or</div>
+            <button className={styles.startNow} onClick={startNow} disabled={submitting || startingNow}>
+              {startingNow ? 'Starting…' : 'Start the interview right now instead'}
+            </button>
+
             {error && <div className={`${styles.banner} ${styles.bannerErr}`}>{error}</div>}
           </>
         )}

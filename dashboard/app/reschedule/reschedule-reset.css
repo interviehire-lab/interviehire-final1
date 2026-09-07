@@ -1,0 +1,10 @@
+/* Route-scoped reset — plain global CSS (not a module), same pattern as
+   app/(auth)/layout.js importing src/styles/auth.css. reschedule.module.css
+   can't zero out `body`'s default UA margin/background itself (CSS Modules
+   rejects a bare :root/body selector with no local class), which is what
+   showed as a white sliver around the page's edges — the reschedule.module.css
+   card sits inside body's untouched 8px default margin on a white default
+   background. Next.js only loads this stylesheet while a route under
+   app/reschedule is active. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: #000000; }

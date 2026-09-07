@@ -135,9 +135,13 @@
 .field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 6px; }
 .label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: #7A7770; }
 
-.pickerWrap { width: 100%; }
-.pickerInput {
+/* Custom calendar + native-time-input picker — same component pattern as
+   src/dashboard/resume-analysis.ts's createDateTimePicker (see
+   DateTimeField.tsx), restyled to this page's black/teal input treatment. */
+.dt { position: relative; width: 100%; }
+.dtField {
   width: 100%;
+  text-align: left;
   padding: 12px 15px;
   border: 1px solid rgba(45, 212, 191, 0.10);
   border-bottom-color: rgba(45, 212, 191, 0.16);
@@ -146,11 +150,92 @@
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   font-size: 0.9rem;
   outline: none;
+  cursor: pointer;
   transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   box-sizing: border-box;
 }
-.pickerInput:hover { border-color: rgba(45, 212, 191, 0.28); }
-.pickerInput:focus { border-color: rgba(45, 212, 191, 0.5); background: rgba(45, 212, 191, 0.025); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.07); }
+.dtField:hover { border-color: rgba(45, 212, 191, 0.28); }
+.dtField:focus { border-color: rgba(45, 212, 191, 0.5); background: rgba(45, 212, 191, 0.025); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.07); }
+
+.dtPop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 264px;
+  max-width: 88vw;
+  padding: 14px;
+  background: #050505;
+  border: 1px solid rgba(45, 212, 191, 0.10);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7);
+}
+.dtHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dtTitle { font-size: 0.82rem; font-weight: 600; color: #F0EBE0; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; }
+.dtNav {
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(45, 212, 191, 0.10);
+  color: #7A7770;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.dtNav:hover { color: #F0EBE0; border-color: rgba(45, 212, 191, 0.35); }
+.dtDow, .dtGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dtDow { margin-bottom: 4px; }
+.dtDow span { text-align: center; font-size: 0.64rem; color: #3A3830; padding: 2px 0; }
+.dtDay {
+  aspect-ratio: 1 / 1;
+  display: grid; place-items: center;
+  background: none;
+  border: none;
+  color: #b8b4ab;
+  font-size: 0.76rem;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.dtDay:hover { background: rgba(45, 212, 191, 0.14); }
+.dtDayEmpty { background: none; cursor: default; }
+.dtDaySel { background: #2dd4bf; color: #060402; font-weight: 700; }
+.dtDayDisabled { color: #3A3830; cursor: not-allowed; }
+.dtDayDisabled:hover { background: none; }
+.dtTimeRow { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(45, 212, 191, 0.10); }
+.dtTimeRow label { font-size: 0.74rem; color: #7A7770; }
+.dtTimeInput {
+  flex: 1;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(45, 212, 191, 0.10);
+  color: #F0EBE0;
+  font-size: 0.8rem;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  outline: none;
+  color-scheme: dark;
+}
+.dtTimeInput:focus { border-color: rgba(45, 212, 191, 0.5); }
+
+/* ── Secondary "start now" action ─────────────────────────────────── */
+.startNow {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: 10px;
+  padding: 11px 16px;
+  background: transparent;
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  color: #b8b4ab;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+.startNow:hover:not(:disabled) { border-color: rgba(45, 212, 191, 0.4); color: #5eead4; background: rgba(45, 212, 191, 0.04); }
+.startNow:disabled { cursor: not-allowed; opacity: 0.4; }
+.divider { display: flex; align-items: center; gap: 10px; margin: 18px 0; color: #3A3830; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: rgba(255, 255, 255, 0.06); }
 
 /* ── Recap line ───────────────────────────────────────────────────── */
 .recap { font-size: 0.8rem; color: #7A7770; line-height: 1.6; margin: 14px 0 0; }
@@ -225,40 +310,6 @@
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-/* ── react-datepicker reskin — see the CSS Modules note: every rule
-   needs a local class even ones that only reach into react-datepicker's
-   own global classnames, so everything is scoped under .pickerWrap
-   (react-datepicker renders its popup as a DOM sibling inside the
-   wrapper carrying wrapperClassName, not a portal). ── */
-.pickerWrap :global(.react-datepicker) {
-  background: #050505;
-  border: 1px solid rgba(45, 212, 191, 0.10);
-  border-radius: 0;
-  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
-  color: #F0EBE0;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7);
-}
-.pickerWrap :global(.react-datepicker__header) {
-  background: #000000;
-  border-bottom: 1px solid rgba(45, 212, 191, 0.10);
-  border-top-left-radius: 0;
-}
-.pickerWrap :global(.react-datepicker__current-month),
-.pickerWrap :global(.react-datepicker-time__header),
-.pickerWrap :global(.react-datepicker__day-name) { color: #F0EBE0; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; }
-.pickerWrap :global(.react-datepicker__day) { color: #b8b4ab; }
-.pickerWrap :global(.react-datepicker__day:hover) { background: rgba(45, 212, 191, 0.14); border-radius: 0; }
-.pickerWrap :global(.react-datepicker__day--selected),
-.pickerWrap :global(.react-datepicker__day--keyboard-selected) { background: #2dd4bf; color: #060402; font-weight: 700; border-radius: 0; }
-.pickerWrap :global(.react-datepicker__day--disabled) { color: #3A3830; }
-.pickerWrap :global(.react-datepicker__time-container) { border-left: 1px solid rgba(45, 212, 191, 0.10); }
-.pickerWrap :global(.react-datepicker__time-container .react-datepicker__time) { background: #050505; }
-.pickerWrap :global(.react-datepicker__time-list-item) { color: #b8b4ab !important; }
-.pickerWrap :global(.react-datepicker__time-list-item:hover) { background: rgba(45, 212, 191, 0.14) !important; }
-.pickerWrap :global(.react-datepicker__time-list-item--selected) { background: #2dd4bf !important; color: #060402 !important; font-weight: 700; }
-.pickerWrap :global(.react-datepicker__navigation-icon::before) { border-color: #7A7770; }
-.pickerWrap :global(.react-datepicker__triangle) { display: none; }
 
 /* ── Responsive ───────────────────────────────────────────────────── */
 @media (max-width: 520px) {
