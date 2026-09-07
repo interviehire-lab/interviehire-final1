@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { RoomAgentDispatch, RoomConfiguration } from '@livekit/protocol';
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, AgentDispatchClient, RoomServiceClient } from 'livekit-server-sdk';
 import { prisma } from '../lib/prisma.js';
 import { evaluateInterview, generatePdfReport, getCandidateFacingReport } from '../services/evaluation.service.js';
 import nodemailer from 'nodemailer';
@@ -519,6 +519,30 @@ export async function interviewRoutes(app: FastifyInstance) {
       departureTimeout: 30,
       agents: [new RoomAgentDispatch({ agentName, metadata })],
     });
+
+    // RoomConfiguration.agents above only dispatches an agent when LiveKit
+    // actually CREATES the room — a no-op if it already exists. The room name
+    // is deterministic (`interview-${session.id}`), so a candidate retrying a
+    // stalled first attempt (agent crashed, worker briefly unregistered, etc.)
+    // reconnects to that SAME already-existing room on every retry, and the
+    // roomConfig on each new token is silently ignored — no new agent is ever
+    // dispatched, no matter how many times they reload. Explicitly check for
+    // a live agent and (re-)dispatch one if it's missing, instead of relying
+    // solely on the room-creation-time path.
+    try {
+      const roomService = new RoomServiceClient(livekitUrl, apiKey, apiSecret);
+      const participants = await roomService.listParticipants(roomName);
+      const hasLiveAgent = participants.some((p) => !p.identity.startsWith('candidate-'));
+      if (!hasLiveAgent) {
+        const dispatchClient = new AgentDispatchClient(livekitUrl, apiKey, apiSecret);
+        await dispatchClient.createDispatch(roomName, agentName, { metadata });
+        req.log?.info?.({ roomName, agentName }, 'explicitly (re-)dispatched agent to existing room with no live agent');
+      }
+    } catch {
+      // listParticipants throws when the room doesn't exist yet — the normal
+      // first-connect case, where roomConfig above handles dispatch on
+      // creation. Any other failure here shouldn't block token issuance.
+    }
 
     return {
       url: livekitUrl,
