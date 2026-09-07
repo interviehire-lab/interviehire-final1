@@ -97,6 +97,16 @@ def build_invite_link(token: str) -> str:
     return f"{base.rstrip('/')}/i/{token}"
 
 
+def _invite_job_description(db: Session, invite: InterviewInvite) -> Optional[str]:
+    """The real JD text for an invite's email, when the invite is bound to a
+    real Job row (``invite.job_id``). Standalone invites minted with just a
+    free-text ``role`` string (no ``job_id``) have no JD to show."""
+    if not invite.job_id:
+        return None
+    job = db.query(Job).filter(Job.id == invite.job_id).first()
+    return job.description if job else None
+
+
 def create_invite(
     db: Session,
     *,
@@ -172,7 +182,8 @@ def invite_candidates(
         if send:
             try:
                 send_interview_invite_email(
-                    invite.candidate_name, invite.candidate_email, invite.role, link, invite.expires_at
+                    invite.candidate_name, invite.candidate_email, invite.role, link, invite.expires_at,
+                    job_description=_invite_job_description(db, invite),
                 )
             except Exception as mail_err:
                 logger.error(f"Failed to send invite email to {email}: {mail_err}")
@@ -324,7 +335,8 @@ def _provision_invite_for_applicant(
     if send:
         try:
             sent = send_interview_invite_email(
-                invite.candidate_name, invite.candidate_email, invite.role, link, invite.expires_at
+                invite.candidate_name, invite.candidate_email, invite.role, link, invite.expires_at,
+                job_description=_invite_job_description(db, invite),
             )
         except Exception as mail_err:
             logger.error(f"Failed to send invite email for {invite.token}: {mail_err}")
@@ -492,7 +504,8 @@ def send_existing_invite(
     link = build_invite_link(invite.token)
     try:
         sent = send_interview_invite_email(
-            invite.candidate_name, invite.candidate_email, invite.role, link, invite.expires_at
+            invite.candidate_name, invite.candidate_email, invite.role, link, invite.expires_at,
+            job_description=_invite_job_description(db, invite),
         )
     except Exception as mail_err:
         logger.error(f"Failed to send invite {token}: {mail_err}")
@@ -615,9 +628,11 @@ def request_new_invite(token: str, request: Request, db: Session = Depends(get_d
                 candidate_email=invite.candidate_email,
                 candidate_name=invite.candidate_name,
                 role=invite.role,
+                job_id=invite.job_id,
             )
             send_interview_invite_email(
-                new_invite.candidate_name, new_invite.candidate_email, new_invite.role, link, new_invite.expires_at
+                new_invite.candidate_name, new_invite.candidate_email, new_invite.role, link, new_invite.expires_at,
+                job_description=_invite_job_description(db, new_invite),
             )
     except Exception as e:
         logger.error(f"Failed to re-issue invite for {token}: {e}")

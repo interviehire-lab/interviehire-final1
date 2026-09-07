@@ -128,6 +128,7 @@ def run_reminders(db: Session, *, dry_run: bool = True, limit: Optional[int] = N
                     stage_name=stage_name,
                     start_time=scheduled_at,
                     interview_link=interview_link,
+                    job_description=job.description if job else None,
                 )
                 result["emails_sent"] += 1
             except Exception:

@@ -2,9 +2,10 @@
    app/(auth)/layout.js importing src/styles/auth.css. reschedule.module.css
    can't zero out `body`'s default UA margin/background itself (CSS Modules
    rejects a bare :root/body selector with no local class), which is what
-   showed as a white sliver around the page's edges — the reschedule.module.css
-   card sits inside body's untouched 8px default margin on a white default
-   background. Next.js only loads this stylesheet while a route under
-   app/reschedule is active. */
+   showed as a sliver around the page's edges in the default UA background —
+   the reschedule.module.css card sits inside body's untouched 8px default
+   margin. Next.js only loads this stylesheet while a route under
+   app/reschedule is active. Matches .screen's own background (see that
+   file) so there's no flash of a different color before it paints. */
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { background: #000000; }
+html, body { background: #F0F1F4; }

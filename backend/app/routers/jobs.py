@@ -2389,7 +2389,8 @@ def schedule_interview(
             organizer_email=organizer_email,
             reschedule_link=reschedule_link,
             interview_link=interview_link,
-            organizer_name=organizer_name
+            organizer_name=organizer_name,
+            job_description=job.description if job else None,
         )
     except Exception as mail_err:
         logger.error(f"Failed to send interview confirmation email: {mail_err}")

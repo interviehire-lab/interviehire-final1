@@ -1,11 +1,13 @@
-/* Candidate-facing reschedule page — reuses the same design language as
-   src/styles/auth.css (login/signup): black bg, noise grain, ambient teal
-   orbs, sharp-cornered bottom-emphasis inputs, solid-teal sheen-sweep CTA.
-   Values are copied rather than imported so this page has no dependency on
-   the dashboard's own CSS module graph — it's a standalone public route,
-   same as login/signup. */
+/* Candidate-facing interview reschedule page — standalone public route.
+   Light theme (soft gray page, white card), same brand tokens the
+   transactional emails use (backend/app/utils/email_sender.py: ink
+   #17171F, muted #8A8A96, page bg #F0F1F4, card border #ECECF1, teal
+   accent #2dd4bf) so the page a candidate lands on from an email link
+   looks like it belongs to the same product. Values are copied rather
+   than imported so this page has no dependency on the dashboard's own
+   CSS module graph — it's a standalone public route, same as login/signup. */
 
-/* ── Page shell (auth-screen) ─────────────────────────────────────── */
+/* ── Page shell ───────────────────────────────────────────────────── */
 .screen {
   min-height: 100vh;
   width: 100%;
@@ -13,9 +15,18 @@
   align-items: center;
   justify-content: center;
   padding: 32px 16px;
-  overflow: hidden;
-  background: #000000;
-  color: #F0EBE0;
+  /* NOT overflow:hidden — the date-time picker's popover (.dtPop) is an
+     absolutely-positioned descendant that can extend past the viewport
+     on a normal-height screen (a 6-row month grid + time row, opening
+     from a field partway down the card). overflow:hidden here clipped
+     it, forcing candidates to zoom out just to reach the time input.
+     overflow-y:auto lets the page scroll to reach it instead; x stays
+     hidden so the fixed-position ambient orbs never cause a horizontal
+     scrollbar. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #F0F1F4;
+  color: #17171F;
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   position: relative;
@@ -26,7 +37,7 @@
   inset: 0;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.80' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
   background-size: 200px 200px;
-  opacity: 0.025;
+  opacity: 0.012;
   pointer-events: none;
   z-index: 0;
 }
@@ -34,7 +45,7 @@
   content: '';
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse 80% 70% at 50% 45%, rgba(45, 212, 191, 0.04) 0%, transparent 70%);
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, rgba(45, 212, 191, 0.06) 0%, transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -48,14 +59,14 @@
 .orbA {
   width: 700px; height: 700px;
   top: -320px; left: -250px;
-  background: radial-gradient(circle at 40% 40%, rgba(45, 212, 191, 0.13) 0%, rgba(45, 212, 191, 0.03) 40%, transparent 68%);
+  background: radial-gradient(circle at 40% 40%, rgba(45, 212, 191, 0.16) 0%, rgba(45, 212, 191, 0.04) 40%, transparent 68%);
   filter: blur(60px);
   animation: orbDriftA 22s ease-in-out infinite alternate;
 }
 .orbB {
   width: 800px; height: 800px;
   bottom: -380px; right: -300px;
-  background: radial-gradient(circle at 60% 60%, rgba(45, 212, 191, 0.09) 0%, rgba(45, 212, 191, 0.04) 40%, transparent 66%);
+  background: radial-gradient(circle at 60% 60%, rgba(100, 160, 220, 0.12) 0%, rgba(100, 160, 220, 0.04) 40%, transparent 66%);
   filter: blur(80px);
   animation: orbDriftB 28s ease-in-out infinite alternate;
   animation-delay: -10s;
@@ -69,22 +80,20 @@
   z-index: 10;
   width: 100%;
   max-width: 460px;
-  background: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #FFFFFF;
+  border: 1px solid #ECECF1;
+  border-radius: 20px;
+  box-shadow: 0 24px 70px rgba(23, 23, 31, 0.09);
   padding: 44px 40px;
-  /* Not overflow:hidden — the date-time picker's popover (.dtPop) is an
-     absolutely-positioned child that can extend past the card's own
-     height once the calendar grid renders (6 rows for a month starting
-     late in the week). overflow:hidden here clipped it, hiding the time
-     input and everything below the visible day grid. Safe to drop: .card
-     has square corners (no border-radius), so there was never anything
-     for overflow:hidden to actually clip. */
+  /* Not overflow:hidden — see .screen's comment above; the popover needs
+     to be able to extend past the card's own box. */
   animation: cardAppear 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .card::before {
   content: '';
   position: absolute;
-  top: 0; left: 0; right: 0; height: 1px;
+  top: 0; left: 0; right: 0; height: 3px;
+  border-radius: 20px 20px 0 0;
   background: linear-gradient(90deg, transparent 0%, #2dd4bf 30%, #5eead4 50%, #2dd4bf 70%, transparent 100%);
   z-index: 1;
   animation: topBarShimmer 4s ease-in-out infinite;
@@ -97,33 +106,34 @@
 .logoMark { position: relative; width: 26px; height: 26px; flex-shrink: 0; }
 .logoMark::before {
   content: ''; position: absolute; inset: 0; border-radius: 50%;
-  border: 1px solid rgba(45, 212, 191, 0.35);
+  border: 1px solid rgba(45, 212, 191, 0.45);
   animation: ringPulse 3s ease-in-out infinite;
 }
 .logoMark::after {
   content: ''; position: absolute; inset: 7px; border-radius: 50%;
-  background: #2dd4bf; box-shadow: 0 0 10px rgba(45, 212, 191, 0.65);
+  background: #2dd4bf; box-shadow: 0 0 10px rgba(45, 212, 191, 0.5);
   animation: dotGlow 3s ease-in-out infinite;
 }
 @keyframes ringPulse { 0%, 100% { transform: scale(1); opacity: 0.5; } 50% { transform: scale(1.14); opacity: 1; } }
-@keyframes dotGlow { 0%, 100% { box-shadow: 0 0 8px rgba(45, 212, 191, 0.5); } 50% { box-shadow: 0 0 18px rgba(45, 212, 191, 0.9), 0 0 36px rgba(45, 212, 191, 0.25); } }
-.wordmark { font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; font-weight: 600; font-size: 1rem; letter-spacing: -0.02em; color: #F0EBE0; }
+@keyframes dotGlow { 0%, 100% { box-shadow: 0 0 8px rgba(45, 212, 191, 0.4); } 50% { box-shadow: 0 0 18px rgba(45, 212, 191, 0.7), 0 0 36px rgba(45, 212, 191, 0.18); } }
+.wordmark { font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; font-weight: 600; font-size: 1rem; letter-spacing: -0.02em; color: #17171F; }
 .wordmarkAccent {
-  background: linear-gradient(90deg, #DDDDDD, #2dd4bf);
+  background: linear-gradient(90deg, #3A3A45, #2dd4bf);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
   font-weight: 700;
 }
 
 /* ── Heading ──────────────────────────────────────────────────────── */
-.title { font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; color: #F0EBE0; margin: 0 0 6px; }
-.sub { font-size: 0.85rem; color: #7A7770; line-height: 1.55; font-weight: 300; margin: 0 0 22px; }
+.title { font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; color: #17171F; margin: 0 0 6px; }
+.sub { font-size: 0.85rem; color: #8A8A96; line-height: 1.55; font-weight: 400; margin: 0 0 22px; }
 .center { text-align: center; }
 
 /* ── Interview summary card ──────────────────────────────────────── */
 .summary {
-  border: 1px solid rgba(45, 212, 191, 0.10);
+  border: 1px solid rgba(45, 212, 191, 0.16);
   border-left: 2px solid #2dd4bf;
-  background: rgba(45, 212, 191, 0.03);
+  border-radius: 0 12px 12px 0;
+  background: rgba(45, 212, 191, 0.045);
   padding: 16px 18px;
   margin-bottom: 24px;
   display: flex;
@@ -131,28 +141,32 @@
   gap: 11px;
 }
 .summaryRow { display: flex; align-items: flex-start; gap: 10px; }
-.summaryIcon { flex-shrink: 0; margin-top: 1px; color: #2dd4bf; opacity: 0.85; }
+.summaryIcon { flex-shrink: 0; margin-top: 1px; color: #2dd4bf; opacity: 0.9; }
 .summaryText { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.summaryLabel { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: #7A7770; }
-.summaryValue { font-size: 0.88rem; color: #F0EBE0; font-weight: 500; }
-.summaryRelative { font-size: 0.72rem; color: #5eead4; font-weight: 500; }
+.summaryLabel { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: #8A8A96; }
+.summaryValue { font-size: 0.88rem; color: #17171F; font-weight: 500; }
+.summaryRelative { font-size: 0.72rem; color: #0f9488; font-weight: 500; }
 
-/* ── Form field / picker (auth-field / auth-input) ───────────────── */
+/* ── Form field / picker ──────────────────────────────────────────── */
 .field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 6px; }
-.label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: #7A7770; }
+.label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: #8A8A96; }
 
 /* Custom calendar + native-time-input picker — same component pattern as
    src/dashboard/resume-analysis.ts's createDateTimePicker (see
-   DateTimeField.tsx), restyled to this page's black/teal input treatment. */
+   DateTimeField.tsx), restyled to this page's light input treatment.
+   .dtPopUp is applied by DateTimeField.tsx when there isn't enough room
+   below the field to open downward (it measures available viewport space
+   and flips the popover above the field instead — see that file). */
 .dt { position: relative; width: 100%; }
 .dtField {
   width: 100%;
   text-align: left;
   padding: 12px 15px;
-  border: 1px solid rgba(45, 212, 191, 0.10);
-  border-bottom-color: rgba(45, 212, 191, 0.16);
-  background: rgba(255, 255, 255, 0.016);
-  color: #F0EBE0;
+  border-radius: 10px;
+  border: 1px solid rgba(45, 212, 191, 0.22);
+  border-bottom-color: rgba(45, 212, 191, 0.32);
+  background: #FAFAFB;
+  color: #17171F;
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   font-size: 0.9rem;
   outline: none;
@@ -160,8 +174,8 @@
   transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   box-sizing: border-box;
 }
-.dtField:hover { border-color: rgba(45, 212, 191, 0.28); }
-.dtField:focus { border-color: rgba(45, 212, 191, 0.5); background: rgba(45, 212, 191, 0.025); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.07); }
+.dtField:hover { border-color: rgba(45, 212, 191, 0.45); }
+.dtField:focus { border-color: rgba(45, 212, 191, 0.6); background: #ffffff; box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12); }
 
 .dtPop {
   position: absolute;
@@ -171,56 +185,65 @@
   width: 264px;
   max-width: 88vw;
   padding: 14px;
-  background: #050505;
-  border: 1px solid rgba(45, 212, 191, 0.10);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7);
+  border-radius: 12px;
+  background: #FFFFFF;
+  border: 1px solid #ECECF1;
+  box-shadow: 0 18px 50px rgba(23, 23, 31, 0.16);
+}
+/* Opens upward from the field instead of downward — see DateTimeField.tsx. */
+.dtPopUp {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 .dtHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.dtTitle { font-size: 0.82rem; font-weight: 600; color: #F0EBE0; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; }
+.dtTitle { font-size: 0.82rem; font-weight: 600; color: #17171F; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; }
 .dtNav {
   width: 26px; height: 26px;
+  border-radius: 7px;
   display: grid; place-items: center;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(45, 212, 191, 0.10);
-  color: #7A7770;
+  background: rgba(23, 23, 31, 0.03);
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  color: #8A8A96;
   cursor: pointer;
   font-size: 0.95rem;
   line-height: 1;
 }
-.dtNav:hover { color: #F0EBE0; border-color: rgba(45, 212, 191, 0.35); }
+.dtNav:hover { color: #17171F; border-color: rgba(45, 212, 191, 0.45); background: rgba(45, 212, 191, 0.06); }
 .dtDow, .dtGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .dtDow { margin-bottom: 4px; }
-.dtDow span { text-align: center; font-size: 0.64rem; color: #3A3830; padding: 2px 0; }
+.dtDow span { text-align: center; font-size: 0.64rem; color: #B8B8C2; padding: 2px 0; }
 .dtDay {
   aspect-ratio: 1 / 1;
+  border-radius: 7px;
   display: grid; place-items: center;
   background: none;
   border: none;
-  color: #b8b4ab;
+  color: #4B4B58;
   font-size: 0.76rem;
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   cursor: pointer;
   transition: background 0.12s ease;
 }
-.dtDay:hover { background: rgba(45, 212, 191, 0.14); }
+.dtDay:hover { background: rgba(45, 212, 191, 0.16); }
 .dtDayEmpty { background: none; cursor: default; }
 .dtDaySel { background: #2dd4bf; color: #060402; font-weight: 700; }
-.dtDayDisabled { color: #3A3830; cursor: not-allowed; }
+.dtDayDisabled { color: #D6D6DE; cursor: not-allowed; }
 .dtDayDisabled:hover { background: none; }
-.dtTimeRow { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(45, 212, 191, 0.10); }
-.dtTimeRow label { font-size: 0.74rem; color: #7A7770; }
+.dtTimeRow { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ECECF1; }
+.dtTimeRow label { font-size: 0.74rem; color: #8A8A96; }
 .dtTimeInput {
   flex: 1;
   padding: 6px 10px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(45, 212, 191, 0.10);
-  color: #F0EBE0;
+  border-radius: 7px;
+  background: #F5F5F7;
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  color: #17171F;
   font-size: 0.8rem;
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   outline: none;
-  color-scheme: dark;
+  color-scheme: light;
 }
-.dtTimeInput:focus { border-color: rgba(45, 212, 191, 0.5); }
+.dtTimeInput:focus { border-color: rgba(45, 212, 191, 0.6); }
 
 /* ── Secondary "start now" action ─────────────────────────────────── */
 .startNow {
@@ -229,30 +252,32 @@
   text-align: center;
   margin-top: 10px;
   padding: 11px 16px;
+  border-radius: 10px;
   background: transparent;
-  border: 1px solid rgba(45, 212, 191, 0.18);
-  color: #b8b4ab;
+  border: 1px solid rgba(45, 212, 191, 0.28);
+  color: #5B5B68;
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   font-size: 0.8rem;
   font-weight: 500;
   cursor: pointer;
   transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
 }
-.startNow:hover:not(:disabled) { border-color: rgba(45, 212, 191, 0.4); color: #5eead4; background: rgba(45, 212, 191, 0.04); }
-.startNow:disabled { cursor: not-allowed; opacity: 0.4; }
-.divider { display: flex; align-items: center; gap: 10px; margin: 18px 0; color: #3A3830; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; }
-.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: rgba(255, 255, 255, 0.06); }
+.startNow:hover:not(:disabled) { border-color: rgba(45, 212, 191, 0.55); color: #0f9488; background: rgba(45, 212, 191, 0.05); }
+.startNow:disabled { cursor: not-allowed; opacity: 0.45; }
+.divider { display: flex; align-items: center; gap: 10px; margin: 18px 0; color: #B0B0BC; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #ECECF1; }
 
 /* ── Recap line ───────────────────────────────────────────────────── */
-.recap { font-size: 0.8rem; color: #7A7770; line-height: 1.6; margin: 14px 0 0; }
-.recapArrow { color: #3A3830; margin: 0 6px; }
-.recapValue { color: #F0EBE0; font-weight: 600; }
+.recap { font-size: 0.8rem; color: #8A8A96; line-height: 1.6; margin: 14px 0 0; }
+.recapArrow { color: #C4C4CE; margin: 0 6px; }
+.recapValue { color: #17171F; font-weight: 600; }
 
-/* ── Submit button (auth-submit) ──────────────────────────────────── */
+/* ── Submit button ────────────────────────────────────────────────── */
 .submit {
   position: relative;
   margin-top: 20px; width: 100%;
   padding: 13px 20px;
+  border-radius: 10px;
   border: 1px solid #2dd4bf;
   background: #2dd4bf;
   color: #060402;
@@ -265,42 +290,43 @@
 .submit:hover:not(:disabled) {
   background: #5eead4; border-color: #5eead4;
   transform: translateY(-1px);
-  box-shadow: 0 12px 36px -8px rgba(45, 212, 191, 0.55);
+  box-shadow: 0 12px 36px -8px rgba(45, 212, 191, 0.45);
 }
 .submit:active:not(:disabled) { transform: translateY(0); }
-.submit:disabled { cursor: not-allowed; opacity: 0.4; transform: none; box-shadow: none; }
+.submit:disabled { cursor: not-allowed; opacity: 0.45; transform: none; box-shadow: none; }
 .submit::after {
   content: ''; position: absolute; top: 0; bottom: 0; left: -120%; width: 60%;
-  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.28) 50%, transparent);
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.35) 50%, transparent);
 }
 .submit:hover:not(:disabled)::after { animation: btnSheen 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 @keyframes btnSheen { to { left: 160%; } }
 
-/* ── Error / success banners (auth-error) ────────────────────────── */
+/* ── Error / success banners ──────────────────────────────────────── */
 .banner {
   display: flex; align-items: flex-start; gap: 9px;
   padding: 11px 13px; margin-top: 16px;
+  border-radius: 8px;
   font-size: 0.8rem; line-height: 1.5;
   animation: bannerIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes bannerIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
 .bannerErr {
-  border: 1px solid rgba(255, 70, 100, 0.22);
-  border-left: 3px solid rgba(255, 70, 100, 0.65);
-  background: rgba(255, 70, 100, 0.06);
-  color: #FF8FA3;
+  border: 1px solid rgba(214, 41, 75, 0.22);
+  border-left: 3px solid rgba(214, 41, 75, 0.7);
+  background: rgba(214, 41, 75, 0.06);
+  color: #B3123A;
 }
 .bannerOk {
-  border: 1px solid rgba(45, 212, 191, 0.25);
+  border: 1px solid rgba(45, 212, 191, 0.28);
   border-left: 3px solid #2dd4bf;
-  background: rgba(45, 212, 191, 0.06);
-  color: #5eead4;
+  background: rgba(45, 212, 191, 0.07);
+  color: #0f9488;
 }
 
 .gcal {
   display: inline-flex; align-items: center; gap: 8px;
   margin-top: 16px;
-  color: #5eead4; text-decoration: none;
+  color: #0f9488; text-decoration: none;
   font-weight: 600; font-size: 0.85rem;
   transition: color 0.2s ease;
 }
@@ -309,7 +335,7 @@
 /* ── Spinner ──────────────────────────────────────────────────────── */
 .spinner {
   width: 26px; height: 26px;
-  border: 2px solid rgba(45, 212, 191, 0.18);
+  border: 2px solid rgba(45, 212, 191, 0.22);
   border-top-color: #2dd4bf;
   border-radius: 50%;
   margin: 20px auto;

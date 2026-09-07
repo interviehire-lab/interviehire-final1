@@ -29,6 +29,28 @@ _BRAND_TEAL = "#2dd4bf"
 _BRAND_INDIGO = "#64a0dc"
 _BRAND_INK = "#17171F"
 
+_JD_MAX_CHARS = 900
+
+
+def _jd_block(job_description: str | None) -> str:
+    """Renders the job-description block shared by every candidate-facing
+    interview email below, or '' when there's no JD text to show (job
+    lookup failed, or the job has no `description` set) — callers just
+    splice this into their body string. Truncated: a full JD can run to
+    several thousand characters, which would dwarf the rest of a short
+    transactional email."""
+    text = (job_description or "").strip()
+    if not text:
+        return ""
+    if len(text) > _JD_MAX_CHARS:
+        text = text[:_JD_MAX_CHARS].rstrip() + "…"
+    return f"""
+        <div class="jd-box">
+            <div class="jd-label">About the role</div>
+            <div class="jd-text">{_esc(text)}</div>
+        </div>
+    """
+
 
 def _email_shell(preheader: str, body_html: str) -> str:
     """Wrap template-specific body HTML in the shared wordmark-header /
@@ -59,6 +81,9 @@ def _email_shell(preheader: str, body_html: str) -> str:
   .detail-box {{ background:linear-gradient(135deg, rgba(45,212,191,0.08), rgba(100,160,220,0.08)); border-left:3px solid {_BRAND_TEAL}; border-radius:0 12px 12px 0; padding:18px 22px; margin:24px 0; }}
   .detail-label {{ font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:#8A8A96; margin-bottom:4px; font-weight:600; }}
   .detail-value {{ font-size:17px; font-weight:700; color:{_BRAND_INK}; }}
+  .jd-box {{ background:#FAFAFB; border:1px solid #ECECF1; border-radius:12px; padding:16px 20px; margin:20px 0; }}
+  .jd-label {{ font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:#8A8A96; margin-bottom:8px; font-weight:600; }}
+  .jd-text {{ font-size:14px; line-height:1.65; color:#3A3A45; white-space:pre-line; }}
   .cta {{ text-align:center; margin:30px 0 6px; }}
   .btn {{ display:inline-block; background-color:{_BRAND_TEAL}; background-image:linear-gradient(135deg,{_BRAND_TEAL},{_BRAND_INDIGO}); color:#ffffff !important; text-decoration:none; font-weight:600; font-size:15px; padding:14px 34px; border-radius:10px; margin:6px; }}
   .btn-secondary {{ display:inline-block; background:#ffffff; color:#3A3A45 !important; text-decoration:none; font-weight:600; font-size:15px; padding:12.5px 32px; border-radius:10px; margin:6px; border:1.5px solid #E2E2E8; }}
@@ -236,12 +261,13 @@ def send_ical_invitation_email(
     organizer_email: str,
     reschedule_link: str,
     interview_link: str,
-    organizer_name: str = "IntervieHire Host"
+    organizer_name: str = "IntervieHire Host",
+    job_description: str | None = None,
 ) -> bool:
     subject = f"Confirmed: {stage_name} Scheduled - {job_title}"
     from app.utils.timezones import to_ist
     time_str = to_ist(start_time).strftime("%B %d, %Y at %I:%M %p IST")
-    
+
     ical_body = f"""
         <h1>{_esc(stage_name)} confirmed</h1>
         <p>Dear {_esc(candidate_name)},</p>
@@ -250,6 +276,7 @@ def send_ical_invitation_email(
             <div class="detail-label">Interview date &amp; time</div>
             <div class="detail-value">{_esc(time_str)}</div>
         </div>
+        {_jd_block(job_description)}
         <p>To join the interactive interview at the scheduled time, use the button below:</p>
         <div class="cta">
             <a href="{interview_link}" class="btn">Enter interview room</a>
@@ -366,6 +393,7 @@ def send_interview_reminder_email(
     stage_name: str,
     start_time: datetime,
     interview_link: str,
+    job_description: str | None = None,
 ) -> bool:
     """Reminder email sent ~REMINDER_MINUTES_BEFORE the scheduled interview
     start (see `app/jobs/reminders.py`). No `.ics` attachment — that was
@@ -384,6 +412,7 @@ def send_interview_reminder_email(
             <div class="detail-label">Interview date &amp; time</div>
             <div class="detail-value">{_esc(time_str)}</div>
         </div>
+        {_jd_block(job_description)}
         <p>Please join a few minutes early to make sure your camera and microphone are working.</p>
         <div class="cta">
             <a href="{interview_link}" class="btn">Join interview</a>
@@ -416,6 +445,7 @@ def send_interview_invite_email(
     role: str | None,
     interview_link: str,
     expires_at: datetime | None = None,
+    job_description: str | None = None,
 ) -> bool:
     """Transactional per-candidate interview invite carrying the unique link.
 
@@ -460,6 +490,7 @@ def send_interview_invite_email(
         <h1>You're invited to your interview</h1>
         <p>Hi {greeting_name},</p>
         <p>You've been invited to an AI-led interview for <strong>{role_label}</strong> with IntervieHire.</p>
+        {_jd_block(job_description)}
         <div class="cta">
             <a href="{interview_link}" class="btn">Start your interview</a>
         </div>

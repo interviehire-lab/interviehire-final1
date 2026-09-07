@@ -1356,7 +1356,7 @@ export default function Interview() {
               <AIVisualAssistant
                 mode={assistantMode}
                 voiceActive={voiceActive && micOn}
-                room={voice.room}
+                agentAudioTrack={voice.agentAudioTrack}
               />
               <div className="avatar-overlay" />
               <div className="identity">

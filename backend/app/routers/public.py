@@ -282,7 +282,8 @@ def confirm_interview_slot(token: str, request: Request, db: Session = Depends(g
             organizer_email=organizer_email,
             reschedule_link=reschedule_link,
             interview_link=interview_link,
-            organizer_name=organizer_name
+            organizer_name=organizer_name,
+            job_description=job.description if job else None,
         )
     except Exception as mail_err:
         logger.error(f"Failed to send confirmation email: {mail_err}")
@@ -458,7 +459,8 @@ def public_reschedule_interview(
                 organizer_email=organizer_email,
                 reschedule_link=reschedule_link,
                 interview_link=interview_link,
-                organizer_name=organizer_name
+                organizer_name=organizer_name,
+                job_description=job.description if job else None,
             )
         except Exception as mail_err:
             logger.error(f"Failed to send rescheduled confirmation email: {mail_err}")

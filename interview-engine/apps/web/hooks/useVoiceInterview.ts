@@ -64,18 +64,15 @@ export function useVoiceInterview({
   const agentJoinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [connected, setConnected] = useState(false);
   // The raw LiveKit Room instance, reactively exposed once connect() resolves —
-  // consumed by AIVisualAssistant to build orb-ui's app-managed LiveKit adapter
-  // (createLiveKitAdapter({ room, createAudioAnalyser })), which subscribes to
-  // this SAME Room rather than owning a connection of its own.
+  // available to any consumer that needs direct Room access.
   const [room, setRoom] = useState<Room | null>(null);
   const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [hardLimitSeconds, setHardLimitSeconds] = useState(1800);
-  // The real remote agent-audio track, once LiveKit subscribes to it. Kept in
-  // the hook's return value for any other consumer that wants raw access to
-  // it directly; AIVisualAssistant's orb-ui adapter now gets its per-frame
-  // waveform straight from the exposed `room` (createLiveKitAdapter), not
-  // from this track.
+  // The real remote agent-audio track, once LiveKit subscribes to it.
+  // AIVisualAssistant feeds this straight into AgentAudioVisualizerAura's
+  // `audioTrack` prop, which reads its live per-frame volume via LiveKit's
+  // own useTrackVolume (Web Audio AnalyserNode) to drive the aura's motion.
   const [agentAudioTrack, setAgentAudioTrack] = useState<RemoteAudioTrack | null>(null);
   // Room-level `connected` only means the BROWSER reached LiveKit Cloud — the
   // voice-agent worker is dispatched to the room as a separate async process

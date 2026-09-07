@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import styles from './reschedule.module.css';
 
 // React port of the recruiter-side date+time picker (createDateTimePicker in
@@ -44,6 +44,15 @@ export function DateTimeField({
   const [viewYear, setViewYear] = useState(value.getFullYear());
   const [viewMonth, setViewMonth] = useState(value.getMonth());
   const rootRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  // Whether the popover should open upward (.dtPopUp) instead of its default
+  // downward placement — flips when there isn't enough room below the field
+  // to fit the full month grid + time row without the outer .screen having
+  // to clip or scroll it out of reach (see reschedule.module.css's .dtPop
+  // comment for the bug this fixes: candidates having to zoom out to reach
+  // the time input).
+  const [flipUp, setFlipUp] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -53,6 +62,26 @@ export function DateTimeField({
     document.addEventListener('mousedown', onDocPointerDown);
     return () => document.removeEventListener('mousedown', onDocPointerDown);
   }, [open]);
+
+  // Measured after the popover is in the DOM (default: opens downward), so
+  // its real rendered height reflects the current month's row count (5 vs 6
+  // weeks). Runs before paint, so a flip is invisible — no flash of the
+  // wrong position.
+  useLayoutEffect(() => {
+    if (!open) {
+      setFlipUp(false);
+      return;
+    }
+    const field = fieldRef.current;
+    const pop = popRef.current;
+    if (!field || !pop) return;
+    const fieldRect = field.getBoundingClientRect();
+    const popHeight = pop.offsetHeight;
+    const margin = 14; // .dtPop's own 6px offset + a little breathing room
+    const spaceBelow = window.innerHeight - fieldRect.bottom;
+    const spaceAbove = fieldRect.top;
+    setFlipUp(spaceBelow < popHeight + margin && spaceAbove > spaceBelow);
+  }, [open, viewYear, viewMonth]);
 
   const minKey = dayKey(minDate);
   const maxKey = dayKey(maxDate);
@@ -92,13 +121,14 @@ export function DateTimeField({
       <button
         type="button"
         id={id}
+        ref={fieldRef}
         className={styles.dtField}
         onClick={() => setOpen((v) => !v)}
       >
         {fmtField(value)}
       </button>
       {open && (
-        <div className={styles.dtPop}>
+        <div ref={popRef} className={`${styles.dtPop} ${flipUp ? styles.dtPopUp : ''}`}>
           <div className={styles.dtHead}>
             <button type="button" className={styles.dtNav} onClick={() => navMonth(-1)} aria-label="Previous month">‹</button>
             <span className={styles.dtTitle}>{MONTHS[viewMonth]} {viewYear}</span>

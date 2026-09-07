@@ -175,6 +175,11 @@ async function runInterview(ctx: JobContext<ProcessData>): Promise<void> {
     voice: config.CARTESIA_VOICE_ID,
     language: 'en',
     speed: 1.05,
+    // The plugin defaults to 24kHz if unset. 48kHz is Opus's native max sample
+    // rate for WebRTC voice (LiveKit publishes at up to 48kHz) — this avoids
+    // leaving audible fidelity on the table for no bandwidth reason, though it
+    // won't fully close the gap to Cartesia's own (non-real-time) playground.
+    sampleRate: 48_000,
   });
   tts.prewarm();
   ctx.addShutdownCallback(() => tts.close());
@@ -294,6 +299,17 @@ async function runInterview(ctx: JobContext<ProcessData>): Promise<void> {
         'Speak its response exactly. Never invent questions, coaching, evaluation criteria, or scores.',
       ].join(' '),
     }),
+    outputOptions: {
+      // Must match the Cartesia TTS's own `sampleRate` above — RoomIO publishes
+      // the output track at its own default (24kHz) otherwise, independent of
+      // what the TTS plugin declares, silently downsampling/mismatching audio.
+      audioSampleRate: 48_000,
+      // Default 200ms is too thin a prebuffer for Cartesia's bursty streaming
+      // delivery: when TTS produces audio faster than real-time, early frames
+      // get dropped from the ring buffer, which is what "choppy" sounds like.
+      // Give it a larger cushion.
+      queueSizeMs: 1_000,
+    },
   });
   await ctx.connect();
   controller.startTimers();

@@ -148,14 +148,21 @@ export const roomStyles = `
 
   .lina-panel { position: relative; flex: 1 1 50%; min-width: 0; overflow: hidden; }
 
-  /* orb-ui's <Orb theme="cloud"> replaces the legacy CSS blob/sphere/wave
-     visualization entirely (one visual system everywhere, no CSS-orb
-     fallback). This is just the sizing/positioning wrapper .avatar-panel
-     needs — orb-ui owns everything about the orb's own rendering. .identity
-     and .candidate-panel still stack above it via their own z-index. */
+  /* AgentAudioVisualizerAura (LiveKit-audio-driven WebGL shader) replaces the
+     legacy CSS blob/sphere/wave visualization entirely (one visual system
+     everywhere, no CSS-orb fallback). This is just the sizing/positioning
+     wrapper .avatar-panel needs — the aura component owns everything about
+     its own rendering. .identity and .candidate-panel still stack above it
+     via their own z-index. */
   .orb-stage {
     position: absolute; inset: 0; z-index: 1;
-    display: grid; place-items: center;
+    /* flex (not grid): a flex child's width:100% resolves against .orb-stage's
+       own definite box (it fills .lina-panel via inset:0). A single-item
+       CSS grid's implicit auto-track sizes to the item's own content instead
+       of the container, so the aura's Tailwind w-full/aspect-square combo
+       (see AIVisualAssistant.tsx) wouldn't reliably fill the panel there. */
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
     overflow: hidden;
     background:
       radial-gradient(circle at 50% 47%, rgba(103, 232, 249, .055), transparent 32%),
@@ -502,9 +509,63 @@ export const roomStyles = `
   @media (max-width: 1100px) {
     .room { position: absolute; height: auto; min-height: 100vh; overflow: visible; }
     .topbar, .content { grid-template-columns: 1fr; }
+    /* .content's flex:1 (flex-basis:0) assumes .room has a definite height to
+       flex against — true in the default position:fixed/inset:0 layout, but
+       .room switches to height:auto right above so the page can grow/scroll
+       naturally. Left as flex:1, .content's own box came out SHORTER than
+       .avatar-panel's min-height (measured: content ~427px vs avatar-panel's
+       460px min-height), so avatar-panel silently overflowed past .content's
+       bottom edge and visually collided with .controlbar below it. flex:none
+       makes .content size to its actual children again. */
+    .content { flex: none; }
     .connection { justify-content: flex-start; flex-wrap: wrap; }
     .avatar-panel { min-height: 620px; flex-direction: column; }
     .candidate-panel { border-left: none; border-top: 1px solid rgba(255, 255, 255, .14); }
     .controlbar { padding-right: 32px; }
+  }
+
+  /* Phone-width tightening on top of the ≤1100px tablet rules above: the
+     104px-tall .topbar and 418px-min .job-pill never adapted to a real
+     375-414px phone (they just clipped/overflowed), and .controlbar's
+     button row + timer text had no wrap fallback. */
+  @media (max-width: 640px) {
+    .topbar {
+      height: auto;
+      grid-template-columns: 1fr;
+      justify-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      text-align: center;
+    }
+    .brand, .connection { justify-content: center; }
+    .room-label { margin-left: 12px; }
+    .job-pill { min-width: 0; width: 100%; padding: 9px 14px; }
+    .job-pill strong { font-size: 15px; }
+
+    .content { padding: 10px 12px 16px; gap: 16px; }
+    .avatar-panel { min-height: 460px; border-radius: 20px; }
+
+    .identity { top: 16px; left: 16px; gap: 10px; }
+    .identity-icon { width: 40px; height: 40px; font-size: 16px; }
+    .identity strong { font-size: 15px; }
+    .you-pill { top: 10px; left: 10px; padding: 6px 11px; font-size: 11px; }
+
+    .listen-card { left: 16px; right: 16px; bottom: 16px; padding: 14px 18px; gap: 12px; }
+    .listen-copy span { max-width: 46vw; }
+
+    .controlbar {
+      height: auto;
+      min-height: 78px;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 12px 16px;
+    }
+    .control-time { flex-wrap: wrap; gap: 8px; }
+    .control-actions { gap: 8px; }
+    .control-actions button { width: 44px; height: 44px; font-size: 16px; }
+    .control-actions .end { width: 50px; }
+
+    .gate { padding: 16px; }
+    .gate-title { font-size: 24px; }
   }
 `;

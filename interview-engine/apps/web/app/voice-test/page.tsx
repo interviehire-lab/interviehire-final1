@@ -166,7 +166,7 @@ export default function VoiceTestPage() {
 
       <div className="vt-body">
         <div className="vt-visual">
-          <AIVisualAssistant mode={assistantMode} room={voice.room} />
+          <AIVisualAssistant mode={assistantMode} agentAudioTrack={voice.agentAudioTrack} />
         </div>
 
         <div className="vt-panel">

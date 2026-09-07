@@ -1,17 +1,10 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { Room } from 'livekit-client';
-import { createAudioAnalyser } from 'livekit-client';
-import { Orb } from 'orb-ui';
-import type { OrbState } from 'orb-ui';
-// The app-managed LiveKit adapter ({ room, createAudioAnalyser }) is only
-// exported from orb-ui's general adapters barrel — the 'orb-ui/adapters/livekit'
-// subpath resolves to the package's fully-managed browser adapter instead
-// (tokenEndpoint/sandboxId only), which would hand Room ownership to orb-ui and
-// break this app's own timers/question-tracking/proctoring logic already living
-// on this Room. See orb-ui's package.json "exports" map.
-import { createLiveKitAdapter } from 'orb-ui/adapters';
+import { memo, type CSSProperties } from 'react';
+import type { RemoteAudioTrack } from 'livekit-client';
+import type { AgentState } from '@livekit/components-react';
+
+import { AgentAudioVisualizerAura } from '@/components/agents-ui/agent-audio-visualizer-aura';
 
 export type AssistantMode = 'connecting' | 'idle' | 'listening' | 'thinking' | 'speaking' | 'complete';
 
@@ -19,18 +12,21 @@ type Props = {
   mode: AssistantMode;
   voiceActive?: boolean;
   /**
-   * The already-connected LiveKit Room from useVoiceInterview, once connect()
-   * has resolved. When set, the orb subscribes to real per-frame audio via
-   * orb-ui's app-managed LiveKit adapter. Null before connect() resolves, and
-   * for the (now rare/legacy) non-LiveKit path — the orb still renders in
-   * controlled mode with a synthesized volume in that case.
+   * The agent's live remote audio track from useVoiceInterview
+   * (RoomEvent.TrackSubscribed), once the LiveKit worker has joined and
+   * started publishing. The aura reads this track's real-time volume via
+   * LiveKit's own useTrackVolume (Web Audio AnalyserNode) to morph its
+   * shape/brightness per animation frame — no synthetic/random-walk
+   * fallback. Null before the agent joins, or between turns while no
+   * remote audio track is subscribed; the aura still renders (state-driven
+   * motion) with zero volume in that case.
    */
-  room?: Room | null;
+  agentAudioTrack?: RemoteAudioTrack | null;
 };
 
-// orb-ui's OrbState has no "interview complete" concept — fall back to its
-// calmest resting state.
-const ORB_STATE_MAP: Record<AssistantMode, OrbState> = {
+// The aura's own AgentState has no "interview complete" concept — fall back
+// to its calmest resting state.
+const AGENT_STATE_MAP: Record<AssistantMode, AgentState> = {
   connecting: 'connecting',
   idle: 'idle',
   listening: 'listening',
@@ -39,10 +35,9 @@ const ORB_STATE_MAP: Record<AssistantMode, OrbState> = {
   complete: 'idle',
 };
 
-// Screen-reader-only turn-state announcer — replaces the removed visible
-// "Lina is speaking" / "Understanding your answer" captions for sighted users
-// (who now read turn-state from the orb's own motion) while keeping the same
-// information available to screen-reader users via aria-live.
+// Screen-reader-only turn-state announcer — sighted users read turn-state
+// from the aura's own motion; screen-reader users get the same information
+// via aria-live.
 function turnStateAnnouncement(mode: AssistantMode): string {
   if (mode === 'listening') return 'Your turn to speak';
   if (mode === 'speaking') return 'Lina is responding';
@@ -62,83 +57,24 @@ const srOnlyStyle: CSSProperties = {
 };
 
 // Memoized: this subtree shouldn't re-render just because unrelated state
-// changes elsewhere in the (large) candidate-room page component — that would
-// compete with orb-ui's own rendering/animation loop for main-thread time.
-function AIVisualAssistantImpl({ mode, voiceActive = false, room = null }: Props) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  // orb-ui's <Orb> takes a fixed pixel `size` (default 200) rather than
-  // filling its container — track the stage's own box so the orb scales with
-  // the .avatar-panel layout instead of sitting at a constant 200px regardless
-  // of viewport (roughly matching the legacy orb's clamp(150px,20vw,220px)).
-  const [orbSize, setOrbSize] = useState(200);
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver((entries) => {
-      const box = entries[0]?.contentRect;
-      if (!box) return;
-      const next = Math.round(Math.min(box.width, box.height) * 0.6);
-      setOrbSize(Math.max(150, Math.min(280, next)));
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // App-managed LiveKit adapter: subscribes to the Room this app already
-  // connected (via useVoiceInterview) rather than orb-ui owning its own
-  // connection. Real per-frame agent/mic volume flows through this; `state`
-  // below is still passed explicitly and stays authoritative for turn-state.
-  const adapter = useMemo(
-    () => (room ? createLiveKitAdapter({ room, createAudioAnalyser }) : undefined),
-    [room],
-  );
-
-  // Legacy/no-room path (rare going forward — only transiently true before
-  // connect() resolves, or for a non-LiveKit session). No real waveform to
-  // read here, so synthesize a smoothed, non-repeating random walk while
-  // "speaking" — the same trick most "AI is talking" orb UIs use — written to
-  // a volume React state instead of a CSS variable.
-  const [syntheticVolume, setSyntheticVolume] = useState(0);
-  useEffect(() => {
-    if (adapter) return;
-    if (mode !== 'speaking') {
-      setSyntheticVolume(0);
-      return;
-    }
-    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      setSyntheticVolume(0.4);
-      return;
-    }
-    let raf = 0;
-    let current = 0.35;
-    let target = 0.35;
-    let lastTargetChangeMs = 0;
-    const loop = (t: number) => {
-      if (t - lastTargetChangeMs > 140 + Math.random() * 180) {
-        target = 0.3 + Math.random() * 0.7;
-        lastTargetChangeMs = t;
-      }
-      current += (target - current) * 0.14;
-      setSyntheticVolume(current);
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [mode, adapter]);
-
+// changes elsewhere in the (large) candidate-room page component — that
+// would compete with the shader's own per-frame animation loop for
+// main-thread time.
+function AIVisualAssistantImpl({ mode, voiceActive = false, agentAudioTrack = null }: Props) {
   const announcement = turnStateAnnouncement(mode);
 
   return (
-    <div ref={rootRef} className={`orb-stage${voiceActive ? ' is-voice-active' : ''}`}>
-      <Orb
-        adapter={adapter}
-        theme="cloud"
-        interactive={false}
-        state={ORB_STATE_MAP[mode]}
-        volume={adapter ? undefined : syntheticVolume}
-        size={orbSize}
-        className="orb-stage-orb"
+    <div className={`orb-stage${voiceActive ? ' is-voice-active' : ''}`}>
+      {/* AgentAudioVisualizerAuraVariants' `size` prop is a fixed Tailwind
+          h-[Npx] step (icon/sm/md/lg/xl), not container-relative. `h-auto`
+          here overrides that (cn()'s tailwind-merge drops the variant's
+          conflicting h-[Npx] in favor of this later class), leaving only
+          `w-full` explicit — so aspect-square derives height from the
+          .orb-stage's actual width instead of a constant pixel size. */}
+      <AgentAudioVisualizerAura
+        state={AGENT_STATE_MAP[mode]}
+        audioTrack={agentAudioTrack ?? undefined}
+        className="orb-stage-orb aspect-square w-full h-auto max-w-[420px]"
         aria-label="Lina, your AI interviewer"
       />
       <div role="status" aria-live="polite" style={srOnlyStyle}>
