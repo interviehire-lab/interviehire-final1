@@ -247,7 +247,7 @@ export default function Interview() {
     onActivity: handleVoiceActivity,
     onEnded: () => void endCallRef.current(),
     onError: (detail, error) => {
-      console.error('[livekit] voice error', error || detail);
+      console.error('[livekit] voice error', { sessionId, detail, error });
       setStartError(`Voice interview error: ${detail}`);
       setAssistantActivity('idle');
     },
@@ -1058,13 +1058,20 @@ export default function Interview() {
     <>
       <style>{roomStyles}</style>
 
-      {/* Interview blocked by the recruiter's settings (disabled / late / reattempt / CV) */}
+      {/* Interview blocked by the recruiter's settings (disabled / late / reattempt / CV),
+          OR a voice-connection failure. Only the latter is worth a retry button —
+          a link-expired/schedule-gate error won't be fixed by refreshing. */}
       {startError && (
         <div className="gate">
           <div className="gate-card">
             <p className="gate-eyebrow">Interview unavailable</p>
             <h1 className="gate-title">Can&apos;t start this interview</h1>
             <p className="gate-sub">{startError}</p>
+            {startError.startsWith('Voice interview') && (
+              <button type="button" className="gate-btn" onClick={() => window.location.reload()}>
+                Refresh and try again
+              </button>
+            )}
           </div>
         </div>
       )}

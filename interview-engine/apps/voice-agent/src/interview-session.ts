@@ -88,9 +88,38 @@ export class InterviewSessionController {
     void this.finish(reason, { waitForCurrentSpeech: true });
   }
 
+  // `ctx.agent` (the SDK's own LocalParticipant getter) can briefly still read
+  // `undefined` right after `ctx.connect()` resolves — an SDK-internal timing
+  // gap between the connect() promise settling and its own bookkeeping
+  // populating this getter. `publish()` used to read `ctx.agent` with a bare
+  // `?.`, which silently no-ops (no throw, no log) when it's still undefined
+  // at that instant — the exact failure mode behind candidates hearing the
+  // agent's voice while the client never received the 'session started'
+  // message and showed a false "couldn't connect you" error. Poll briefly
+  // instead of trusting the getter on the first read.
+  async #waitForAgentParticipant(timeoutMs = 5_000) {
+    if (this.ctx.agent) return this.ctx.agent;
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (this.ctx.agent) return this.ctx.agent;
+    }
+    return undefined;
+  }
+
   async publish(event: VoiceEvent): Promise<void> {
+    const agent = await this.#waitForAgentParticipant();
+    if (!agent) {
+      // Was silent before (see comment above) — now visible in Railway logs
+      // instead of leaving the client stuck with no server-side trace at all.
+      this.logger.warn(
+        { eventType: event.type },
+        'ctx.agent still unavailable after waiting; dropping voice event',
+      );
+      return;
+    }
     try {
-      await this.ctx.agent?.publishData(new TextEncoder().encode(JSON.stringify(event)), {
+      await agent.publishData(new TextEncoder().encode(JSON.stringify(event)), {
         reliable: true,
         topic: 'interviehire.voice',
       });

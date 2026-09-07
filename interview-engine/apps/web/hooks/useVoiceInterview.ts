@@ -58,6 +58,17 @@ function parseLiveKitMessage(payload: Uint8Array): Record<string, unknown> | nul
   }
 }
 
+// Consistent, greppable prefix (matches page.tsx's existing '[livekit] voice
+// error' log) for every step of the connect → agent-join → first-audio
+// sequence. This sequence spans two processes (this browser tab and the
+// voice-agent worker) and several async gates, so when something goes wrong
+// — like a candidate hearing the agent's voice while the UI still shows a
+// connection error — a plain stack trace won't explain it; a timestamped
+// trail of which step actually happened will.
+function logVoice(event: string, data?: Record<string, unknown>) {
+  console.info(`[livekit] ${event}`, { ts: new Date().toISOString(), ...data });
+}
+
 export function useVoiceInterview({
   sessionId,
   getInviteToken,
@@ -93,6 +104,10 @@ export function useVoiceInterview({
   const endedDeliveredRef = useRef(false);
   const agentConnectedRef = useRef(false);
   const agentJoinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // When connect() started — purely for elapsed-time context in logVoice calls
+  // below, so a timeout firing (or not) can be read against how long each
+  // prior step actually took.
+  const connectStartMsRef = useRef<number | null>(null);
   const [connected, setConnected] = useState(false);
   // The raw LiveKit Room instance, reactively exposed once connect() resolves —
   // available to any consumer that needs direct Room access.
@@ -129,7 +144,9 @@ export function useVoiceInterview({
     }
   }, []);
 
-  const markAgentConnected = useCallback(() => {
+  const markAgentConnected = useCallback((reason: 'session-started-message' | 'audio-track-subscribed') => {
+    if (agentConnectedRef.current) return;
+    logVoice('agent connected', { reason, elapsedMs: connectStartMsRef.current ? Date.now() - connectStartMsRef.current : null });
     clearAgentJoinTimeout();
     agentConnectedRef.current = true;
     setAgentConnected(true);
@@ -189,6 +206,8 @@ export function useVoiceInterview({
   const connect = useCallback(async () => {
     if (activeRef.current) return;
 
+    connectStartMsRef.current = Date.now();
+    logVoice('connect() starting', { sessionId });
     deliberateStopRef.current = false;
     endedDeliveredRef.current = false;
     setDeadlineAt(null);
@@ -204,12 +223,14 @@ export function useVoiceInterview({
     });
     const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
     if (!response.ok) {
+      logVoice('livekit-token fetch failed', { status: response.status, error: payload?.error });
       throw new Error(typeof payload?.error === 'string' && payload.error
         ? payload.error
         : `LiveKit connection setup failed (${response.status}).`);
     }
     const credentials = payload as LiveKitCredentials | null;
     if (!credentials?.url || !credentials?.token) throw new Error('The engine returned incomplete LiveKit credentials.');
+    logVoice('livekit-token fetched', { roomName: credentials.roomName });
 
     setStartedAt(credentials.startedAt || new Date().toISOString());
     setHardLimitSeconds(Number(credentials.hardLimitSeconds) || 1800);
@@ -220,6 +241,17 @@ export function useVoiceInterview({
     setRoom(room);
     room.on(RoomEvent.TrackSubscribed, (track) => {
       if (track.kind !== Track.Kind.Audio) return;
+      logVoice('agent audio track subscribed', { trackSid: track.sid });
+      // If real audio is already flowing, the agent is unambiguously
+      // connected — this is the same fact the 'session started' data message
+      // exists to confirm, just observed a different way. Treating it as an
+      // equally valid signal closes a real gap: `ctx.agent` on the
+      // voice-agent worker can briefly still read undefined right after
+      // `ctx.connect()` resolves (an SDK-internal timing gap), which used to
+      // silently drop that data message with zero trace on either side —
+      // the client would show "couldn't connect you with your interviewer"
+      // while the candidate could already hear them talking.
+      markAgentConnected('audio-track-subscribed');
       setAgentAudioTrack(track as RemoteAudioTrack);
       const element = track.attach();
       // No `autoplay` attribute — playback is driven explicitly below so it
@@ -241,8 +273,14 @@ export function useVoiceInterview({
       if (track.kind === Track.Kind.Audio) setAgentAudioTrack(null);
       detachRemoteAudio(track);
     });
-    room.on(RoomEvent.Reconnecting, () => callbacksRef.current.onActivity('thinking'));
-    room.on(RoomEvent.Reconnected, () => callbacksRef.current.onActivity('idle'));
+    room.on(RoomEvent.Reconnecting, () => {
+      logVoice('room reconnecting');
+      callbacksRef.current.onActivity('thinking');
+    });
+    room.on(RoomEvent.Reconnected, () => {
+      logVoice('room reconnected');
+      callbacksRef.current.onActivity('idle');
+    });
     room.on(RoomEvent.DataReceived, (payload) => {
       const message = parseLiveKitMessage(payload);
       if (!message) return;
@@ -260,12 +298,14 @@ export function useVoiceInterview({
           callbacksRef.current.onActivity(activity);
         }
       } else if (message.type === 'interview-ended') {
+        logVoice('interview-ended message received', { reason: message.reason });
         emitEnded(typeof message.reason === 'string' ? message.reason : 'director-completed');
       } else if (message.type === 'session' && message.state === 'started') {
-        markAgentConnected();
+        markAgentConnected('session-started-message');
       }
     });
     room.on(RoomEvent.Disconnected, () => {
+      logVoice('room disconnected', { deliberate: deliberateStopRef.current });
       activeRef.current = false;
       setConnected(false);
       setAgentAudioTrack(null);
@@ -279,10 +319,12 @@ export function useVoiceInterview({
     try {
       await room.connect(credentials.url, credentials.token, { autoSubscribe: true });
     } catch (error) {
+      logVoice('room.connect() failed', { error: error instanceof Error ? error.message : String(error) });
       roomRef.current = null;
       setRoom(null);
       throw error;
     }
+    logVoice('room.connect() resolved', { elapsedMs: Date.now() - connectStartMsRef.current });
     activeRef.current = true;
     setConnected(true);
     callbacksRef.current.onActivity('idle');
@@ -291,11 +333,25 @@ export function useVoiceInterview({
     // agent crash, a payload the worker rejects), don't leave the candidate
     // staring at "connecting" forever with no way to know something's wrong.
     // Attached here (not to publishMicrophone) since room.connect() succeeding
-    // is what actually triggers the worker's dispatch.
+    // is what actually triggers the worker's dispatch. Now that TrackSubscribed
+    // also calls markAgentConnected (see above), reaching this branch means
+    // BOTH the 'session started' message AND real agent audio failed to
+    // arrive within the window — a genuine failure, not the audio-without-
+    // confirmation false positive this used to produce.
     clearAgentJoinTimeout();
     agentJoinTimeoutRef.current = setTimeout(() => {
       if (agentConnectedRef.current || deliberateStopRef.current) return;
-      callbacksRef.current.onError("Couldn't connect you with your interviewer. Please refresh and try again.");
+      const diagnostics = {
+        elapsedMs: connectStartMsRef.current ? Date.now() - connectStartMsRef.current : null,
+        roomConnected: activeRef.current,
+        hadAudioTrack: audioElementsRef.current.size > 0,
+        sessionId,
+      };
+      logVoice('agent-join timeout fired', diagnostics);
+      const ref = `${sessionId.slice(0, 8)}-${Date.now().toString(36)}`;
+      callbacksRef.current.onError(
+        `We couldn't confirm your interviewer joined (waited 20s). This is usually temporary — please refresh and try again. If it keeps happening, share this reference with support: ${ref}`,
+      );
     }, 20_000);
   }, [clearAgentJoinTimeout, detachRemoteAudio, emitEnded, getInviteToken, markAgentDisconnected, sessionId]);
 
