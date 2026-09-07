@@ -24,10 +24,7 @@ const BACKEND_API_PREFIXES = [
 // apex `interviehire.com/interviewcandidateroom`, which this dashboard serves and
 // has no such route → 404. Forward those to the room subdomain, preserving the
 // ?sessionId query (Next carries query params through on redirects).
-// interview.interviehire.com is stuck on an inaccessible Vercel account (see
-// backend/app/config.py's FRONTEND_URL comment) — falls back to the raw
-// Vercel URL until the domain is recovered or replaced.
-let ROOM_ORIGIN = (process.env.INTERVIEW_ROOM_ORIGIN || 'https://interviehire-interview.vercel.app').replace(/\/$/, '');
+let ROOM_ORIGIN = (process.env.INTERVIEW_ROOM_ORIGIN || 'https://interview.interviehire.com').replace(/\/$/, '');
 if (!/^https?:\/\//i.test(ROOM_ORIGIN)) {
   ROOM_ORIGIN = `https://${ROOM_ORIGIN}`;
 }

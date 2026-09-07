@@ -17,25 +17,20 @@ class Settings(BaseSettings):
     APP_NAME: str = "Hiring Dashboard"
  
     # CORS — the recruiter dashboard origin
-    # Interim: app.interviehire.com is stuck on an inaccessible Vercel account
-    # (custom domain claimed there, not reachable from this team) — falls back
-    # to the raw Vercel URL until the domain is recovered or replaced.
-    FRONTEND_URL: str = "https://interviehire-final1.vercel.app"
+    FRONTEND_URL: str = "https://app.interviehire.com"
 
     # The candidate interview room BASE URL (the engine web app). The link is
     # built as `{INTERVIEW_ROOM_URL}/interviewcandidateroom?sessionId=…`, so this
     # is the origin only. The emailed calendar invite's "Enter Interview Room"
     # link points here, so it opens the SAME AI interview room that "Run test
-    # interview" uses. Local: :3001. Interim production: the raw Vercel URL —
-    # see the FRONTEND_URL comment above for why interview.interviehire.com
-    # isn't used here.
-    INTERVIEW_ROOM_URL: str = "https://interviehire-interview.vercel.app"
+    # interview" uses. Local: :3001.
+    INTERVIEW_ROOM_URL: str = "https://interview.interviehire.com"
 
     # Per-candidate unique interview invite links (`/i/{token}`).
     # INVITE_LINK_BASE is the origin that serves `GET /i/{token}` — this backend,
     # or whatever host/rewrite is put in front of it (e.g. app.interviehire.com/i/*
     # rewritten to the backend). The emailed link is `{INVITE_LINK_BASE}/i/{token}`.
-    INVITE_LINK_BASE: str = "https://interviehire-backend-production-ca93.up.railway.app"
+    INVITE_LINK_BASE: str = "https://backend-production-4daf.up.railway.app"
     # Dedicated transactional sender for interview invites — isolated from the
     # recruiting/cold-email From so it never touches that reputation pool.
     INVITE_FROM_EMAIL: str = "interviews@interviehire.com"
