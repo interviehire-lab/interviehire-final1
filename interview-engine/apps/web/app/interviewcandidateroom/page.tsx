@@ -251,6 +251,11 @@ export default function Interview() {
       setStartError(`Voice interview error: ${detail}`);
       setAssistantActivity('idle');
     },
+    // Client-side backstop: don't let the agent's audio actually play while
+    // the candidate is still on the calibration screen, even if it arrives
+    // early (the agent worker joins right after consent, well before
+    // calibration is done). See useVoiceInterview's own doc comment.
+    readyToListen: !!calibration,
   });
 
   const voiceDeadlineMs = useMemo(() => {

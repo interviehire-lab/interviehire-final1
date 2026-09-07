@@ -50,14 +50,18 @@ function parseMetadata(raw: string) {
 
 // The frontend now dispatches this agent (via room.connect()) before the
 // candidate's mic permission has resolved, so it can join/warm up while the
-// candidate is still clicking through permission prompts. That means
-// `ctx.waitForParticipant()` alone (which resolves as soon as ANY participant
-// joins the room) can resolve before the candidate's microphone track is
-// actually published. A ~15-20s bound: long enough for a normal
-// permission-grant, short enough that a stale frontend build (or a dropped
-// data message) never hangs the interview — it just falls back to today's
-// participant-only behavior.
-const CANDIDATE_READY_TIMEOUT_MS = 18_000;
+// candidate is still clicking through permission prompts AND running gaze
+// calibration (~30s on its own, per GazeCalibration's own copy) — mic
+// publish (and thus the 'candidate-ready' message below) doesn't fire until
+// both are done. That means `ctx.waitForParticipant()` alone (which resolves
+// as soon as ANY participant joins the room) can resolve well before the
+// candidate is actually ready to be spoken to. This used to be an 18s bound,
+// which is comfortably shorter than permission-grant + calibration combined
+// — the agent would give up and start talking while the candidate was still
+// on the calibration screen. 120s is a genuine safety net for a lost/dropped
+// data message or a stale frontend build, not a normal-path timeout that
+// should realistically fire.
+const CANDIDATE_READY_TIMEOUT_MS = 120_000;
 
 function isCandidateReadyMessage(value: unknown): value is { type: 'candidate-ready' } {
   return (

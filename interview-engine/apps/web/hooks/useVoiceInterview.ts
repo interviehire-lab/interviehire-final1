@@ -25,6 +25,19 @@ type UseVoiceInterviewOptions = {
   onActivity: (activity: VoiceActivity) => void;
   onEnded: (reason?: string) => void;
   onError: (message: string, error?: unknown) => void;
+  /**
+   * Whether the candidate has actually finished whatever pre-interview gates
+   * the caller runs (permission grant, gaze calibration) and is ready to
+   * hear the agent. Defaults to true (unchanged behavior) for callers that
+   * don't have such a gate. The agent worker joins the room — and may start
+   * speaking — well before this is true (it's dispatched right after
+   * consent to hide connection latency), so this only controls whether
+   * ALREADY-ARRIVED agent audio is actually played on this client; it's a
+   * client-side backstop for `voice-agent`'s own (much longer)
+   * CANDIDATE_READY_TIMEOUT_MS safety net, not the primary fix for making
+   * the agent wait.
+   */
+  readyToListen?: boolean;
 };
 
 type LiveKitCredentials = {
@@ -52,11 +65,29 @@ export function useVoiceInterview({
   onActivity,
   onEnded,
   onError,
+  readyToListen,
 }: UseVoiceInterviewOptions) {
   const callbacksRef = useRef({ onTranscript, onActivity, onEnded, onError });
   const roomRef = useRef<Room | null>(null);
   const publishedMicRef = useRef<{ track: MediaStreamTrack; publication: LocalTrackPublication } | null>(null);
   const audioElementsRef = useRef<Set<HTMLMediaElement>>(new Set());
+  // Elements that arrived (TrackSubscribed fired) before readyToListen was
+  // true — played as soon as it flips, by the effect below. A ref (not
+  // state) since it's mutated from the TrackSubscribed closure and doesn't
+  // itself need to trigger a re-render.
+  const pendingAudioRef = useRef<Set<HTMLMediaElement>>(new Set());
+  const readyToListenRef = useRef(readyToListen ?? true);
+  useEffect(() => {
+    readyToListenRef.current = readyToListen ?? true;
+    if (readyToListenRef.current) {
+      for (const element of pendingAudioRef.current) {
+        void element.play().catch(() => {
+          callbacksRef.current.onError('Interviewer audio was blocked by the browser. Click once in the room to enable audio.');
+        });
+      }
+      pendingAudioRef.current.clear();
+    }
+  }, [readyToListen]);
   const activeRef = useRef(false);
   const deliberateStopRef = useRef(false);
   const endedDeliveredRef = useRef(false);
@@ -115,11 +146,13 @@ export function useVoiceInterview({
       for (const element of track.detach()) {
         element.remove();
         audioElementsRef.current.delete(element);
+        pendingAudioRef.current.delete(element);
       }
       return;
     }
     for (const element of audioElementsRef.current) element.remove();
     audioElementsRef.current.clear();
+    pendingAudioRef.current.clear();
   }, []);
 
   const stop = useCallback(async () => {
@@ -189,13 +222,20 @@ export function useVoiceInterview({
       if (track.kind !== Track.Kind.Audio) return;
       setAgentAudioTrack(track as RemoteAudioTrack);
       const element = track.attach();
-      element.autoplay = true;
+      // No `autoplay` attribute — playback is driven explicitly below so it
+      // can be held back until readyToListen (e.g. the candidate is still on
+      // the calibration screen), rather than the browser starting it the
+      // instant the element has data.
       element.style.display = 'none';
       document.body.appendChild(element);
       audioElementsRef.current.add(element);
-      void element.play().catch(() => {
-        callbacksRef.current.onError('Interviewer audio was blocked by the browser. Click once in the room to enable audio.');
-      });
+      if (readyToListenRef.current) {
+        void element.play().catch(() => {
+          callbacksRef.current.onError('Interviewer audio was blocked by the browser. Click once in the room to enable audio.');
+        });
+      } else {
+        pendingAudioRef.current.add(element);
+      }
     });
     room.on(RoomEvent.TrackUnsubscribed, (track) => {
       if (track.kind === Track.Kind.Audio) setAgentAudioTrack(null);
