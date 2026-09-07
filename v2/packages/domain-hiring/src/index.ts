@@ -7,3 +7,4 @@ export * from "./scheduling";
 export * from "./decision";
 export * from "./deep-analysis";
 export * from "./intake";
+export * from "./interview-result";

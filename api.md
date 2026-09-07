@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-07** — **Added service-authenticated Core command `POST /internal/v2/interview-results`.** The evaluation worker sends only explicit application/session references and the evaluated interview stage. Core verifies its own mapping and marks recruiter screening complete idempotently; the Interview worker never updates Hiring tables directly. Interview evaluation now atomically emits `interview.evaluated.v1` after both evaluators merge.
 - **2026-09-07** — **Added V2 candidate intake at `POST /v2/jobs/{id}/applications`.** The tenant-scoped JSON command accepts candidate identity/contact fields, source, and extracted resume text, creates a new application in `resume_analysis` with a separate generated ID, an `active` decision, and `not_requested` async status, and returns 201. Resume analysis remains an explicit asynchronous follow-up command.
 - **2026-09-07** — **Added V2 `ALL /compat/*` as the explicit anti-corruption proxy for secondary legacy APIs.** The gateway preserves method, query, headers, and body while forwarding to the configured legacy backend; V2 code does not import or write legacy schemas. The `automations` queue now uses a BullMQ daily Job Scheduler and an Ops-owned idempotent run ledger to invoke the existing shared-secret retention engine safely under retries.
 - **2026-09-07** — **V2 scheduling and decision transactions now emit reference-only `notification.requested.v1` work for email, WhatsApp, and robocall delivery.** Schedule commands create immediate confirmation and 30-minute-before reminder events for each selected channel; decisions create email work. Recipient PII remains in Hiring storage and is loaded only after dequeue. Ops owns an idempotent per-channel delivery ledger. No HTTP route shape changed.
@@ -106,6 +107,16 @@ The suffix after `/compat/` is forwarded to the configured legacy backend with m
 query, headers, and body intact. This is the anti-corruption boundary for secondary
 features such as Talent Finder, privacy/DSAR, platform admin, and invites; V2 packages
 do not gain direct access to legacy-owned database tables.
+
+### POST /internal/v2/interview-results
+
+- **Required headers:** `x-internal-secret`, `x-tenant-id`
+- **Request:** `{ "applicationId": "string", "interviewSessionId": "string", "interviewStage": "recruiter_screening | functional_interview" }`
+- **200:** `{ "ok": true, "screeningComplete": "boolean" }`
+- **401:** invalid service credential; **404:** explicit application/session/stage mapping not found; **422:** invalid request; **503:** handler unavailable.
+
+This is a worker-to-Core command. Core verifies the mapping it owns and applies hiring
+policy; the Interview evaluation worker cannot write Hiring storage directly.
 
 ### GET /health
 

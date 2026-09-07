@@ -12,6 +12,7 @@
     "dev:core": "bun run --cwd apps/core-api dev",
     "dev:interview": "bun run --cwd apps/interview-api dev",
     "dev:web": "bun run --cwd apps/recruiter-web dev",
+    "worker": "bun run scripts/run-worker.ts",
     "seed:demo": "bun run scripts/seed-demo.ts",
     "infra:up": "docker compose -f compose.test.yml up -d --wait",
     "infra:down": "docker compose -f compose.test.yml down",

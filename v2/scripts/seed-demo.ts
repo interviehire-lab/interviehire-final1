@@ -1,7 +1,14 @@
 import { connectHiringDatabase, migrateHiringDatabase, applications, applicationInterviewRefs, resumeAnalysisRuns } from "@interviehire/db-hiring";
 import { connectInterviewDatabase, migrateInterviewDatabase, interviewEvaluations, interviewSessions } from "@interviehire/db-interview";
 import { migrateOpsDatabase } from "@interviehire/db-ops"; import { resetHiringDb, resetInterviewDb, resetOpsDb } from "@interviehire/testing";
+import { createQueue, QUEUE_NAMES } from "@interviehire/queue";
 const url = process.env.DATABASE_URL ?? process.env.TEST_DATABASE_URL; if (!url) throw new Error("DATABASE_URL is required");
+const redisUrl = process.env.REDIS_URL ?? process.env.TEST_REDIS_URL;
+if (redisUrl) {
+  const queues = QUEUE_NAMES.map((name) => createQueue(name, redisUrl));
+  try { await Promise.all(queues.map((queue) => queue.obliterate({ force: true }))); }
+  finally { await Promise.all(queues.map((queue) => queue.close())); }
+}
 await migrateHiringDatabase(url); await migrateInterviewDatabase(url); await migrateOpsDatabase(url); await resetOpsDb(url); await resetInterviewDb(url); await resetHiringDb(url);
 const hiring = connectHiringDatabase(url); const interview = connectInterviewDatabase(url); const createdAt = "2026-09-07T06:00:00.000Z";
 try {

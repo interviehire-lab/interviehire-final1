@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { InterviewEvaluationQueries, InterviewEvaluationView } from "@interviehire/domain-interview";
 import type { EvaluationStore, EvaluatorName } from "@interviehire/worker";
 import type { InterviewDatabase } from "./database";
-import { interviewEvaluations, interviewSessions } from "./schema";
+import { interviewEvaluations, interviewOutbox, interviewSessions } from "./schema";
 
 export class DrizzleEvaluationStore implements EvaluationStore, InterviewEvaluationQueries {
   constructor(private readonly db: InterviewDatabase) {}
@@ -31,7 +31,28 @@ export class DrizzleEvaluationStore implements EvaluationStore, InterviewEvaluat
       const structured = rows.find((row) => row.evaluator === "structured" && row.status === "ready")?.result;
       if (!holistic || !structured) return { kind: "pending" as const };
       const report = { holistic, structured, evaluatedAt: completedAt };
-      await tx.update(interviewSessions).set({ status: "evaluated", evaluation: report }).where(eq(interviewSessions.id, sessionId));
+      const [session] = await tx.update(interviewSessions).set({ status: "evaluated", evaluation: report }).where(eq(interviewSessions.id, sessionId)).returning({
+        tenantId: interviewSessions.tenantId,
+        applicationId: interviewSessions.applicationId,
+        interviewStage: interviewSessions.interviewStage,
+        correlationId: interviewSessions.correlationId,
+      });
+      if (session) {
+        await tx.insert(interviewOutbox).values({
+          eventId: `interview.evaluated:${sessionId}`,
+          eventType: "interview.evaluated.v1",
+          aggregateId: sessionId,
+          tenantId: session.tenantId,
+          correlationId: session.correlationId,
+          payload: {
+            resourceType: "interview_session",
+            resourceId: sessionId,
+            applicationId: session.applicationId,
+            interviewStage: session.interviewStage,
+          },
+          occurredAt: completedAt,
+        }).onConflictDoNothing();
+      }
       return { kind: "evaluated" as const, report };
     });
   }

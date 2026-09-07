@@ -9,4 +9,5 @@ export * from "./schedule-repository";
 export * from "./decision-repository";
 export * from "./notification-directory";
 export * from "./intake-repository";
+export * from "./interview-result-repository";
 export * from "./schema";

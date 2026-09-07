@@ -10,6 +10,7 @@ import {
   type DecisionService,
   type DeepAnalysisService,
   type ApplicationIntakeService,
+  type InterviewResultService,
 } from "@interviehire/domain-hiring";
 import type { LegacyGateway } from "./compatibility";
 
@@ -22,6 +23,8 @@ export interface CoreAppDependencies {
   readonly deepAnalysis?: DeepAnalysisService;
   readonly legacyGateway?: LegacyGateway;
   readonly intake?: ApplicationIntakeService;
+  readonly interviewResults?: InterviewResultService;
+  readonly internalServiceSecret?: string;
 }
 
 export function createCoreApp(dependencies: CoreAppDependencies) {
@@ -45,6 +48,31 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
 
   return new Elysia({ name: "interviehire-v2-core" })
     .get("/health", () => ({ status: "ok", service: "core-api" }))
+    .post("/internal/v2/interview-results", async ({ body, headers, set }) => {
+      if (!dependencies.internalServiceSecret || headers["x-internal-secret"] !== dependencies.internalServiceSecret) {
+        set.status = 401;
+        return { ok: false as const, code: "UNAUTHORIZED" as const, message: "Invalid service credential." };
+      }
+      if (!dependencies.interviewResults) {
+        set.status = 503;
+        return { ok: false as const, code: "UNAVAILABLE" as const, message: "Interview result handling is unavailable." };
+      }
+      const result = await dependencies.interviewResults.record({
+        tenantId: headers["x-tenant-id"],
+        applicationId: body.applicationId,
+        interviewSessionId: body.interviewSessionId,
+        interviewStage: body.interviewStage,
+      });
+      if (!result.ok) set.status = 404;
+      return result;
+    }, {
+      headers: t.Object({ "x-internal-secret": t.String(), "x-tenant-id": t.String({ minLength: 1 }) }, { additionalProperties: true }),
+      body: t.Object({
+        applicationId: t.String({ minLength: 1 }),
+        interviewSessionId: t.String({ minLength: 1 }),
+        interviewStage: t.Union([t.Literal("recruiter_screening"), t.Literal("functional_interview")]),
+      }),
+    })
     .all("/compat/*", ({ request, params, set }) => {
       if (!dependencies.legacyGateway) { set.status = 503; return { code: "UNAVAILABLE", message: "Legacy compatibility gateway is unavailable." }; }
       return dependencies.legacyGateway.forward(request, params["*"]);

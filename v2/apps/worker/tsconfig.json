@@ -3,5 +3,5 @@
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../../packages/contracts" }, { "path": "../../packages/domain-interview" }]
+  "references": [{ "path": "../../packages/contracts" }, { "path": "../../packages/domain-interview" }, { "path": "../../packages/queue" }]
 }

@@ -40,6 +40,34 @@ export interface OutboxPublisher {
   publish(event: OutboxRecord): Promise<void>;
 }
 
+export function queueForEvent(eventType: string): QueueName | undefined {
+  if (eventType === "resume-analysis.requested.v1") return "ai.resume";
+  if (eventType === "interview.completed.v1") return "ai.interview";
+  if (eventType === "interview.evaluated.v1") return "automations";
+  if (eventType === "notification.requested.v1") return "notifications";
+  if (eventType === "application.stage_changed.v1" || eventType === "application.decision-recorded.v1") {
+    return "automations";
+  }
+  return undefined;
+}
+
+export function createRoutedOutboxPublisher(
+  publishers: Partial<Record<QueueName, OutboxPublisher>>,
+): OutboxPublisher {
+  return {
+    async publish(event) {
+      const queueName = queueForEvent(event.eventType);
+      const publisher = queueName ? publishers[queueName] : undefined;
+      if (!queueName || !publisher) throw new Error(`No queue route for ${event.eventType}`);
+      await publisher.publish(event);
+    },
+  };
+}
+
+export function queueJobIdForEvent(eventId: string): string {
+  return eventId.replaceAll("%", "%25").replaceAll(":", "%3A");
+}
+
 export function createBullMqPublisher(queue: Queue<JobEnvelopeV1>, now: () => number = Date.now): OutboxPublisher {
   return {
     async publish(event) {
@@ -62,7 +90,14 @@ export function createBullMqPublisher(queue: Queue<JobEnvelopeV1>, now: () => nu
             key !== "resourceType" && key !== "resourceId" && ["string", "number", "boolean"].includes(typeof value),
           )),
         },
-      }, { jobId: event.eventId, ...(typeof event.payload.deliverAt === "string" ? { delay: Math.max(0, Date.parse(event.payload.deliverAt) - now()) } : {}) });
+      }, {
+        jobId: queueJobIdForEvent(event.eventId),
+        attempts: 5,
+        backoff: { type: "exponential", delay: 1_000 },
+        removeOnComplete: { age: 24 * 60 * 60, count: 1_000 },
+        removeOnFail: { age: 7 * 24 * 60 * 60, count: 5_000 },
+        ...(typeof event.payload.deliverAt === "string" ? { delay: Math.max(0, Date.parse(event.payload.deliverAt) - now()) } : {}),
+      });
     },
   };
 }

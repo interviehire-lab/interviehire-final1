@@ -91,6 +91,18 @@ reachable through an explicit compatibility boundary without shared-schema write
 Completed with a daily BullMQ Job Scheduler, durable Ops run claims, a shared-secret
 retention client, and a method/body/query-preserving Core compatibility gateway.
 
+## DONE — Runnable worker topology and evaluation handoff
+
+RED: source-domain events route to the correct BullMQ group; unsafe event IDs are
+escaped deterministically; one worker process pumps both outboxes; a merged screening
+evaluation reaches Core without the Interview worker writing Hiring storage.
+
+Completed with a `WORKER_GROUP` bootstrap, bounded outbox pump, structured logs,
+retry/backoff defaults, deterministic demo providers, graceful shutdown, an
+`interview.evaluated.v1` event, and a service-authenticated Core policy command. A live
+rehearsal completed resume analysis and both interview evaluators, then successfully
+unlocked functional scheduling.
+
 ## DOING — Recruiter Web and deterministic demo
 
 RED: three-column accessible board, application sheet, schedule/decision actions, async
@@ -98,4 +110,4 @@ status, Deep Analysis, deterministic seed, and golden-path browser coverage.
 
 ## TODO
 
-- Recruiter Web, deterministic seed, Playwright golden path, and service bootstraps
+- Finish the checked-in demo/runbook and repeat the complete golden browser path

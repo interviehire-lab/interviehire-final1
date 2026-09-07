@@ -24,7 +24,9 @@ test("BullMQ retry preserves the first evaluator and merges both after restart-s
   } finally { await worker.close(); }
   const [session] = await connection.db.select().from(interviewSessions).where(eq(interviewSessions.id, "session_eval"));
   const runs = await connection.db.select().from(interviewEvaluations);
+  const [evaluatedEvent] = await connection.db.select().from(interviewOutbox).where(eq(interviewOutbox.eventType, "interview.evaluated.v1"));
   expect(session?.status).toBe("evaluated"); expect(session?.evaluation).toMatchObject({ holistic: { overallScore: 84 }, structured: { rubricScore: 81 } });
   expect(runs.map((row) => [row.evaluator, row.status, row.attempt]).sort()).toEqual([["holistic", "ready", 1], ["structured", "ready", 2]]);
   expect({ holisticCalls, structuredCalls }).toEqual({ holisticCalls: 1, structuredCalls: 2 });
+  expect(evaluatedEvent?.payload).toMatchObject({ applicationId: "app_eval", interviewStage: "recruiter_screening", resourceId: "session_eval" });
 });
