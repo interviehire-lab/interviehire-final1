@@ -59,12 +59,18 @@ export async function startWorkerRuntime(options: WorkerRuntimeOptions) {
     .map(([queue, processor]) => {
       const worker = new Worker<JobEnvelopeV1>(queue, processor!, { connection, concurrency: 4 });
       worker.on("completed", (job) => log({
-        service: "v2-worker", event: "job.completed", queue, jobId: job.id,
+        service: "v2-worker", event: "job.completed", status: "completed", queue,
+        jobName: job.name, jobId: job.id, attempt: job.attemptsMade,
         tenantId: job.data.tenantId, correlationId: job.data.correlationId,
+        resourceType: job.data.resourceRef.type, resourceId: job.data.resourceRef.id,
+        durationMs: job.finishedOn && job.processedOn ? job.finishedOn - job.processedOn : undefined,
       }));
       worker.on("failed", (job, error) => log({
-        service: "v2-worker", event: "job.failed", queue, jobId: job?.id,
+        service: "v2-worker", event: "job.failed", status: "failed", queue,
+        jobName: job?.name, jobId: job?.id, attempt: job?.attemptsMade,
         tenantId: job?.data.tenantId, correlationId: job?.data.correlationId,
+        resourceType: job?.data.resourceRef.type, resourceId: job?.data.resourceRef.id,
+        durationMs: job?.processedOn ? Date.now() - job.processedOn : undefined,
         errorClass: error.name,
       }));
       return worker;

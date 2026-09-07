@@ -40,7 +40,10 @@ export class DrizzleResumeAnalysisWorkerStore {
       const [run] = await tx.update(resumeAnalysisRuns).set({
         status: "ready", result, errorCode: null, updatedAt: completedAt,
       }).where(eq(resumeAnalysisRuns.id, runId)).returning({ applicationId: resumeAnalysisRuns.applicationId });
-      if (run) await tx.update(applications).set({ asyncStatus: "ready" }).where(eq(applications.id, run.applicationId));
+      if (run) await tx.update(applications).set({
+        asyncStatus: "ready",
+        resumeAnalysisComplete: true,
+      }).where(eq(applications.id, run.applicationId));
     });
   }
 

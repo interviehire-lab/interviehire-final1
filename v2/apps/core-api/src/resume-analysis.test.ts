@@ -18,6 +18,12 @@ function service(): ResumeAnalysisService {
       result: null, errorCode: null, createdAt: "2026-09-07T06:00:00.000Z",
       updatedAt: "2026-09-07T06:00:00.000Z",
     } : undefined,
+    findLatest: async (tenantId, applicationId) => tenantId === "org_001" && applicationId === "app_001" ? {
+      id: "resume_run_001", applicationId, tenantId, status: "ready", attempt: 1,
+      idempotencyKey: "resume_1", correlationId: "corr_resume", resumeRevision: 1,
+      result: { score: 91, recommendation: "advance" }, errorCode: null,
+      createdAt: "2026-09-07T06:00:00.000Z", updatedAt: "2026-09-07T06:01:00.000Z",
+    } : undefined,
   };
 }
 
@@ -52,5 +58,14 @@ describe("resume analysis routes", () => {
       headers: { "x-tenant-id": "org_other", "x-correlation-id": "corr_hidden" },
     }));
     expect(hidden.status).toBe(404);
+  });
+
+  test("latest application analysis exposes durable result evidence", async () => {
+    const response = await createCoreApp({ applicationRepository, resumeAnalysis: service() }).handle(new Request(
+      "http://localhost/v2/applications/app_001/resume-analysis",
+      { headers: { "x-tenant-id": "org_001", "x-correlation-id": "corr_latest" } },
+    ));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "ready", result: { score: 91, recommendation: "advance" } });
   });
 });

@@ -30,9 +30,12 @@ import {
   createInterviewEvaluationProcessor,
   createInterviewResultProcessor,
   createHttpCoreInterviewResultClient,
+  createHttpInterviewEvaluator,
+  createHttpResumeAnalysisProvider,
   createLegacyRetentionClient,
   createNotificationProcessor,
   createResumeAnalysisProcessor,
+  createResilientEvaluator,
   createRetentionProcessor,
   startWorkerRuntime,
   upsertRetentionScheduler,
@@ -64,6 +67,23 @@ const deterministicEvaluator = (kind: "holistic" | "structured"): InterviewEvalu
       : { rubricScore: score - 2, communication: score, problemSolving: score - 4, source: "structured-demo" };
   },
 });
+const evaluator = (kind: "holistic" | "structured") => {
+  const url = process.env[kind === "holistic" ? "HOLISTIC_EVALUATOR_URL" : "STRUCTURED_EVALUATOR_URL"];
+  return url
+    ? createResilientEvaluator(createHttpInterviewEvaluator({ url, ...(process.env.AI_PROVIDER_API_KEY ? { apiKey: process.env.AI_PROVIDER_API_KEY } : {}) }), deterministicEvaluator(kind))
+    : deterministicEvaluator(kind);
+};
+const deterministicResumeProvider = {
+  async analyseResume(input: { resumeText: string }) {
+    const skills = ["TypeScript", "PostgreSQL", "distributed systems"].filter((skill) =>
+      input.resumeText.toLowerCase().includes(skill.toLowerCase()),
+    );
+    return { score: 76 + skills.length * 6, recommendation: skills.length >= 2 ? "advance" : "review", matchedSkills: skills };
+  },
+};
+const resumeProvider = process.env.RESUME_ANALYSIS_PROVIDER_URL
+  ? createHttpResumeAnalysisProvider({ url: process.env.RESUME_ANALYSIS_PROVIDER_URL, ...(process.env.AI_PROVIDER_API_KEY ? { apiKey: process.env.AI_PROVIDER_API_KEY } : {}) })
+  : deterministicResumeProvider;
 const notificationProvider: NotificationProvider = {
   async send(message) {
     const providerMessageId = `demo_${message.channel}_${crypto.randomUUID()}`;
@@ -83,20 +103,13 @@ const interviewResultProcessor = createInterviewResultProcessor(createHttpCoreIn
 const processors: Partial<Record<QueueName, Processor<JobEnvelopeV1>>> = {
   "ai.resume": createBullMqResumeProcessor(createResumeAnalysisProcessor(
     new DrizzleResumeAnalysisWorkerStore(hiring.db),
-    {
-      async analyseResume(input) {
-        const skills = ["TypeScript", "PostgreSQL", "distributed systems"].filter((skill) =>
-          input.resumeText.toLowerCase().includes(skill.toLowerCase()),
-        );
-        return { score: 76 + skills.length * 6, recommendation: skills.length >= 2 ? "advance" : "review", matchedSkills: skills };
-      },
-    },
+    resumeProvider,
     now,
   )),
   "ai.interview": createBullMqInterviewProcessor(createInterviewEvaluationProcessor(
     new DrizzleEvaluationStore(interview.db),
-    deterministicEvaluator("holistic"),
-    deterministicEvaluator("structured"),
+    evaluator("holistic"),
+    evaluator("structured"),
     now,
   )),
   notifications: createBullMqNotificationProcessor(createNotificationProcessor(

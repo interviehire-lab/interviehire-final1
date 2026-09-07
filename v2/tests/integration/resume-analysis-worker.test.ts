@@ -75,6 +75,7 @@ test("real BullMQ worker persists READY once and replays duplicate delivery", as
   const [application] = await connection.db.select().from(applications).where(eq(applications.id, "app_worker"));
   expect(run).toMatchObject({ status: "ready", attempt: 1, result: { score: 91, recommendation: "advance" } });
   expect(application?.asyncStatus).toBe("ready");
+  expect(application?.resumeAnalysisComplete).toBe(true);
   expect(providerCalls).toBe(1);
   const afterRestart = await createResumeAnalysisService(
     new DrizzleResumeAnalysisRepository(connection.db),

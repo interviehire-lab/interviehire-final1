@@ -23,6 +23,7 @@ export interface ResumeAnalysisRepository {
   setApplicationAsyncStatus(applicationId: string, status: AsyncStatus): Promise<void>;
   appendOutbox(event: ResumeAnalysisRequestedV1): Promise<void>;
   findRunForTenant(tenantId: string, runId: string): Promise<ResumeAnalysisRun | undefined>;
+  findLatestForApplication(tenantId: string, applicationId: string): Promise<ResumeAnalysisRun | undefined>;
 }
 
 export interface ResumeAnalysisCommand {
@@ -40,6 +41,7 @@ export type ResumeAnalysisRequestResult =
 export interface ResumeAnalysisService {
   request(command: ResumeAnalysisCommand): Promise<ResumeAnalysisRequestResult>;
   findJob(tenantId: string, runId: string): Promise<ResumeAnalysisRun | undefined>;
+  findLatest(tenantId: string, applicationId: string): Promise<ResumeAnalysisRun | undefined>;
 }
 
 export function createResumeAnalysisService(
@@ -90,5 +92,6 @@ export function createResumeAnalysisService(
       });
     },
     findJob: (tenantId, runId) => repository.findRunForTenant(tenantId, runId),
+    findLatest: (tenantId, applicationId) => repository.findLatestForApplication(tenantId, applicationId),
   };
 }

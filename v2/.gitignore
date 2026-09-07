@@ -4,5 +4,9 @@ dist/
 .env
 .env.*
 !.env.test.example
+!.env.demo.example
 .playwright-cli/
 output/
+test-results/
+playwright-report/
+apps/recruiter-web/next-env.d.ts

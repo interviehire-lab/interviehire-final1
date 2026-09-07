@@ -11,6 +11,10 @@ export interface EvaluationStore {
   finalize(sessionId: string, completedAt: string): Promise<{ readonly kind: "evaluated"; readonly report: Readonly<Record<string, unknown>> } | { readonly kind: "pending" }>;
 }
 export interface InterviewEvaluator { evaluate(input: { readonly sessionId: string; readonly interviewStage: InterviewStage; readonly transcript: readonly TranscriptEntry[] }): Promise<Readonly<Record<string, unknown>>> }
+export function createHttpInterviewEvaluator(options: { url: string; apiKey?: string; fetch?: typeof fetch }): InterviewEvaluator {
+  const send = options.fetch ?? fetch;
+  return { async evaluate(input) { const response = await send(options.url, { method: "POST", headers: { "content-type": "application/json", ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}) }, body: JSON.stringify(input) }); if (!response.ok) throw new Error(`Interview evaluator failed (${response.status})`); const result: unknown = await response.json(); if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("Interview evaluator returned an invalid result"); return result as Readonly<Record<string, unknown>>; } };
+}
 export function createResilientEvaluator(primary: InterviewEvaluator, fallback: InterviewEvaluator): InterviewEvaluator {
   return { async evaluate(input) { try { return await primary.evaluate(input); } catch { return { ...(await fallback.evaluate(input)), degraded: true }; } } };
 }

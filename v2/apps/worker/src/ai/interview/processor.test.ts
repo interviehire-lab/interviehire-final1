@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { JobEnvelopeV1 } from "@interviehire/contracts";
-import { createInterviewEvaluationProcessor, createResilientEvaluator, type EvaluationStore, type EvaluatorName } from "./processor";
+import { createHttpInterviewEvaluator, createInterviewEvaluationProcessor, createResilientEvaluator, type EvaluationStore, type EvaluatorName } from "./processor";
 const envelope: JobEnvelopeV1 = { jobId: "interview.completed:session_1", tenantId: "org_1", correlationId: "corr_1", idempotencyKey: "interview.completed:session_1", resourceRef: { type: "interview_session", id: "session_1" }, requestedAt: "2026-09-07T09:00:00.000Z", version: 1, payload: { eventType: "interview.completed.v1" } };
 function memoryStore(): EvaluationStore & { states: Record<EvaluatorName, string> } {
   const states = { holistic: "pending", structured: "pending" }; const results: Partial<Record<EvaluatorName, Readonly<Record<string, unknown>>>> = {};
@@ -20,4 +20,9 @@ describe("dual interview evaluation processor", () => {
     const evaluator = createResilientEvaluator({ evaluate: async () => { throw new Error("provider down"); } }, { evaluate: async () => ({ overallScore: 60, source: "deterministic" }) });
     expect(await evaluator.evaluate({ sessionId: "session_1", interviewStage: "functional_interview", transcript: [] })).toEqual({ overallScore: 60, source: "deterministic", degraded: true });
   });
+});
+test("HTTP evaluator supports a real provider behind the same durable processor port", async () => {
+  let body = ""; const evaluator = createHttpInterviewEvaluator({ url: "https://provider.test/evaluate", fetch: async (_url, init) => { body = String(init?.body); return Response.json({ overallScore: 87 }); } });
+  expect(await evaluator.evaluate({ sessionId: "session_1", interviewStage: "functional_interview", transcript: [] })).toEqual({ overallScore: 87 });
+  expect(body).toContain("session_1");
 });

@@ -103,11 +103,19 @@ retry/backoff defaults, deterministic demo providers, graceful shutdown, an
 rehearsal completed resume analysis and both interview evaluators, then successfully
 unlocked functional scheduling.
 
-## DOING — Recruiter Web and deterministic demo
+## DONE — Recruiter Web and deterministic demo
 
 RED: three-column accessible board, application sheet, schedule/decision actions, async
 status, Deep Analysis, deterministic seed, and golden-path browser coverage.
 
+Completed with a responsive shadcn-based workspace, pointer and keyboard stage actions,
+candidate/schedule sheets, recruiter-visible durable resume evidence, separate holistic,
+structured, and proctoring sections, deterministic eight-candidate seed data, a
+four-process demo supervisor, and a no-retry Playwright path that takes a new candidate
+through both interviews to a persisted hire decision.
+
 ## TODO
 
-- Finish the checked-in demo/runbook and repeat the complete golden browser path
+- None for the V2 demo acceptance scope. The real LiveKit provider smoke passed on
+  2026-09-07; it remains a per-environment release gate because deployment credentials
+  are intentionally excluded from the repository and deterministic CI.

@@ -30,6 +30,26 @@ export interface ResumeAnalysisProvider {
   }): Promise<Readonly<Record<string, unknown>>>;
 }
 
+export function createHttpResumeAnalysisProvider(options: { url: string; apiKey?: string; fetch?: typeof fetch }): ResumeAnalysisProvider {
+  const send = options.fetch ?? fetch;
+  return {
+    async analyseResume(input) {
+      const response = await send(options.url, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}) },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        if (response.status === 429 || response.status >= 500) throw new TransientProviderError(`Resume provider failed (${response.status})`);
+        throw new PermanentResumeAnalysisError(`Resume provider rejected the request (${response.status})`);
+      }
+      const result: unknown = await response.json();
+      if (!result || typeof result !== "object" || Array.isArray(result)) throw new PermanentResumeAnalysisError("Resume provider returned an invalid result");
+      return result as Readonly<Record<string, unknown>>;
+    },
+  };
+}
+
 export function createResumeAnalysisProcessor(
   store: ResumeAnalysisWorkerStore,
   provider: ResumeAnalysisProvider,

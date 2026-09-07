@@ -34,6 +34,7 @@ function repository(options: { failOutbox?: boolean } = {}) {
       if (options.failOutbox) throw new Error("outbox insert failed");
     },
     findRunForTenant: async (tenantId, id) => runs.find((run) => run.tenantId === tenantId && run.id === id),
+    findLatestForApplication: async (tenantId, applicationId) => [...runs].reverse().find((run) => run.tenantId === tenantId && run.applicationId === applicationId),
   };
   return repo;
 }

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type {
   ResumeAnalysisRepository,
   ResumeAnalysisRun,
@@ -44,6 +44,13 @@ export class DrizzleResumeAnalysisRepository implements ResumeAnalysisRepository
     const [row] = await this.db.select().from(resumeAnalysisRuns).where(and(
       eq(resumeAnalysisRuns.tenantId, tenantId), eq(resumeAnalysisRuns.id, runId),
     )).limit(1);
+    return row;
+  }
+
+  async findLatestForApplication(tenantId: string, applicationId: string): Promise<ResumeAnalysisRun | undefined> {
+    const [row] = await this.db.select().from(resumeAnalysisRuns).where(and(
+      eq(resumeAnalysisRuns.tenantId, tenantId), eq(resumeAnalysisRuns.applicationId, applicationId),
+    )).orderBy(desc(resumeAnalysisRuns.createdAt)).limit(1);
     return row;
   }
 }

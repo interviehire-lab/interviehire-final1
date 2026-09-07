@@ -40,6 +40,7 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
   const unavailableResumeAnalysis: ResumeAnalysisService = {
     request: async () => ({ ok: false, code: "NOT_FOUND", message: "Application not found." }),
     findJob: async () => undefined,
+    findLatest: async () => undefined,
   };
   const resumeAnalysis = dependencies.resumeAnalysis ?? unavailableResumeAnalysis;
   const scheduling = dependencies.scheduling;
@@ -144,6 +145,19 @@ export function createCoreApp(dependencies: CoreAppDependencies) {
       if (!run) {
         set.status = 404;
         return { code: "NOT_FOUND" as const, message: "Async job not found.", correlationId: headers["x-correlation-id"] };
+      }
+      return { ...run, correlationId: headers["x-correlation-id"] };
+    }, {
+      headers: readHeaders,
+      params: t.Object({ id: t.String({ minLength: 1 }) }),
+    })
+    .get("/v2/applications/:id/resume-analysis", async ({ headers, params, set }) => {
+      const run = await Effect.runPromise(Effect.tryPromise(() =>
+        resumeAnalysis.findLatest(headers["x-tenant-id"], params.id),
+      ));
+      if (!run) {
+        set.status = 404;
+        return { code: "NOT_FOUND" as const, message: "Resume analysis not found.", correlationId: headers["x-correlation-id"] };
       }
       return { ...run, correlationId: headers["x-correlation-id"] };
     }, {

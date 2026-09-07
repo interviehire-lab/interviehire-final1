@@ -6,6 +6,7 @@
 
 > Append-only, newest first. A new entry is **prepended** here whenever a route is added, modified, refactored, or removed. Never rewrite history.
 
+- **2026-09-07** — **Added tenant-scoped `GET /v2/applications/{id}/resume-analysis` for the latest durable resume-analysis state/result.** Application detail and board application objects also expose `resumeAnalysisComplete` and `screeningComplete` readiness booleans. A successful resume worker transaction now sets both `asyncStatus="ready"` and `resumeAnalysisComplete=true`, allowing the authoritative scheduling policy to advance the candidate.
 - **2026-09-07** — **Added service-authenticated Core command `POST /internal/v2/interview-results`.** The evaluation worker sends only explicit application/session references and the evaluated interview stage. Core verifies its own mapping and marks recruiter screening complete idempotently; the Interview worker never updates Hiring tables directly. Interview evaluation now atomically emits `interview.evaluated.v1` after both evaluators merge.
 - **2026-09-07** — **Added V2 candidate intake at `POST /v2/jobs/{id}/applications`.** The tenant-scoped JSON command accepts candidate identity/contact fields, source, and extracted resume text, creates a new application in `resume_analysis` with a separate generated ID, an `active` decision, and `not_requested` async status, and returns 201. Resume analysis remains an explicit asynchronous follow-up command.
 - **2026-09-07** — **Added V2 `ALL /compat/*` as the explicit anti-corruption proxy for secondary legacy APIs.** The gateway preserves method, query, headers, and body while forwarding to the configured legacy backend; V2 code does not import or write legacy schemas. The `automations` queue now uses a BullMQ daily Job Scheduler and an Ops-owned idempotent run ledger to invoke the existing shared-secret retention engine safely under retries.
@@ -147,7 +148,9 @@ policy; the Interview evaluation worker cannot write Hiring storage directly.
           "stage": "resume_analysis | recruiter_screening | functional_interview",
           "decision": "active | hired | rejected | withdrawn",
           "source": "string | null",
-          "asyncStatus": "not_requested | queued | running | ready | failed"
+          "asyncStatus": "not_requested | queued | running | ready | failed",
+          "resumeAnalysisComplete": "boolean",
+          "screeningComplete": "boolean"
         }
       ]
     }
@@ -181,6 +184,7 @@ request resume analysis through the dedicated asynchronous command.
 - **404 response:** `{ "code": "NOT_FOUND", "message": "Application not found.", "correlationId": "string" }`
 
 A record in another tenant is deliberately indistinguishable from a missing record.
+The response also includes the two readiness booleans shown on board application objects.
 
 ### GET /v2/applications/{id}/deep-analysis
 
@@ -234,6 +238,17 @@ Stage, history, and `application.stage_changed.v1` outbox event commit atomicall
 
 The request returns after committing the run, application async state, and
 `resume-analysis.requested.v1` outbox event. Resume text is not included in Redis.
+
+### GET /v2/applications/{id}/resume-analysis
+
+- **Required headers:** `x-tenant-id`, `x-correlation-id`
+- **200:** the latest resume-analysis run using the same durable shape as
+  `GET /v2/async-jobs/{id}`.
+- **404:** `{ "code": "NOT_FOUND", "message": "Resume analysis not found.", "correlationId": "string" }`.
+
+The lookup is tenant scoped and orders by creation time. It lets recruiter clients
+recover the latest evidence after navigation or process restart without retaining an
+ephemeral queue job ID.
 
 ### GET /v2/async-jobs/{id}
 

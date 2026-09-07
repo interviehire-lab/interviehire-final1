@@ -9,6 +9,8 @@ export interface ApplicationView {
   readonly decision: ApplicationDecision;
   readonly source: string | null;
   readonly asyncStatus: AsyncStatus;
+  readonly resumeAnalysisComplete?: boolean;
+  readonly screeningComplete?: boolean;
 }
 
 export interface ApplicationQueryRepository {

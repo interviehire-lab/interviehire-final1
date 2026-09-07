@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { JobEnvelopeV1 } from "@interviehire/contracts";
 import {
   createResumeAnalysisProcessor,
+  createHttpResumeAnalysisProvider,
   TransientProviderError,
   type ResumeAnalysisWorkerStore,
 } from "./processor";
@@ -67,4 +68,13 @@ describe("resume analysis worker", () => {
     expect(await processor(envelope)).toMatchObject({ replayed: false });
     expect(persistence.state).toMatchObject({ status: "ready", attempt: 2, result: { score: 81 } });
   });
+});
+
+test("HTTP resume provider keeps real integrations injectable and classifies rate limits", async () => {
+  let authorization = "";
+  const provider = createHttpResumeAnalysisProvider({ url: "https://provider.test/resume", apiKey: "secret", fetch: async (_url, init) => { authorization = new Headers(init?.headers).get("authorization") ?? ""; return Response.json({ score: 90 }); } });
+  expect(await provider.analyseResume({ applicationId: "app_1", resumeText: "TypeScript", correlationId: "corr_1" })).toEqual({ score: 90 });
+  expect(authorization).toBe("Bearer secret");
+  const limited = createHttpResumeAnalysisProvider({ url: "https://provider.test/resume", fetch: async () => new Response(null, { status: 429 }) });
+  await expect(limited.analyseResume({ applicationId: "app_1", resumeText: "x", correlationId: "corr_1" })).rejects.toBeInstanceOf(TransientProviderError);
 });

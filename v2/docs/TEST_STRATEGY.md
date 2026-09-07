@@ -15,7 +15,7 @@ feature-parity update. Required expectations are never skipped, disabled, or wea
 | Database | Drizzle, constraints, transactions, outbox, mappings | `bun run infra:up && bun run test:integration` with real PostgreSQL |
 | Queue/worker | Retry, duplicates, replay, restart, persistence | `bun run infra:up && bun run test:integration` with real Redis/PostgreSQL |
 | UI interaction | Board, Sheets, async and errors | recruiter-web test suite |
-| Golden E2E | Seeded recruiter workflow | Playwright against the full V2 stack |
+| Golden E2E | Seeded recruiter workflow | `bun run test:e2e` (starts infrastructure and the full V2 stack) |
 | Provider smoke | One real LiveKit and notification path | explicit demo-environment command |
 
 The test stack uses `TEST_DATABASE_URL` and `TEST_REDIS_URL`; copy `.env.test.example`

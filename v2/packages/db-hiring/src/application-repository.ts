@@ -83,5 +83,7 @@ function toApplicationView(row: ApplicationRow): ApplicationView {
     decision: row.decision,
     source: row.source,
     asyncStatus: row.asyncStatus,
+    resumeAnalysisComplete: row.resumeAnalysisComplete,
+    screeningComplete: row.screeningComplete,
   };
 }
