@@ -219,10 +219,20 @@ function drawFunnelSVG(job, candidates) {
     stagesContainer.style.position = 'relative';
     stagesContainer.style.gap = '0';
     stagesContainer.style.height = H + 'px';
+    // ys[] holds n evenly-spaced points (padT .. H-padB), one per stage —
+    // meant for the SVG trapezoids above (n-1 of them, each connecting
+    // consecutive points). The last stage has no trapezoid of its own to
+    // align with, and reusing `H - padB` as both its top AND bottom (it
+    // already equals ys[n-1] by construction) collapsed it to zero height —
+    // its content still rendered, just overflowing a 0px box (the visual
+    // "compressed" row). The list itself doesn't need to track the chart's
+    // n-1 point-to-point spacing band-for-band — dividing its own available
+    // height into n equal rows fills the container exactly, with every row
+    // (including the last) getting real height and no overflow past H.
+    const rowH = (H - padT - padB) / n;
     stageItems.forEach((item, i) => {
-      const segTop = ys[i];
-      const segBot = i < n - 1 ? ys[i + 1] : H - padB;
-      const segH = segBot - segTop;
+      const segTop = padT + i * rowH;
+      const segH = rowH;
       item.style.position = 'absolute';
       item.style.left = '0';
       item.style.right = '0';
