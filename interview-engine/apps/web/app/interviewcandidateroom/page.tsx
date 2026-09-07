@@ -565,6 +565,15 @@ export default function Interview() {
   useEffect(() => {
     if (!consentGiven || !interviewSettingsLoaded || earlyStartRef.current) return;
     if (socket?.readyState !== WebSocket.OPEN) return;
+    // Don't call /start while the client-side schedule check says we're still
+    // in the pre-slot lobby — firing anyway used to race the WaitingRoom
+    // countdown: the server's own TOO_EARLY 403 sets startError, which
+    // lobbyLocked (above) treats as an immediate unlock condition, so the
+    // countdown flashed for a moment and got replaced by the generic error
+    // gate instead of just staying put until the slot actually opens. Once
+    // lobbyLocked flips false (the 1s heartbeat above re-renders this), the
+    // effect re-runs and starts normally.
+    if (lobbyLocked) return;
     earlyStartRef.current = true;
     (async () => {
       try {
@@ -597,7 +606,7 @@ export default function Interview() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consentGiven, socket, interviewSettingsLoaded, voice]);
+  }, [consentGiven, socket, interviewSettingsLoaded, voice, lobbyLocked]);
 
   // --- Auto-start recording + publish the mic once calibrated + connected ---
   // The LiveKit room itself was already connected by the early effect above;
