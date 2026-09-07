@@ -264,7 +264,7 @@ def confirm_interview_slot(token: str, request: Request, db: Session = Depends(g
     db.refresh(applicant)
     
     # Send custom MIME/iCalendar confirmation email
-    reschedule_link = f"{settings.FRONTEND_URL}/reschedule.html?token={applicant.scheduling_token}"
+    reschedule_link = f"{settings.FRONTEND_URL}/reschedule?token={applicant.scheduling_token}"
     _job_qs = f"&jobId={applicant.job_id}" if applicant.job_id else ""
     interview_link = f"{settings.INTERVIEW_ROOM_URL.rstrip('/')}/interviewcandidateroom?sessionId={applicant.id}{_job_qs}"
     uid = f"interview-{stage.lower().replace(' ', '-')}-{applicant.id}@interviehire.com"
@@ -367,7 +367,7 @@ def public_reschedule_interview(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid ISO datetime format.")
 
-    # Reschedule window: the client (reschedule.html) already blocks past times,
+    # Reschedule window: the client (app/reschedule) already blocks past times,
     # but that check is trivially bypassed with a direct POST, and neither side
     # enforced any upper bound at all — a stray/malicious date (year 3000) was
     # previously accepted outright. There's no recruiter-configured scheduling
@@ -434,7 +434,7 @@ def public_reschedule_interview(
     db.commit()
     db.refresh(applicant)
     
-    reschedule_link = f"{settings.FRONTEND_URL}/reschedule.html?token={applicant.scheduling_token}"
+    reschedule_link = f"{settings.FRONTEND_URL}/reschedule?token={applicant.scheduling_token}"
     _job_qs = f"&jobId={applicant.job_id}" if applicant.job_id else ""
     interview_link = f"{settings.INTERVIEW_ROOM_URL.rstrip('/')}/interviewcandidateroom?sessionId={applicant.id}{_job_qs}"
     uid = f"interview-{stage.lower().replace(' ', '-')}-{applicant.id}@interviehire.com"

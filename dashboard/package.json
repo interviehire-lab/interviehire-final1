@@ -20,6 +20,8 @@
   "dependencies": {
     "@gsap/react": "^2.1.2",
     "@napi-rs/canvas": "0.1.80",
+    "date-fns": "^4.4.0",
+    "date-fns-tz": "^3.2.0",
     "gsap": "^3.15.0",
     "locomotive-scroll": "^5.0.1",
     "mammoth": "^1.12.0",
@@ -28,6 +30,7 @@
     "pdfjs-dist": "^5.4.296",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
+    "react-datepicker": "^9.1.0",
     "react-dom": "^19.2.7",
     "three": "^0.184.0",
     "video.js": "^8.24.0",
