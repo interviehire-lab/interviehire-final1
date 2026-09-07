@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Same mark as the dashboard sidebar's .logo-mark badge (teal-on-dark,
+       "iH"), just tuned for standalone favicon legibility: a fully opaque
+       dark fill instead of the sidebar's low-alpha teal-over-dark-surface
+       tint, so it reads clearly against any browser tab-bar color. -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#0a0a0a" />
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#2dd4bf" fill-opacity="0.15" />
+  <rect x="2.5" y="2.5" width="59" height="59" rx="13.5" fill="none" stroke="#2dd4bf" stroke-opacity="0.55" stroke-width="1.5" />
+  <text
+    x="32" y="34"
+    text-anchor="middle"
+    dominant-baseline="central"
+    font-family="Outfit, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+    font-weight="800"
+    font-size="26"
+    fill="#64a0dc"
+  >iH</text>
+</svg>
