@@ -2302,10 +2302,14 @@ def schedule_interview(
     if stage == "screening":
         applicant.screening_scheduled_at = scheduled_at
         applicant.screening_status = InterviewStatus.scheduled
+        # See public.py's public_reschedule_interview for why this must be
+        # cleared on every (re)schedule, not just the first one.
+        applicant.screening_reminder_sent_at = None
         stage_name = "Recruiter Screening"
     else:
         applicant.functional_scheduled_at = scheduled_at
         applicant.functional_status = InterviewStatus.scheduled
+        applicant.functional_reminder_sent_at = None
         stage_name = "Functional Interview"
 
     db.commit()

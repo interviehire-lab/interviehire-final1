@@ -132,6 +132,7 @@ def run_reminders(db: Session, *, dry_run: bool = True, limit: Optional[int] = N
                 )
                 result["emails_sent"] += 1
             except Exception:
+                logger.exception(f"Reminder email failed for applicant {applicant.id} ({stage_key})")
                 result["errors"] += 1
 
             # WhatsApp — best-effort, independent of the email/call outcome. No-ops
@@ -164,6 +165,7 @@ def run_reminders(db: Session, *, dry_run: bool = True, limit: Optional[int] = N
                 if wa_sent:
                     result["whatsapp_sent"] += 1
             except Exception:
+                logger.exception(f"Reminder WhatsApp send failed for applicant {applicant.id} ({stage_key})")
                 result["errors"] += 1
 
             # Robocall — best-effort, independent of the email/WhatsApp outcome.
@@ -176,6 +178,7 @@ def run_reminders(db: Session, *, dry_run: bool = True, limit: Optional[int] = N
                 if place_reminder_call(applicant.phone, say_message):
                     result["calls_placed"] += 1
             except Exception:
+                logger.exception(f"Reminder call failed for applicant {applicant.id} ({stage_key})")
                 result["errors"] += 1
 
             # Mark sent regardless of individual channel outcomes above — the

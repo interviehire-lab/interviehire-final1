@@ -408,6 +408,11 @@ def public_reschedule_interview(
         stage = "Functional Interview"
         applicant.functional_scheduled_at = parsed_time
         applicant.functional_status = InterviewStatus.scheduled
+        # A reminder already sent for the OLD time is no longer relevant at the
+        # new time — app/jobs/reminders.py never retries an applicant once this
+        # is set, so without resetting it here a reschedule after the original
+        # reminder fired would silently never remind the candidate again.
+        applicant.functional_reminder_sent_at = None
         try:
             from app.utils.ai_sync import sync_applicant_to_ai
             sync_applicant_to_ai(db, applicant)
@@ -417,6 +422,7 @@ def public_reschedule_interview(
         stage = "Recruiter Screening"
         applicant.screening_scheduled_at = parsed_time
         applicant.screening_status = InterviewStatus.scheduled
+        applicant.screening_reminder_sent_at = None
         try:
             from app.utils.ai_sync import sync_applicant_to_ai
             sync_applicant_to_ai(db, applicant)
