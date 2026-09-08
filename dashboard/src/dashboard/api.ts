@@ -639,6 +639,7 @@ function mapApplicantOutToCandidate(a: any = {}): Candidate {
     id: a.id,
     name: a.name || '',
     email: a.email || '',
+    phone: a.phone ?? null,
     jobApplied: a.job_role_title || a.role_name || '',
     // decision (the recruiter's explicit call) wins over derived stage so Hired/Rejected
     // and a pre-schedule shortlist survive a refetch. 'shortlisted' shows as Screening
