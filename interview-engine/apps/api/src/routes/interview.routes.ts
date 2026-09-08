@@ -521,27 +521,34 @@ export async function interviewRoutes(app: FastifyInstance) {
     });
 
     // RoomConfiguration.agents above only dispatches an agent when LiveKit
-    // actually CREATES the room — a no-op if it already exists. The room name
-    // is deterministic (`interview-${session.id}`), so a candidate retrying a
-    // stalled first attempt (agent crashed, worker briefly unregistered, etc.)
-    // reconnects to that SAME already-existing room on every retry, and the
-    // roomConfig on each new token is silently ignored — no new agent is ever
-    // dispatched, no matter how many times they reload. Explicitly check for
-    // a live agent and (re-)dispatch one if it's missing, instead of relying
-    // solely on the room-creation-time path.
+    // actually CREATES the room, and even then it isn't 100% reliable — we've
+    // seen candidates hit "interviewer never joined" on their very first
+    // attempt (brand-new room) with no explicit-dispatch log line at all,
+    // meaning the embedded dispatch silently never fired. So don't treat it
+    // as the primary path: explicitly dispatch an agent ourselves on every
+    // token issuance UNLESS we can confirm one is already live in the room
+    // (e.g. a token refresh mid-interview). This also covers the original
+    // "stale room on retry" case (deterministic room name
+    // `interview-${session.id}`, so a retry reconnects to the same room and
+    // the embedded roomConfig is silently ignored since the room isn't new).
     try {
       const roomService = new RoomServiceClient(livekitUrl, apiKey, apiSecret);
-      const participants = await roomService.listParticipants(roomName);
-      const hasLiveAgent = participants.some((p) => !p.identity.startsWith('candidate-'));
+      let hasLiveAgent = false;
+      try {
+        const participants = await roomService.listParticipants(roomName);
+        hasLiveAgent = participants.some((p) => !p.identity.startsWith('candidate-'));
+      } catch {
+        // listParticipants throws when the room doesn't exist yet — the
+        // normal first-connect case. Fall through and dispatch explicitly
+        // rather than trusting the token's embedded room-creation dispatch.
+      }
       if (!hasLiveAgent) {
         const dispatchClient = new AgentDispatchClient(livekitUrl, apiKey, apiSecret);
         await dispatchClient.createDispatch(roomName, agentName, { metadata });
-        req.log?.info?.({ roomName, agentName }, 'explicitly (re-)dispatched agent to existing room with no live agent');
+        req.log?.info?.({ roomName, agentName }, 'explicitly dispatched agent for interview session');
       }
-    } catch {
-      // listParticipants throws when the room doesn't exist yet — the normal
-      // first-connect case, where roomConfig above handles dispatch on
-      // creation. Any other failure here shouldn't block token issuance.
+    } catch (err) {
+      req.log?.error?.({ err, roomName, agentName }, 'explicit agent dispatch failed; falling back to token-embedded room-creation dispatch');
     }
 
     return {

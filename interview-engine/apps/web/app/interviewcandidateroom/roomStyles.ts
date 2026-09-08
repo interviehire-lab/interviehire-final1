@@ -8,8 +8,18 @@ export const roomStyles = `
     --panel: #11131a;
     --line: rgba(255, 255, 255, .1);
     --muted: #94a3b8;
-    --lime: #d4ff00;
-    --orange: #f95738;
+    /* Brand colors — same teal + indigo used everywhere else in the product
+       (dashboard sidebar, landing page, transactional emails; see
+       backend/app/utils/email_sender.py's own brand-color comment). The room
+       previously used an unrelated orange/lime "gamer HUD" palette that
+       matched nothing else in the app. --danger keeps the old orange hex
+       verbatim, since it's still the right color for what it's used for now
+       (recording indicator, end-call, mute, alerts) — those are universal
+       call-UI conventions (red = recording/hang up/warning), not branding,
+       and shouldn't become teal just because the brand pass touched them. */
+    --teal: #2dd4bf;
+    --indigo: #64a0dc;
+    --danger: #f95738;
     position: fixed;
     inset: 0;
     z-index: 40;
@@ -19,8 +29,8 @@ export const roomStyles = `
     color: #fff;
     font-family: "IBM Plex Sans", system-ui, sans-serif;
     background:
-      radial-gradient(circle at 0 0, rgba(249, 87, 56, .20), transparent 28%),
-      radial-gradient(circle at 100% 45%, rgba(212, 255, 0, .08), transparent 26%),
+      radial-gradient(circle at 0 0, rgba(100, 160, 220, .16), transparent 28%),
+      radial-gradient(circle at 100% 45%, rgba(45, 212, 191, .10), transparent 26%),
       #08090d;
   }
 
@@ -50,13 +60,13 @@ export const roomStyles = `
     height: 42px;
     place-items: center;
     border-radius: 999px;
-    background: linear-gradient(135deg, #f95738, #8b1d13);
-    box-shadow: 0 0 40px rgba(249, 87, 56, .28);
+    background: linear-gradient(135deg, #2dd4bf, #64a0dc);
+    box-shadow: 0 0 40px rgba(45, 212, 191, .28);
     font: 900 18px Manrope, sans-serif;
   }
 
   .brand-name { font: 800 22px Manrope, sans-serif; letter-spacing: -.03em; }
-  .brand-name span { color: var(--orange); }
+  .brand-name span { color: var(--teal); }
 
   .room-label {
     margin-left: 24px;
@@ -79,8 +89,8 @@ export const roomStyles = `
 
   .live-dot {
     width: 8px; height: 8px; border-radius: 999px;
-    background: var(--lime);
-    box-shadow: 0 0 18px rgba(212, 255, 0, .85);
+    background: var(--teal);
+    box-shadow: 0 0 18px rgba(45, 212, 191, .85);
   }
 
   .job-pill strong { font: 700 17px Manrope, sans-serif; }
@@ -99,9 +109,9 @@ export const roomStyles = `
     text-transform: capitalize;
     border: 1px solid transparent;
   }
-  .integrity.ok { color: var(--lime); border-color: rgba(212,255,0,.3); background: rgba(212,255,0,.08); }
+  .integrity.ok { color: var(--teal); border-color: rgba(45,212,191,.3); background: rgba(45,212,191,.08); }
   .integrity.warn { color: #fbbf24; border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.1); }
-  .integrity.alert { color: var(--orange); border-color: rgba(249,87,56,.45); background: rgba(249,87,56,.14); }
+  .integrity.alert { color: var(--danger); border-color: rgba(249,87,56,.45); background: rgba(249,87,56,.14); }
 
   .bars {
     display: inline-grid;
@@ -110,7 +120,7 @@ export const roomStyles = `
     gap: 3px;
     height: 17px;
   }
-  .bars i { display: block; width: 3px; border-radius: 999px; background: var(--lime); }
+  .bars i { display: block; width: 3px; border-radius: 999px; background: var(--teal); }
   .bars i:nth-child(1) { height: 5px; }
   .bars i:nth-child(2) { height: 8px; }
   .bars i:nth-child(3) { height: 12px; }
@@ -165,7 +175,7 @@ export const roomStyles = `
     padding: 24px;
     overflow: hidden;
     background:
-      radial-gradient(circle at 50% 47%, rgba(103, 232, 249, .055), transparent 32%),
+      radial-gradient(circle at 50% 47%, rgba(45, 212, 191, .055), transparent 32%),
       #060810;
   }
   .orb-stage-orb { display: block; }
@@ -183,7 +193,7 @@ export const roomStyles = `
     border: 1px solid rgba(255, 255, 255, .13);
     border-radius: 999px;
     background: rgba(255, 255, 255, .08);
-    color: var(--orange);
+    color: var(--teal);
     font: 900 20px Manrope, sans-serif;
     backdrop-filter: blur(18px);
   }
@@ -202,7 +212,7 @@ export const roomStyles = `
     backdrop-filter: blur(18px);
   }
 
-  .red-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--orange); }
+  .red-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--danger); }
 
   .listen-card {
     position: absolute; z-index: 3; right: 30px; bottom: 30px; left: 30px;
@@ -215,7 +225,7 @@ export const roomStyles = `
   }
 
   .wave { display: flex; align-items: center; gap: 4px; }
-  .wave i { width: 4px; height: 4px; border-radius: 999px; background: var(--orange); animation: pulse 1s infinite ease-in-out; }
+  .wave i { width: 4px; height: 4px; border-radius: 999px; background: var(--teal); animation: pulse 1s infinite ease-in-out; }
   .wave i:nth-child(2) { animation-delay: .08s; }
   .wave i:nth-child(3) { animation-delay: .16s; }
   .wave i:nth-child(4) { animation-delay: .24s; }
@@ -229,7 +239,7 @@ export const roomStyles = `
   .listen-copy span { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .hd-audio { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; letter-spacing: .28em; text-transform: uppercase; }
-  .hd-audio i { width: 7px; height: 7px; border-radius: 999px; background: var(--lime); }
+  .hd-audio i { width: 7px; height: 7px; border-radius: 999px; background: var(--teal); }
 
   .right-stack { display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr); gap: 30px; }
 
@@ -244,7 +254,7 @@ export const roomStyles = `
   /* Lights up while the candidate's own voice is actually detected — see the
      AnalyserNode-based check in page.tsx. Answers "is my mic picking me up?". */
   .candidate-panel.speaking {
-    box-shadow: inset 0 0 0 3px rgba(212, 255, 0, .45), inset 0 0 26px rgba(212, 255, 0, .3);
+    box-shadow: inset 0 0 0 3px rgba(45, 212, 191, .45), inset 0 0 26px rgba(45, 212, 191, .3);
   }
 
   /* Demo/debug-only live-caption strip — proves browser STT is actually hearing
@@ -260,9 +270,9 @@ export const roomStyles = `
     backdrop-filter: blur(6px);
   }
   .stt-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; background: #64748b; }
-  .stt-dot.stt-listening { background: var(--lime); box-shadow: 0 0 8px rgba(212, 255, 0, .7); }
+  .stt-dot.stt-listening { background: var(--teal); box-shadow: 0 0 8px rgba(45, 212, 191, .7); }
   .stt-dot.stt-unavailable { background: #fbbf24; }
-  .stt-dot.stt-error, .stt-dot.stt-unsupported { background: var(--orange); }
+  .stt-dot.stt-error, .stt-dot.stt-unsupported { background: var(--danger); }
 
   .candidate-video {
     position: absolute; inset: 0; width: 100%; height: 100%;
@@ -280,7 +290,7 @@ export const roomStyles = `
     border-radius: 999px; background: rgba(0, 0, 0, .48); padding: 7px 14px;
     color: #e5e7eb; font-size: 12px; letter-spacing: .22em; text-transform: uppercase;
   }
-  .you-pill i { width: 8px; height: 8px; border-radius: 999px; background: var(--lime); }
+  .you-pill i { width: 8px; height: 8px; border-radius: 999px; background: var(--teal); }
 
   .candidate-footer {
     position: absolute; right: 0; bottom: 0; left: 0; z-index: 3;
@@ -306,7 +316,7 @@ export const roomStyles = `
   .question-meta { color: #778195; font-size: 12px; letter-spacing: .28em; text-transform: uppercase; margin-top: 10px; }
 
   .tag {
-    border: 1px solid rgba(249, 87, 56, .4); border-radius: 999px; color: var(--orange);
+    border: 1px solid rgba(100, 160, 220, .4); border-radius: 999px; color: var(--indigo);
     padding: 6px 12px; font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
     white-space: normal; text-align: right; max-width: 60%;
   }
@@ -317,7 +327,7 @@ export const roomStyles = `
   .circle-btn, .next-btn { border: 1px solid rgba(255, 255, 255, .08); color: #fff; cursor: pointer; }
   .circle-btn { width: 46px; height: 46px; border-radius: 999px; background: rgba(255, 255, 255, .03); }
   .circle-btn:disabled { opacity: .35; cursor: not-allowed; }
-  .next-btn { border-color: rgba(249, 87, 56, .42); border-radius: 999px; background: rgba(249, 87, 56, .18); padding: 0 24px; color: var(--orange); font-weight: 800; letter-spacing: .08em; }
+  .next-btn { border-color: rgba(45, 212, 191, .42); border-radius: 999px; background: rgba(45, 212, 191, .18); padding: 0 24px; color: var(--teal); font-weight: 800; letter-spacing: .08em; }
 
   .controlbar {
     display: flex; height: 78px; align-items: center; justify-content: space-between;
@@ -335,8 +345,8 @@ export const roomStyles = `
     width: 50px; height: 50px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 999px;
     background: rgba(255, 255, 255, .06); color: #fff; cursor: pointer; font-size: 18px;
   }
-  .control-actions button.muted { background: rgba(249, 87, 56, .14); border-color: rgba(249,87,56,.4); color: var(--orange); }
-  .control-actions .end { width: 58px; background: rgba(249, 87, 56, .2); color: var(--orange); }
+  .control-actions button.muted { background: rgba(249, 87, 56, .14); border-color: rgba(249,87,56,.4); color: var(--danger); }
+  .control-actions .end { width: 58px; background: rgba(249, 87, 56, .2); color: var(--danger); }
 
   /* ===== Pre-interview permission gate ===== */
   .gate {
@@ -349,7 +359,7 @@ export const roomStyles = `
      top isn't clipped) when the card is taller than the viewport — e.g. the
      five-checkbox consent gate, whose "I do not consent" button was cut off. */
   .gate-card { width: 100%; max-width: 560px; margin: auto; }
-  .gate-eyebrow { margin: 0; color: #67e8f9; font-size: 12px; letter-spacing: .35em; text-transform: uppercase; text-align: center; }
+  .gate-eyebrow { margin: 0; color: #2dd4bf; font-size: 12px; letter-spacing: .35em; text-transform: uppercase; text-align: center; }
   .gate-title { margin: 18px 0 0; font: 900 30px Manrope, sans-serif; text-align: center; }
   .gate-sub { margin: 12px 0 0; color: #94a3b8; font-size: 14px; line-height: 1.6; text-align: center; }
   .gate-checks { margin-top: 28px; display: grid; gap: 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 18px; background: rgba(255,255,255,.04); padding: 16px; }
@@ -357,27 +367,27 @@ export const roomStyles = `
   .gate-check-l { display: flex; align-items: center; gap: 12px; }
   .gate-check-label { margin: 0; font-size: 14px; font-weight: 600; }
   .gate-check-detail { margin: 2px 0 0; font-size: 12px; color: #94a3b8; }
-  .ok-ico { color: #6ee7b7; }
-  .wait-ico { color: #67e8f9; }
+  .ok-ico { color: #2dd4bf; }
+  .wait-ico { color: #2dd4bf; }
   .bad-ico { color: #f87171; }
   .gate-check-detail.is-bad { color: #fca5a5; }
   .gate-dot { width: 10px; height: 10px; border-radius: 999px; }
-  .gate-dot.is-ok { background: #34d399; }
+  .gate-dot.is-ok { background: #64a0dc; }
   .gate-dot.is-wait { background: #fbbf24; }
   .gate-dot.is-bad { background: #f87171; }
   .gate-btn {
     margin-top: 24px; width: 100%;
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    border: 0; border-radius: 14px; background: #67e8f9; color: #020617;
+    border: 0; border-radius: 14px; background: #2dd4bf; color: #020617;
     padding: 14px; font: 800 14px Manrope, sans-serif; cursor: pointer;
-    box-shadow: 0 0 40px rgba(103,232,249,.18);
+    box-shadow: 0 0 40px rgba(45,212,191,.18);
   }
   .gate-error { margin-top: 16px; text-align: center; font-size: 14px; color: #fecdd3; }
   .gate-spinner {
     width: 36px; height: 36px; margin: 0 auto 4px;
     border-radius: 999px;
     border: 3px solid rgba(255,255,255,.12);
-    border-top-color: #67e8f9;
+    border-top-color: #2dd4bf;
     animation: gate-spin .8s linear infinite;
   }
   @keyframes gate-spin { to { transform: rotate(360deg); } }
@@ -386,10 +396,10 @@ export const roomStyles = `
   .consent-card { max-width: 600px; }
   .consent-badge {
     width: 54px; height: 54px; margin: 0 auto; border-radius: 16px;
-    display: grid; place-items: center; color: #67e8f9;
-    background: linear-gradient(150deg, rgba(103,232,249,.20), rgba(52,211,153,.12));
-    border: 1px solid rgba(103,232,249,.35);
-    box-shadow: 0 12px 34px rgba(103,232,249,.18), inset 0 1px 0 rgba(255,255,255,.12);
+    display: grid; place-items: center; color: #2dd4bf;
+    background: linear-gradient(150deg, rgba(45,212,191,.20), rgba(100,160,220,.12));
+    border: 1px solid rgba(45,212,191,.35);
+    box-shadow: 0 12px 34px rgba(45,212,191,.18), inset 0 1px 0 rgba(255,255,255,.12);
   }
   .consent-list { margin-top: 24px; display: grid; gap: 10px; text-align: left; }
   .consent-item {
@@ -398,11 +408,11 @@ export const roomStyles = `
     background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.08);
     transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .06s ease;
   }
-  .consent-item:hover { border-color: rgba(103,232,249,.35); background: rgba(255,255,255,.055); }
+  .consent-item:hover { border-color: rgba(45,212,191,.35); background: rgba(255,255,255,.055); }
   .consent-item:active { transform: scale(.995); }
   .consent-item.is-on {
-    border-color: rgba(52,211,153,.5); background: rgba(52,211,153,.09);
-    box-shadow: 0 8px 24px rgba(52,211,153,.14);
+    border-color: rgba(100,160,220,.5); background: rgba(100,160,220,.09);
+    box-shadow: 0 8px 24px rgba(100,160,220,.14);
   }
   .consent-native { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
   .consent-box {
@@ -413,20 +423,20 @@ export const roomStyles = `
   }
   .consent-box > svg { opacity: 0; transform: scale(.55); transition: opacity .18s ease, transform .18s ease; }
   .consent-item.is-on .consent-box {
-    background: linear-gradient(145deg, #67e8f9, #34d399); border-color: transparent;
-    box-shadow: 0 4px 14px rgba(52,211,153,.4);
+    background: linear-gradient(145deg, #2dd4bf, #64a0dc); border-color: transparent;
+    box-shadow: 0 4px 14px rgba(100,160,220,.4);
   }
   .consent-item.is-on .consent-box > svg { opacity: 1; transform: scale(1); }
-  .consent-native:focus-visible + .consent-box { outline: 2px solid #67e8f9; outline-offset: 2px; }
+  .consent-native:focus-visible + .consent-box { outline: 2px solid #2dd4bf; outline-offset: 2px; }
   .consent-text { display: grid; gap: 3px; }
   .consent-title { font-size: 14px; font-weight: 600; color: #e8eefc; line-height: 1.4; }
   .consent-detail { font-size: 12.5px; color: #93a4c3; line-height: 1.5; }
-  .consent-link { color: #67e8f9; text-decoration: underline; text-underline-offset: 2px; }
+  .consent-link { color: #2dd4bf; text-decoration: underline; text-underline-offset: 2px; }
   .consent-link:hover { color: #a5f3fc; }
   .consent-all {
     margin-top: 4px;
-    background: linear-gradient(135deg, rgba(52,211,153,.12), rgba(103,232,249,.06));
-    border-color: rgba(52,211,153,.32);
+    background: linear-gradient(135deg, rgba(100,160,220,.12), rgba(45,212,191,.06));
+    border-color: rgba(100,160,220,.32);
   }
   .consent-all .consent-title { font-weight: 750; }
   .consent-actions { margin-top: 24px; display: grid; gap: 10px; }
@@ -434,11 +444,11 @@ export const roomStyles = `
     width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     border: 0; border-radius: 14px; padding: 15px; color: #04121a;
     font: 800 14px Manrope, sans-serif; letter-spacing: .01em; cursor: pointer;
-    background: linear-gradient(135deg, #67e8f9, #34d399);
-    box-shadow: 0 12px 30px rgba(52,211,153,.28);
+    background: linear-gradient(135deg, #2dd4bf, #64a0dc);
+    box-shadow: 0 12px 30px rgba(100,160,220,.28);
     transition: transform .06s ease, box-shadow .2s ease, opacity .2s ease;
   }
-  .consent-agree:hover:not(:disabled) { box-shadow: 0 16px 42px rgba(52,211,153,.42); }
+  .consent-agree:hover:not(:disabled) { box-shadow: 0 16px 42px rgba(100,160,220,.42); }
   .consent-agree:active:not(:disabled) { transform: translateY(1px); }
   .consent-agree:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
   .consent-decline {
@@ -475,7 +485,7 @@ export const roomStyles = `
     display: flex;
     flex-direction: column;
     gap: 10px;
-    border: 1px solid rgba(212,255,0,.25);
+    border: 1px solid rgba(45,212,191,.25);
     border-radius: 18px;
     background: rgba(8,9,13,.94);
     box-shadow: 0 30px 90px rgba(0,0,0,.6);
@@ -485,7 +495,7 @@ export const roomStyles = `
     font-family: "IBM Plex Sans", system-ui, sans-serif;
   }
   .debug-head { display: flex; align-items: center; justify-content: space-between; }
-  .debug-head strong { font: 800 14px Manrope, sans-serif; color: #d4ff00; letter-spacing: .04em; }
+  .debug-head strong { font: 800 14px Manrope, sans-serif; color: #2dd4bf; letter-spacing: .04em; }
   .debug-head button { border: 0; background: rgba(255,255,255,.08); color: #fff; width: 26px; height: 26px; border-radius: 8px; cursor: pointer; }
   .debug-section-title { margin-top: 6px; color: #74829b; font: 700 10px Manrope, sans-serif; letter-spacing: .26em; text-transform: uppercase; }
   .debug-grid { display: grid; gap: 4px; }
@@ -493,13 +503,13 @@ export const roomStyles = `
   .debug-row-k { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #cbd5e1; }
   .debug-row-v { font: 600 11px "IBM Plex Sans", monospace; color: #fff; text-align: right; word-break: break-word; max-width: 200px; }
   .debug-dot { width: 8px; height: 8px; border-radius: 999px; flex: 0 0 auto; }
-  .debug-dot.is-ok { background: #34d399; }
+  .debug-dot.is-ok { background: #64a0dc; }
   .debug-dot.is-bad { background: #f95738; }
   .debug-events { display: grid; gap: 6px; }
   .debug-event { border-radius: 8px; border-left: 3px solid #64748b; background: rgba(255,255,255,.03); padding: 7px 10px; }
   .debug-event.sev-high, .debug-event.sev-critical { border-left-color: #f95738; }
   .debug-event.sev-medium { border-left-color: #fbbf24; }
-  .debug-event.sev-low { border-left-color: #34d399; }
+  .debug-event.sev-low { border-left-color: #64a0dc; }
   .debug-event-type { display: inline-block; font: 700 11px Manrope, sans-serif; color: #fff; }
   .debug-event-sev { float: right; font-size: 10px; color: #94a3b8; letter-spacing: .1em; }
   .debug-event-meta { margin: 4px 0 0; font-size: 10px; color: #64748b; white-space: pre-wrap; word-break: break-word; }
@@ -524,46 +534,101 @@ export const roomStyles = `
     .controlbar { padding-right: 32px; }
   }
 
-  /* Phone-width tightening on top of the ≤1100px tablet rules above: the
-     104px-tall .topbar and 418px-min .job-pill never adapted to a real
-     375-414px phone (they just clipped/overflowed), and .controlbar's
-     button row + timer text had no wrap fallback. */
+  /* Phone redesign (≤640px) — a real header/scroll/footer layout, not a
+     shrink-everything-and-hope-it-fits patch. The previous version kept
+     .room's ≤1100px 'position: absolute; overflow: visible' and just wrapped
+     .controlbar's contents — but position:absolute (and position:fixed, the
+     default) both take an element out of normal document flow for height
+     purposes, so once wrapped content pushed .room's total height past the
+     viewport, there was no scrollbar anywhere that could reach the
+     overflow: .control-actions (mic/camera/end-call — the buttons a
+     candidate actually needs mid-call) rendered a few pixels below the
+     visible viewport edge with zero way to scroll to them. Verified via a
+     real 375×812 render before writing this rule.
+     Fix: .room becomes a real flex column with a fixed-height header, a
+     FLEXIBLE + SCROLLABLE middle (min-height:0 is what makes flex-basis:0
+     actually shrink instead of overflowing), and a footer that never
+     shrinks — the same structural pattern every mobile call UI (Meet, Zoom)
+     uses so the call controls are physically guaranteed to stay on screen
+     no matter how tall the middle content gets. */
   @media (max-width: 640px) {
+    .room {
+      position: fixed;
+      inset: 0;
+      height: 100dvh; /* not 100vh — accounts for mobile browser chrome
+                          showing/hiding, which 100vh does not */
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Condensed single-row header: logo + stage name + status, everything
+       that isn't essential mid-call (the "AI INTERVIEW ROOM" eyebrow, the
+       "Round 1"/"5-min check-in" sub-label, the live connection-quality
+       bars/text) is dropped rather than squeezed, since none of it is
+       actionable — the candidate can't do anything with "Excellent
+       connection" beyond seeing the dot/pill. */
     .topbar {
       height: auto;
-      grid-template-columns: 1fr;
-      justify-items: center;
-      gap: 10px;
-      padding: 14px 16px;
-      text-align: center;
+      min-height: 0;
+      flex: 0 0 auto;
+      display: flex;
+      flex-wrap: nowrap;
+      grid-template-columns: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 12px;
     }
-    .brand, .connection { justify-content: center; }
-    .room-label { margin-left: 12px; }
-    .job-pill { min-width: 0; width: 100%; padding: 9px 14px; }
-    .job-pill strong { font-size: 15px; }
+    .brand { gap: 8px; min-width: 0; flex: 0 1 auto; }
+    .logo { width: 32px; height: 32px; font-size: 14px; flex-shrink: 0; }
+    .brand-name { font-size: 15px; white-space: nowrap; }
+    .room-label { display: none; }
+    .job-pill {
+      min-width: 0; width: auto; flex: 1 1 auto; justify-content: flex-start;
+      padding: 6px 12px; gap: 8px; overflow: hidden;
+    }
+    .job-pill strong { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .job-pill span { display: none; }
+    .connection { gap: 6px; flex: 0 0 auto; justify-content: flex-end; }
+    .connection-text, .bars { display: none; }
+    .integrity { padding: 5px 9px; font-size: 10.5px; gap: 4px; }
+    .timer { padding: 6px 10px; font-size: 12px; }
 
-    .content { padding: 10px 12px 16px; gap: 16px; }
-    .avatar-panel { min-height: 460px; border-radius: 20px; }
+    /* The scrollable middle. flex-basis:0 + min-height:0 is load-bearing —
+       without min-height:0 a flex item won't shrink below its content's
+       natural size, which is exactly the bug being fixed here. */
+    .content {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 10px;
+      gap: 10px;
+    }
+    .avatar-panel { min-height: 100%; border-radius: 20px; }
 
-    .identity { top: 16px; left: 16px; gap: 10px; }
-    .identity-icon { width: 40px; height: 40px; font-size: 16px; }
-    .identity strong { font-size: 15px; }
+    .identity { top: 14px; left: 14px; gap: 8px; }
+    .identity-icon { width: 36px; height: 36px; font-size: 15px; }
+    .identity strong { font-size: 14px; }
     .you-pill { top: 10px; left: 10px; padding: 6px 11px; font-size: 11px; }
 
-    .listen-card { left: 16px; right: 16px; bottom: 16px; padding: 14px 18px; gap: 12px; }
+    .listen-card { left: 14px; right: 14px; bottom: 14px; padding: 12px 16px; gap: 10px; }
     .listen-copy span { max-width: 46vw; }
 
+    /* The footer: fixed height, never wraps, never shrinks. This is what
+       guarantees the buttons stay on screen — not a height/padding guess. */
     .controlbar {
-      height: auto;
-      min-height: 78px;
-      flex-wrap: wrap;
-      gap: 10px;
-      padding: 12px 16px;
+      flex: 0 0 auto;
+      height: 64px;
+      padding: 0 12px;
+      gap: 8px;
     }
-    .control-time { flex-wrap: wrap; gap: 8px; }
-    .control-actions { gap: 8px; }
-    .control-actions button { width: 44px; height: 44px; font-size: 16px; }
-    .control-actions .end { width: 50px; }
+    .control-time { gap: 6px; min-width: 0; overflow: hidden; }
+    .elapsed-label { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
+    .debug-toggle { padding: 4px 7px; font-size: 9px; margin-left: 4px; flex-shrink: 0; }
+    .control-actions { gap: 10px; flex-shrink: 0; }
+    .control-actions button { width: 46px; height: 46px; font-size: 17px; }
+    .control-actions .end { width: 52px; }
 
     .gate { padding: 16px; }
     .gate-title { font-size: 24px; }
