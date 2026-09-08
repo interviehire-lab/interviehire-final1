@@ -362,6 +362,8 @@ export const roomStyles = `
   .gate-eyebrow { margin: 0; color: #2dd4bf; font-size: 12px; letter-spacing: .35em; text-transform: uppercase; text-align: center; }
   .gate-title { margin: 18px 0 0; font: 900 30px Manrope, sans-serif; text-align: center; }
   .gate-sub { margin: 12px 0 0; color: #94a3b8; font-size: 14px; line-height: 1.6; text-align: center; }
+  .gate-tip { margin: 16px 0 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: #2dd4bf; font-size: 12.5px; line-height: 1.5; text-align: center; }
+  .gate-tip svg { flex: none; }
   .gate-checks { margin-top: 28px; display: grid; gap: 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 18px; background: rgba(255,255,255,.04); padding: 16px; }
   .gate-check { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-radius: 14px; background: rgba(2,6,23,.7); padding: 14px 16px; }
   .gate-check-l { display: flex; align-items: center; gap: 12px; }

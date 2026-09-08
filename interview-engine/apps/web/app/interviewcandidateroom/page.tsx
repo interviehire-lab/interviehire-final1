@@ -5,7 +5,7 @@ import { WS_URL, API_URL } from '@/lib/api';
 import { GazeCalibration } from '@/hooks/GazeCalibration';
 import { useProctoring, getBestViolationRecordingMimeType } from '@/hooks/useProctoring';
 import { useTranscript } from '@/hooks/useTranscript';
-import { Check, Mic, MonitorUp, ShieldCheck, Video } from 'lucide-react';
+import { Check, Headphones, Mic, MonitorUp, ShieldCheck, Video } from 'lucide-react';
 import type { CalibrationResult } from '@/hooks/useGazeCalibration';
 import { roomStyles } from './roomStyles';
 import { WaitingRoom } from './WaitingRoom';
@@ -1189,6 +1189,12 @@ export default function Interview() {
                 : <>Click <strong>Grant required access</strong> — your browser will then ask for
                   microphone access, needed to transcribe your answers. It must be granted before you
                   can start the interview.</>}
+            </p>
+            <p className="gate-tip">
+              <Headphones size={16} />
+              For the clearest audio, use headphones or earbuds — on laptop/phone
+              speakers the interviewer's voice can echo back through your own
+              microphone.
             </p>
             <div className="gate-checks">
               {[
