@@ -42,6 +42,7 @@ def integrations_status(request: Request):
             "authentication_mode": "api_key" if has_api_key else "auth_token" if has_auth_token else None,
             "whatsapp_sender_configured": bool(settings.TWILIO_WHATSAPP_FROM),
             "voice_sender_configured": bool(settings.TWILIO_VOICE_FROM),
+            "sms_service_configured": bool(settings.TWILIO_SMS_MESSAGING_SERVICE_SID),
             "confirmation_template_configured": bool(settings.TWILIO_WHATSAPP_CONFIRMATION_CONTENT_SID),
             "reminder_template_configured": bool(settings.TWILIO_WHATSAPP_REMINDER_CONTENT_SID),
             "confirmation_variable_order": settings.TWILIO_WHATSAPP_CONFIRMATION_VARIABLE_ORDER,

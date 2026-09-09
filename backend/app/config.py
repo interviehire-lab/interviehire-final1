@@ -145,6 +145,16 @@ class Settings(BaseSettings):
         "first_name,stage_name,job_title,minutes_before,interview_link"
     )
 
+    # SMS (confirmation + reminder) — unlike WhatsApp, SMS has no Meta/Content-
+    # Template approval concept at all, so every send is freeform Body; the only
+    # setup needed is a Twilio Messaging Service. Routing through a Messaging
+    # Service (rather than a bare TWILIO_*_FROM number) is REQUIRED for
+    # Alphanumeric Sender ID support (e.g. "interview" instead of a phone
+    # number) — sends specify `MessagingServiceSid`, never `From`. Blank by
+    # default: send_sms_message() no-ops until this is set, same convention as
+    # the rest of this Twilio block.
+    TWILIO_SMS_MESSAGING_SERVICE_SID: str = ""
+
     # Interview reminder job (email + WhatsApp + robocall, ~REMINDER_MINUTES_BEFORE
     # the scheduled start). No global disable switch — email always attempts to send
     # regardless of Twilio config; only the Twilio-backed channels no-op individually

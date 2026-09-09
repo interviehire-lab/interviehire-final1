@@ -211,6 +211,7 @@ def test_email_failure_does_not_block_whatsapp_or_call_and_still_marks_sent(auth
 
     assert result["emails_sent"] == 0
     assert result["whatsapp_sent"] == 1
+    assert result["sms_sent"] == 1
     assert result["calls_placed"] == 1
     assert result["errors"] == 1
     assert "Reminder email failed" in caplog.text
@@ -233,9 +234,33 @@ def test_whatsapp_failure_does_not_block_email_or_call(authed_client, db, mocked
 
     assert result["emails_sent"] == 1
     assert result["whatsapp_sent"] == 0
+    assert result["sms_sent"] == 1
     assert result["calls_placed"] == 1
     assert result["errors"] == 1
     assert "Reminder WhatsApp send failed" in caplog.text
+
+    db.expire_all()
+    applicant = db.get(Applicant, uuid.UUID(applicant_id))
+    assert applicant.screening_reminder_sent_at is not None
+
+
+def test_sms_failure_does_not_block_email_or_whatsapp_or_call(authed_client, db, mocked_externals, monkeypatch, caplog):
+    applicant_id = _schedule_applicant(authed_client, minutes_from_now=5)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("Twilio 500")
+
+    monkeypatch.setattr("app.jobs.reminders.send_sms_message", _boom)
+
+    with caplog.at_level("ERROR"):
+        result = run_reminders(db, dry_run=False)
+
+    assert result["emails_sent"] == 1
+    assert result["whatsapp_sent"] == 1
+    assert result["sms_sent"] == 0
+    assert result["calls_placed"] == 1
+    assert result["errors"] == 1
+    assert "Reminder SMS send failed" in caplog.text
 
     db.expire_all()
     applicant = db.get(Applicant, uuid.UUID(applicant_id))
@@ -255,6 +280,7 @@ def test_call_failure_does_not_block_email_or_whatsapp(authed_client, db, mocked
 
     assert result["emails_sent"] == 1
     assert result["whatsapp_sent"] == 1
+    assert result["sms_sent"] == 1
     assert result["calls_placed"] == 0
     assert result["errors"] == 1
     assert "Reminder call failed" in caplog.text
@@ -283,6 +309,7 @@ def test_reminder_skips_twilio_channels_when_twilio_is_not_configured(authed_cli
 
     assert result["emails_sent"] == 1
     assert result["whatsapp_sent"] == 0
+    assert result["sms_sent"] == 0
     assert result["calls_placed"] == 0
     assert result["errors"] == 0  # a configured-off Twilio is not an error condition
     assert "Twilio not configured" in caplog.text
@@ -308,6 +335,7 @@ def test_reminder_skips_twilio_channels_when_applicant_has_no_usable_phone(authe
     result = run_reminders(db, dry_run=False)
 
     assert result["whatsapp_sent"] == 0
+    assert result["sms_sent"] == 0
     assert result["calls_placed"] == 0
     assert result["errors"] == 0
 
@@ -327,6 +355,7 @@ def test_dry_run_sends_nothing_and_does_not_mark_sent(authed_client, db, mocked_
     assert any(s["applicant_id"] == applicant_id for s in result["sample"])
     assert len(mocked_externals.reminder_email_calls) == 0
     assert len(mocked_externals.reminder_whatsapp_calls) == 0
+    assert len(mocked_externals.reminder_sms_calls) == 0
     assert len(mocked_externals.reminder_call_calls) == 0
 
     db.expire_all()
@@ -350,11 +379,24 @@ def test_run_reminders_caps_total_candidates_at_the_limit(authed_client, db, moc
     insertion order (screening, then functional) — a tight limit can fully starve
     the functional stage on a run where screening alone fills the quota. If this
     stage-priority behaviour ever changes, update this test rather than deleting it."""
-    for _ in range(3):
-        _schedule_applicant(authed_client, minutes_from_now=5, stage="screening")
-    _schedule_applicant(authed_client, minutes_from_now=5, stage="functional")
+    applicant_ids = [_schedule_applicant(authed_client, minutes_from_now=5, stage="screening") for _ in range(3)]
+    applicant_ids.append(_schedule_applicant(authed_client, minutes_from_now=5, stage="functional"))
 
     result = run_reminders(db, dry_run=False, limit=2)
 
     assert result["candidates_found"] == 2
     assert result["emails_sent"] == 2
+
+    # limit=2 leaves 2 of these 4 applicants permanently un-reminded (never even
+    # fetched by select_due, same as the dry-run test above) — select_due() is a
+    # global, unscoped query, so left in "scheduled" + still-due-now they'd leak
+    # into (and inflate the count for) any later test/file in this same pytest
+    # session that also calls run_reminders() against the shared DB (this bit
+    # test_full_flow.py before this cleanup existed). Remove all four the same
+    # way a recruiter removing a candidate would, regardless of which 2 were
+    # actually consumed.
+    for applicant_id in applicant_ids:
+        applicant = db.get(Applicant, uuid.UUID(applicant_id))
+        applicant.removed_at = datetime.now(timezone.utc)
+        db.add(applicant)
+    db.commit()

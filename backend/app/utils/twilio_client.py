@@ -168,6 +168,79 @@ def send_schedule_confirmation_whatsapp(
     return send_whatsapp_message(phone, body=body)
 
 
+def send_sms_message(to_phone: str | None, body: str) -> bool:
+    """Send an SMS via Twilio's Messages API, routed through the configured
+    Messaging Service (`MessagingServiceSid`, never a bare `From` number — this
+    is what makes Alphanumeric Sender ID routing work). Returns False (and
+    logs) instead of raising when Twilio/SMS isn't configured, the phone
+    number doesn't look real, or the request fails.
+
+    Unlike `send_whatsapp_message`, there's no Content Template concept here —
+    SMS has no Meta/WhatsApp-Business-Platform approval requirement, so every
+    send is freeform `Body`.
+    """
+    if not _twilio_configured():
+        logger.info("Twilio not configured (TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN unset) — skipping SMS send.")
+        return False
+    if not settings.TWILIO_SMS_MESSAGING_SERVICE_SID:
+        logger.info("TWILIO_SMS_MESSAGING_SERVICE_SID not configured — skipping SMS send.")
+        return False
+    if not has_real_phone(to_phone):
+        logger.info(f"Skipping SMS send — no usable phone number ({to_phone!r}).")
+        return False
+    normalized = to_e164(to_phone)
+
+    url = f"{_TWILIO_API_BASE}/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json"
+    data = {
+        "MessagingServiceSid": settings.TWILIO_SMS_MESSAGING_SERVICE_SID,
+        "To": normalized,
+        "Body": body,
+    }
+    try:
+        response = requests.post(
+            url,
+            data=data,
+            auth=_twilio_auth(),
+            timeout=_REQUEST_TIMEOUT,
+        )
+        if response.status_code in (200, 201):
+            logger.info(f"SMS sent successfully via Twilio to {normalized}")
+            return True
+        logger.error(f"Failed to send SMS via Twilio: {response.status_code} {response.text}")
+        return False
+    except Exception as e:
+        logger.error(f"Error sending SMS via Twilio to {normalized}: {e}")
+        return False
+
+
+def send_schedule_confirmation_sms(
+    phone: str | None,
+    first_name: str,
+    stage_name: str,
+    job_title: str,
+    org_name: str,
+    date_str: str,
+    time_str: str,
+    interview_link: str,
+    reschedule_link: str,
+) -> bool:
+    """Build + send the SMS confirmation sent when a time slot is set (recruiter
+    schedule, or candidate self-reschedule) — additive alongside the email and
+    WhatsApp confirmations, never a substitute for either. Shared by
+    `app/routers/jobs.py::schedule_interview` and
+    `app/routers/public.py::public_reschedule_interview`, same as
+    `send_schedule_confirmation_whatsapp`. Always freeform — SMS has no
+    Content Template concept. Best-effort: delegates to `send_sms_message`,
+    which never raises."""
+    body = (
+        f"Hi {first_name}, your {stage_name} interview for {job_title} at {org_name} "
+        f"is confirmed for {date_str} at {time_str}.\n"
+        f"Join here: {interview_link}\n"
+        f"Need to change the time? {reschedule_link}"
+    )
+    return send_sms_message(phone, body)
+
+
 def place_reminder_call(to_phone: str | None, say_message: str) -> bool:
     """Place an automated voice call via Twilio's Calls API using inline TwiML (the
     `Twiml` param) — no public webhook endpoint needed to serve TwiML for the call.

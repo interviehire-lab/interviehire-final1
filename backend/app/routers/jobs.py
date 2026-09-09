@@ -2422,6 +2422,28 @@ def schedule_interview(
     except Exception as wa_err:
         logger.error(f"Failed to send WhatsApp interview confirmation: {wa_err}")
 
+    # SMS confirmation — additive alongside email/WhatsApp above, same
+    # independence guarantee (own try/except). No-ops when Twilio/the SMS
+    # Messaging Service isn't configured or applicant.phone isn't real.
+    try:
+        from app.utils.twilio_client import send_schedule_confirmation_sms
+        from app.utils.timezones import to_ist
+        first_name = (applicant.name or "").strip().split(" ")[0] or "there"
+        scheduled_at_ist = to_ist(scheduled_at)
+        send_schedule_confirmation_sms(
+            phone=applicant.phone,
+            first_name=first_name,
+            stage_name=stage_name,
+            job_title=job_title,
+            org_name=organizer_name,
+            date_str=scheduled_at_ist.strftime("%B %d, %Y"),
+            time_str=scheduled_at_ist.strftime("%I:%M %p IST"),
+            interview_link=interview_link,
+            reschedule_link=reschedule_link,
+        )
+    except Exception as sms_err:
+        logger.error(f"Failed to send SMS interview confirmation: {sms_err}")
+
     # Sync to AI backend
     try:
         from app.utils.ai_sync import sync_applicant_to_ai

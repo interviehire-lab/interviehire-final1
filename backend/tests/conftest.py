@@ -85,8 +85,10 @@ class CallRecorder:
     email_calls: list = field(default_factory=list)
     calendar_calls: list = field(default_factory=list)
     whatsapp_calls: list = field(default_factory=list)
+    sms_calls: list = field(default_factory=list)
     reminder_email_calls: list = field(default_factory=list)
     reminder_whatsapp_calls: list = field(default_factory=list)
+    reminder_sms_calls: list = field(default_factory=list)
     reminder_call_calls: list = field(default_factory=list)
 
 
@@ -95,13 +97,13 @@ def mocked_externals(monkeypatch):
     """Patch every external-service call site touched by the schedule/reschedule/reminder
     flow, at the exact import path each caller actually resolves it from:
 
-    - schedule_interview (app/routers/jobs.py) imports email/calendar/WhatsApp LOCALLY
-      inside the function body -> patch the ORIGIN modules.
+    - schedule_interview (app/routers/jobs.py) imports email/calendar/WhatsApp/SMS
+      LOCALLY inside the function body -> patch the ORIGIN modules.
     - public_reschedule_interview (app/routers/public.py) imports calendar/email at
       MODULE TOP -> must patch the name as bound in app.routers.public's own namespace;
-      WhatsApp is imported locally there too -> origin-module patch works for it.
-    - run_reminders (app/jobs/reminders.py) imports all three send functions at MODULE
-      TOP -> patch as bound in app.jobs.reminders.
+      WhatsApp/SMS are imported locally there too -> origin-module patch works for them.
+    - run_reminders (app/jobs/reminders.py) imports all four send functions (email,
+      WhatsApp, SMS, call) at MODULE TOP -> patch as bound in app.jobs.reminders.
     - upload_resumes (app/routers/jobs.py) imports DeepSeek resume parsing locally.
 
     backend/.env has real-looking Twilio/Google/Resend/DeepSeek keys already populated,
@@ -126,11 +128,19 @@ def mocked_externals(monkeypatch):
         rec.whatsapp_calls.append(kwargs)
         return True
 
+    def _fake_sms_confirmation(**kwargs):
+        rec.sms_calls.append(kwargs)
+        return True
+
     def _fake_reminder_email(**kwargs):
         rec.reminder_email_calls.append(kwargs)
 
     def _fake_reminder_whatsapp(*args, **kwargs):
         rec.reminder_whatsapp_calls.append({"args": args, **kwargs})
+        return True
+
+    def _fake_reminder_sms(*args, **kwargs):
+        rec.reminder_sms_calls.append({"args": args, **kwargs})
         return True
 
     def _fake_reminder_call(*args, **kwargs):
@@ -147,12 +157,14 @@ def mocked_externals(monkeypatch):
     monkeypatch.setattr("app.utils.google_calendar.create_calendar_event", _fake_create_event)
     monkeypatch.setattr("app.utils.google_calendar.update_calendar_event", _fake_update_event)
     monkeypatch.setattr("app.utils.twilio_client.send_schedule_confirmation_whatsapp", _fake_whatsapp_confirmation)
+    monkeypatch.setattr("app.utils.twilio_client.send_schedule_confirmation_sms", _fake_sms_confirmation)
 
     monkeypatch.setattr("app.routers.public.update_calendar_event", _fake_update_event)
     monkeypatch.setattr("app.routers.public.send_ical_invitation_email", _fake_ical_email)
 
     monkeypatch.setattr("app.jobs.reminders.send_interview_reminder_email", _fake_reminder_email)
     monkeypatch.setattr("app.jobs.reminders.send_whatsapp_message", _fake_reminder_whatsapp)
+    monkeypatch.setattr("app.jobs.reminders.send_sms_message", _fake_reminder_sms)
     monkeypatch.setattr("app.jobs.reminders.place_reminder_call", _fake_reminder_call)
 
     monkeypatch.setattr("app.utils.resume_parser.parse_resume_with_deepseek", _fake_deepseek_parse)

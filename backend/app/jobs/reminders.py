@@ -37,7 +37,7 @@ from app.database import SessionLocal
 from app.models.applicant import Applicant, InterviewStatus
 from app.models.job import Job
 from app.utils.email_sender import send_interview_reminder_email
-from app.utils.twilio_client import build_content_variables, send_whatsapp_message, place_reminder_call
+from app.utils.twilio_client import build_content_variables, send_whatsapp_message, send_sms_message, place_reminder_call
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,7 @@ def run_reminders(db: Session, *, dry_run: bool = True, limit: Optional[int] = N
         "candidates_found": 0,
         "emails_sent": 0,
         "whatsapp_sent": 0,
+        "sms_sent": 0,
         "calls_placed": 0,
         "errors": 0,
     }
@@ -166,6 +167,22 @@ def run_reminders(db: Session, *, dry_run: bool = True, limit: Optional[int] = N
                     result["whatsapp_sent"] += 1
             except Exception:
                 logger.exception(f"Reminder WhatsApp send failed for applicant {applicant.id} ({stage_key})")
+                result["errors"] += 1
+
+            # SMS — best-effort, independent of every other channel's outcome. No
+            # Content Template concept (unlike WhatsApp) — always freeform. No-ops
+            # internally when Twilio/the Messaging Service isn't configured or the
+            # phone number isn't real; never raises.
+            try:
+                sms_body = (
+                    f"Hi {first_name}, your {stage_name} interview for {job_title} "
+                    f"starts in {minutes_before} minutes.\n"
+                    f"Join here: {interview_link}"
+                )
+                if send_sms_message(applicant.phone, sms_body):
+                    result["sms_sent"] += 1
+            except Exception:
+                logger.exception(f"Reminder SMS send failed for applicant {applicant.id} ({stage_key})")
                 result["errors"] += 1
 
             # Robocall — best-effort, independent of the email/WhatsApp outcome.

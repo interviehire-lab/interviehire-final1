@@ -90,6 +90,8 @@ def test_full_recruiter_candidate_flow(client, db, mocked_externals):
     assert mocked_externals.calendar_calls[0]["op"] == "create"
     assert len(mocked_externals.whatsapp_calls) == 1
     assert mocked_externals.whatsapp_calls[0]["phone"] == "+1 415 555 0123"
+    assert len(mocked_externals.sms_calls) == 1
+    assert mocked_externals.sms_calls[0]["phone"] == "+1 415 555 0123"
 
     # ── 5. Candidate-portal DB-state check ───────────────────────────────────
     # sync_applicant_to_ai runs synchronously inside /schedule and writes directly
@@ -123,9 +125,10 @@ def test_full_recruiter_candidate_flow(client, db, mocked_externals):
     assert saved_time - datetime.now(timezone.utc) < timedelta(minutes=6)
     assert applicant_row.calendar_sequence == 1  # incremented from 0 by the reschedule
 
-    # A second confirmation email/WhatsApp send for the reschedule.
+    # A second confirmation email/WhatsApp/SMS send for the reschedule.
     assert len(mocked_externals.email_calls) == 2
     assert len(mocked_externals.whatsapp_calls) == 2
+    assert len(mocked_externals.sms_calls) == 2
 
     # ── 7. Automations: run-reminders returns 200 and actually fires ────────
     from app.config import settings
@@ -138,6 +141,7 @@ def test_full_recruiter_candidate_flow(client, db, mocked_externals):
     assert len(mocked_externals.reminder_email_calls) == 1
     assert mocked_externals.reminder_email_calls[0]["candidate_email"] == candidate_email
     assert len(mocked_externals.reminder_whatsapp_calls) == 1
+    assert len(mocked_externals.reminder_sms_calls) == 1
     assert len(mocked_externals.reminder_call_calls) == 1
 
     db.expire_all()
