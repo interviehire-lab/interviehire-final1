@@ -22,6 +22,14 @@ class SessionStatus(str, enum.Enum):
     SCHEDULED = "SCHEDULED"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
+    # Transient claim marker: the engine's evaluation poller
+    # (interview-engine/apps/api's evaluation-poller.ts) flips
+    # COMPLETED -> EVALUATING atomically before starting the slow LLM grading
+    # work. Must mirror interview-engine/apps/api/prisma/schema.prisma's
+    # SessionStatus enum exactly — this value's absence here (while real rows
+    # already carried it) crashed every query that touched an InterviewSession
+    # row mid-evaluation with a SQLAlchemy LookupError.
+    EVALUATING = "EVALUATING"
     EVALUATED = "EVALUATED"
     CANCELLED = "CANCELLED"
 
