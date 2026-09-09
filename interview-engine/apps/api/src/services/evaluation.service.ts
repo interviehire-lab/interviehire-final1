@@ -347,7 +347,7 @@ function prepareAnswerEvaluation(params: {
   const questionConfig: EvalQuestionConfig = {
     questionId: params.question.id,
     questionText: params.question.text,
-    questionType: guidance.questionType ?? 'technical_theory',
+    questionType: guidance.questionType ?? 'general',
     questionOrigin: 'predetermined',
     modelAnswer: guidance.modelAnswer,
     difficulty: params.question.difficulty.toLowerCase() as EvalQuestionConfig['difficulty'],
@@ -803,7 +803,7 @@ function parseEvaluationGuidance(raw: string): {
 
     return {
       modelAnswer,
-      questionType: 'technical_theory',
+      questionType: 'general',
       rubric: buildRubricFromText(modelAnswer),
     };
   }

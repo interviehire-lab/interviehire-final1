@@ -1,6 +1,6 @@
 import { document, signal, setTimeout, clearTimeout } from './runtime';
 import { reviewJdRewrite } from './jd-rewrite';
-import { generateQuestionsLocally } from './questions';
+import { generateQuestionsLocally, isVoiceQuestionLength } from './questions';
 import { soundEngine } from './sound';
 import { showPremiumToast } from './sourcing';
 import { AppState, generateJobId } from './state';
@@ -32,89 +32,22 @@ function loadStateFromLocalStorage() {
     
     // Replace AppState.jobs with parsed jobs from localStorage, ensuring all properties are defined with fallbacks
     AppState.jobs = parsedJobs.map(pj => {
-      // Find hardcoded defaults for pipeline or questions if missing
-      const hardcodedDefault = pj.id === 'AKRO62EF45E26EA1' ? {
-        description: "We are seeking a detail-oriented Government Tender & Proposal Executive to manage and lead the preparation, review, and submission of bids, tenders, and proposals for public sector opportunities. Key duties include analyzing RFP guidelines, checking compliance matrices, and writing clear technical and operational responses.",
-        experienceBand: "Upto 2 Years",
-        roleName: "Government Tender & Proposal Executive",
-        cardName: "Government Tender & Proposal Executive..",
-        createdBy: "Devasri",
-        pipeline: { total: 3, resume: 0, screening: 2, functional: 1 },
-        questions: [
-          {
-            id: 'q-prop-1',
-            type: 'technical',
-            question: "Explain the process of drafting a government RFP response. What are the key compliance elements you verify before submission?",
-            difficulty: 'intermediate',
-            rubric: "Identifies compliance checklists, standard submission formats, and verification protocols.",
-            follow_ups: ["How do you handle late updates to tender guidelines?", "What tools do you use for tracking deadline milestones?"]
-          },
-          {
-            id: 'q-prop-2',
-            type: 'behavioral',
-            question: "Describe a time when you had to meet an extremely tight deadline for a critical proposal. How did you organize your tasks?",
-            difficulty: 'beginner',
-            rubric: "Mentions prioritization, time management, keeping key stakeholders aligned, and maintaining accuracy under pressure.",
-            follow_ups: ["Did you make any errors in that rush?", "What would you do differently next time?"]
-          },
-          {
-            id: 'q-prop-3',
-            type: 'situational',
-            question: "A key subject matter expert (SME) fails to deliver their input 2 hours before a tender submission deadline. How do you handle this?",
-            difficulty: 'advanced',
-            rubric: "Proposes logical mitigation strategies like escalation plans, using boilerplate content, or direct intervention to secure crucial technical details.",
-            follow_ups: ["How do you prevent this issue in advance?", "How do you communicate the emergency to leadership?"]
-          }
-        ]
-      } : pj.id === 'AKRO62EF45E26DF5' ? {
-        description: "We are hiring a Full Stack Developer to design, build, and support high-performance web applications. You will work with React on the frontend, Node.js and Express on the backend, and PostgreSQL for storage. Responsibilities include building responsive dashboards, optimizing latency, and ensuring data consistency across endpoints.",
-        experienceBand: "1-4 Years",
-        roleName: "Full Stack Developer",
-        cardName: "Full Stack Developer Hiring - Demo",
-        createdBy: "Devasri",
-        pipeline: { total: 1, resume: 0, screening: 0, functional: 1 },
-        questions: [
-          {
-            id: 'q-dev-1',
-            type: 'technical',
-            question: "Describe the differences between optimistic UI updates and pessimistic UI updates. When would you use each?",
-            difficulty: 'intermediate',
-            rubric: "Explains user experience vs data consistency, error handling, and rollback logic in state managers.",
-            follow_ups: ["How do you handle temporary network failures?", "Can you describe a scenario where optimistic updates fail badly?"]
-          },
-          {
-            id: 'q-dev-2',
-            type: 'behavioral',
-            question: "Tell me about a time you had a technical disagreement with a team lead or colleague. How was it resolved?",
-            difficulty: 'beginner',
-            rubric: "Highlights constructive communication, presenting data-backed arguments, testing hypotheses, and committing to the final team decision.",
-            follow_ups: ["What did you learn from their perspective?", "Did it affect your working relationship afterwards?"]
-          },
-          {
-            id: 'q-dev-3',
-            type: 'situational',
-            question: "We are experiencing a sudden spike in database read latency during peak hours. Walk me through your debugging steps.",
-            difficulty: 'advanced',
-            rubric: "Mentions slow query logs, connection pools, indexing, caching layers (Redis), replica scaling, and server utilization checks.",
-            follow_ups: ["How would you explain the downtime to a non-technical manager?", "What long-term safeguards would you set up?"]
-          }
-        ]
-      } : null;
-
-      const fallbackPipeline = hardcodedDefault ? hardcodedDefault.pipeline : { total: 0, resume: 0, screening: 0, functional: 0 };
-      const fallbackDesc = hardcodedDefault ? hardcodedDefault.description : "No job description provided.";
-      const fallbackQuestions = hardcodedDefault ? hardcodedDefault.questions : [];
+      // Preserve only persisted job data. Missing fields stay neutral instead
+      // of being backfilled from role-specific demo blueprints.
+      const fallbackPipeline = { total: 0, resume: 0, screening: 0, functional: 0 };
+      const fallbackDesc = "No job description provided.";
+      const fallbackQuestions = [];
       
       return {
         ...pj, // keep every saved field (resumeCriteria, scoringConfig, pipelineConfig, …)
         id: pj.id || generateJobId(),
-        roleName: pj.roleName || (hardcodedDefault ? hardcodedDefault.roleName : 'Untitled Role'),
-        cardName: pj.cardName || pj.roleName || (hardcodedDefault ? hardcodedDefault.cardName : 'Untitled Job'),
+        roleName: pj.roleName || 'Untitled Role',
+        cardName: pj.cardName || pj.roleName || 'Untitled Job',
         created: pj.created || 'Recently',
         status: pj.status || 'published',
         customJobId: pj.customJobId || '-',
-        experienceBand: pj.experienceBand || (hardcodedDefault ? hardcodedDefault.experienceBand : 'Upto 2 Years'),
-        createdBy: pj.createdBy || (hardcodedDefault ? hardcodedDefault.createdBy : (globalThis.IH_USER_NAME || 'You')),
+        experienceBand: pj.experienceBand || '',
+        createdBy: pj.createdBy || globalThis.IH_USER_NAME || 'You',
         description: pj.description || fallbackDesc,
         questions: pj.questions || fallbackQuestions,
         pipeline: pj.pipeline || fallbackPipeline
@@ -122,7 +55,7 @@ function loadStateFromLocalStorage() {
     });
   } catch (e) {
     console.error("Error loading jobs from localStorage", e);
-    // If corrupt, save fresh hardcoded defaults
+    // If corrupt, keep the in-memory seed state rather than inventing job data.
     saveStateToLocalStorage();
   }
 
@@ -283,20 +216,8 @@ Return ONLY valid JSON with this exact structure:
     "goodToHaveMinMatch": 1
   },
   "screeningParams": [
-    { "category": "Experience", "params": [
-      { "name": "Total Experience", "required": true, "flexibility": "", "preferredResponse": "specific requirement" },
-      { "name": "Relevant Experience", "required": true, "flexibility": "", "preferredResponse": "specific requirement" }
-    ]},
-    { "category": "Location", "params": [
-      { "name": "Current Location", "required": false, "flexibility": "", "preferredResponse": "Remote or flexible" },
-      { "name": "Ready to relocate", "required": false, "flexibility": "", "preferredResponse": "Flexible" }
-    ]},
-    { "category": "Compensation", "params": [
-      { "name": "Current CTC", "required": false, "flexibility": "", "preferredResponse": "Market rate" },
-      { "name": "Expected CTC", "required": false, "flexibility": "", "preferredResponse": "Competitive" }
-    ]},
-    { "category": "Availability", "params": [
-      { "name": "Notice Period", "required": true, "flexibility": "", "preferredResponse": "30 days or less" }
+    { "category": "A screening category explicitly stated in the JD", "params": [
+      { "name": "The stated requirement", "required": true, "flexibility": "Any flexibility stated in the JD or empty", "preferredResponse": "The value stated in the JD" }
     ]}
   ],
   "jdAnalysis": {
@@ -313,10 +234,10 @@ Return ONLY valid JSON with this exact structure:
   }
 }
 
-Tailor every field specifically to the role. Do not use generic placeholders.
+Tailor every field specifically to the role and use only evidence in the supplied description. Do not infer software or technology work from the word "engineer". If a screening category is not stated, omit it instead of inventing a preferred response. Do not use generic placeholders.
 Red flags are rare; most roles have 0-1. Never produce a red flag that is just the inverse of a must-have.`;
 
-  const questionsPrompt = `You are a senior technical interviewer. Given a job description, generate 5 high-quality interview questions.
+  const questionsPrompt = `You are a senior role-specific assessment designer. Given a job description, generate 5 high-quality interview questions for exactly that role.
 
 Return ONLY valid JSON with this exact structure:
 {
@@ -333,10 +254,12 @@ Return ONLY valid JSON with this exact structure:
 }
 
 Rules:
-- Generate exactly 5 questions: 2 technical, 2 behavioral, 1 situational
+- Generate exactly 5 questions with a mix appropriate to the work described. "technical" means role/domain expertise; it does not imply software engineering or coding.
+- Keep each main question focused on one idea and at most 26 words. Put extra probes in the follow_ups array; never paste a full responsibility sentence into the question field.
 - Vary difficulty: 1 beginner, 3 intermediate, 1 advanced
 - Each question must have exactly 2 follow-ups
 - Tailor every question specifically to the role described
+- Derive every competency, scenario, tool, standard, and rubric expectation from the supplied job description. Never assume software development, system design, coding, product management, or any other occupation unless the description explicitly requires it.
 - Use ids: q-gen-1 through q-gen-5`;
 
   const JD_ANALYSIS_LIMIT = 6000;
@@ -384,30 +307,26 @@ Rules:
   } else {
     job.jdAnalysis = auditJobDescriptionLocally(descriptionText);
     if (!job.resumeCriteria) {
+      const sourceCriteria = descriptionText.split(/\n+|[.;]\s+/)
+        .map((line) => line.replace(/^\s*[-*\d.)]+\s*/, '').trim())
+        .filter((line) => line.length >= 12 && line.length <= 180);
       job.resumeCriteria = {
-        mustHave: ["Relevant experience in this domain", "Excellent verbal and written communication", "Core technical competency"],
-        redFlags: ["No hands-on experience in the core function this role performs"],
-        goodToHave: ["Professional certifications", "Advanced degree or specialization"],
+        mustHave: sourceCriteria.slice(0, 3),
+        redFlags: [],
+        goodToHave: sourceCriteria.slice(3, 6),
         goodToHaveMinMatch: 1,
         source: 'offline'
       };
     }
     if (!job.screeningParams) {
-      job.screeningParams = [
-        { "category": "Experience", "params": [
-          { "name": "Total Experience", "required": true, "flexibility": "None", "preferredResponse": "Meets minimum years" }
-        ]},
-        { "category": "Availability", "params": [
-          { "name": "Notice Period", "required": true, "flexibility": "Flexible", "preferredResponse": "30 days or less" }
-        ]}
-      ];
+      job.screeningParams = [];
     }
   }
 
   if (questionsResult.status === 'fulfilled') {
     try {
       const parsed = parseAIJson(questionsResult.value);
-      if (parsed.questions && Array.isArray(parsed.questions)) {
+      if (parsed.questions && Array.isArray(parsed.questions) && parsed.questions.every((q) => isVoiceQuestionLength(q?.question))) {
         job.questions = parsed.questions;
         job.questionsSource = 'ai';
       } else {
@@ -543,7 +462,7 @@ function auditJobDescriptionLocally(jdText) {
     overallScore: clampPct(score),
     subScores,
     warnings,
-    marketContext: "Moderate talent supply. Most candidates with these technical keywords are actively sourced in the market.",
+    marketContext: "Talent-supply context requires current market data and is not estimated in offline mode.",
     recommendedOptimizations,
     source: 'offline'
   };
@@ -619,6 +538,7 @@ async function generateResumeCriteriaSuggestions(job) {
 {"mustHave":["..."],"redFlags":["..."],"goodToHave":["..."]}
 Rules:
 - 3-5 items per group, each a short specific phrase tailored to the role.
+- Use only requirements supported by the supplied job description. Never infer software engineering from the word "engineer"; return empty arrays when the source is too thin.
 - Do NOT repeat or paraphrase anything already listed.
 - Red flags: at most 1-2, and ONLY true deal-breakers; never restate or negate a must-have; prefer none.
 - No preamble, no commentary.`;

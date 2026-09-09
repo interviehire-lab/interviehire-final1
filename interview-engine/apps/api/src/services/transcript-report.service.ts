@@ -95,7 +95,7 @@ export async function generateTranscriptReport(sessionId: string) {
 
   const llm = await callDeepSeekJson<LlmReport>({
     systemInstruction: [
-      'You are a rigorous but fair technical interview evaluator.',
+      'You are a rigorous but fair job interview evaluator. Apply standards appropriate to the advertised role rather than assuming a software or technical role.',
       `You are scoring a candidate for: ${roleTitle}.`,
       'You are given the FULL interview transcript (the interviewer is an AI avatar; the candidate is the human).',
       'Judge ONLY on the transcript. Score the substance of the answers: correctness, depth, reasoning, relevant examples, and communication.',

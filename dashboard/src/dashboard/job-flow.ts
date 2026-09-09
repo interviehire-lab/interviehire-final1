@@ -33,11 +33,13 @@ const flowBlueprintGeneration = new Set();
 
 // Transient resume-criteria suggestion pop-up (one group at a time).
 let raSuggest = { group: null, loading: false, items: null };
-const RA_SUGGEST_FALLBACK = {
-  mustHave: ['Relevant domain experience', 'Proven track record in the core skill', 'Ownership of end-to-end delivery', 'Strong written and verbal communication'],
-  redFlags: ['No hands-on experience in the core function this role performs'],
-  goodToHave: ['Relevant professional certification', 'Experience at a comparable company', 'Exposure to adjacent tools or domains'],
-};
+function resumeSuggestionFallback(job, group) {
+  const criteria = job.resumeCriteria || {};
+  if (group === 'mustHave') return [...(criteria.mustHave || [])];
+  if (group === 'goodToHave') return [...(criteria.goodToHave || [])];
+  if (group === 'redFlags') return [...(criteria.redFlags || [])];
+  return [];
+}
 // Red flags must be real deal-breakers, not a restatement of a must-have. Drop any
 // red flag that (normalized) echoes a must-have, plus blanks and intra-list dupes.
 const _normRf = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -573,78 +575,23 @@ async function ensureJobFlowQuestions(job, panel) {
 }
 
 function getVerboseJobDescription(job) {
-  const role = job.roleName || 'This role';
-  // The company is the org that posted the JD — job.companyName (org from the
-  // backend), else the signed-in recruiter's org. Never the platform name.
+  const role = job.roleName || job.cardName || 'this role';
   const company = job.companyName || globalThis.IH_ORG_NAME || 'the company';
-  const normalizedRole = role.toLowerCase();
-  const consultingName = company.toLowerCase().includes('consulting') ? company : `${company} Consulting`;
-
-  if (normalizedRole.includes('government tender')) {
-    return {
-      overview: `${consultingName} is seeking a detail-oriented and proactive ${role} to support businesses in navigating and winning government tenders. The role involves identifying relevant tender opportunities, analyzing tender documents, preparing bid submissions, and ensuring compliance with government procurement processes. This position requires strong document handling skills and the ability to coordinate with internal teams to meet deadlines. The company specializes in assisting clients across various sectors with government procurement and tendering.`,
-      responsibilities: [
-        'Identify and track relevant government tenders from portals such as GeM, CPPP, and state procurement platforms.',
-        'Analyze tender documents to understand eligibility criteria, scope of work, submission requirements, and compliance checkpoints.',
-        'Assist in preparing technical, commercial, and financial bid documents with clear supporting evidence.',
-        'Coordinate with internal teams, partners, and subject matter experts to collect necessary documentation and information.',
-        'Ensure all tender submissions are compliant with guidelines and submitted before deadlines.',
-        'Maintain records of submitted tenders, documentation, clarifications, corrigenda, and follow-ups.',
-        'Conduct basic research on government departments, upcoming projects, procurement trends, and competitor activity.'
-      ],
-      requirements: [
-        'Strong attention to detail and ability to work with structured documents.',
-        'Good written and verbal communication skills.',
-        'Ability to understand and interpret tender documents, eligibility criteria, and submission formats.',
-        'Proficiency in MS Excel, Word, Google Workspace, and document collaboration tools.',
-        'Ability to manage multiple deadlines and work independently with minimal supervision.'
-      ],
-      about: `${consultingName} works closely with businesses to help them navigate and win government tenders across various sectors. The company focuses on identifying relevant opportunities, preparing strong proposals, and ensuring complete compliance with government procurement processes.`
-    };
-  }
-
-  if (normalizedRole.includes('full stack')) {
-    return {
-      overview: `${company} is hiring a ${role} to design, build, and maintain high-performance web applications across the frontend, backend, and database layers. The role involves translating product requirements into responsive interfaces, building reliable APIs, optimizing latency, and ensuring that data flows consistently across the system. This position is suited for someone who can move between React interfaces, Node.js services, and PostgreSQL-backed workflows while keeping maintainability and user experience in focus.`,
-      responsibilities: [
-        'Build responsive dashboards and application screens using React, modern JavaScript, and reusable UI patterns.',
-        'Develop backend services, API routes, and integration logic using Node.js and Express.',
-        'Design and maintain PostgreSQL schemas, queries, and data access patterns for reliable product workflows.',
-        'Optimize page performance, API latency, and data loading behavior across key user journeys.',
-        'Collaborate with product and design stakeholders to clarify requirements and ship polished features.',
-        'Debug production issues across the stack and add safeguards that prevent recurring defects.'
-      ],
-      requirements: [
-        'Hands-on experience with React, JavaScript, HTML, CSS, and component-based frontend development.',
-        'Working knowledge of Node.js, Express, REST APIs, and backend validation patterns.',
-        'Practical experience with PostgreSQL or another relational database.',
-        'Ability to reason about performance, state management, and data consistency.',
-        'Clear communication skills and comfort working across product, design, and engineering contexts.'
-      ],
-      about: `${company} builds modern hiring and workflow software for teams that need fast, reliable, and well-designed internal tools. The engineering culture values clear ownership, thoughtful implementation, and interfaces that help users complete complex tasks with less friction.`
-    };
-  }
-
-  const description = job.description && job.description !== 'No job description provided.'
-    ? job.description
-    : `${job.companyName || company} is hiring for ${role}. This role is responsible for owning day-to-day execution, coordinating with stakeholders, and delivering high-quality work against clear business goals.`;
+  const description = String(job.description || '').trim();
+  const clauses = description
+    .split(/\n+|[.;]\s+/)
+    .map((line) => line.replace(/^\s*[-*\d.)]+\s*/, '').trim())
+    .filter((line) => line.length >= 12 && line.length <= 240);
+  const criteria = job.resumeCriteria || {};
+  const requirements = [...(criteria.mustHave || []), ...(criteria.goodToHave || [])]
+    .map((item) => String(item).trim())
+    .filter(Boolean);
 
   return {
-    overview: description,
-    responsibilities: [
-      `Own core execution for the ${role} role from planning through delivery.`,
-      'Coordinate with internal stakeholders to gather context, clarify requirements, and resolve blockers.',
-      'Maintain clear documentation, status updates, and handoff notes for ongoing work.',
-      'Track deadlines, quality checkpoints, and follow-up actions across the workflow.',
-      'Identify process gaps and suggest practical improvements that reduce manual effort.'
-    ],
-    requirements: [
-      'Strong written and verbal communication skills.',
-      'Ability to manage multiple priorities with attention to detail.',
-      'Comfort working with documents, tools, and structured operational processes.',
-      'Ownership mindset with the ability to work independently and ask clear questions when needed.'
-    ],
-    about: `${job.companyName || company} works with teams that need reliable execution, clear communication, and practical problem solving across business-critical workflows.`
+    overview: description || `${company} is hiring for ${role}. Add or upload a job description to define the role's responsibilities and requirements.`,
+    responsibilities: clauses.length ? clauses.slice(0, 7) : [],
+    requirements: [...new Set(requirements)],
+    about: job.companyDescription || `This role is offered by ${company}.`,
   };
 }
 
@@ -1022,7 +969,7 @@ function renderResumeAnalysisFlowConfig(job, panel) {
       renderResumeAnalysisFlowConfig(job, panel);
       let items;
       try { items = (await generateResumeCriteriaSuggestions(job))[group] || []; }
-      catch { items = RA_SUGGEST_FALLBACK[group] || []; }
+      catch { items = resumeSuggestionFallback(job, group); }
       const have = new Set((job.resumeCriteria?.[group] || []).map(x => String(x).trim().toLowerCase()));
       items = items.map(x => String(x).trim()).filter(x => x && !have.has(x.toLowerCase()));
       raSuggest = { group, loading: false, items };

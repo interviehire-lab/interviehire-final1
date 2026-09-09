@@ -50,6 +50,110 @@ def _is_valid_guidance(guidance) -> bool:
     return isinstance(rubric, dict) and bool(rubric.get("requiredPoints"))
 
 
+def _parse_json_object(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    if not value or not isinstance(value, str):
+        return {}
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _dedupe_text(values) -> List[str]:
+    result = []
+    seen = set()
+    for value in values:
+        text = str(value).strip() if value is not None else ""
+        key = text.casefold()
+        if text and key not in seen:
+            seen.add(key)
+            result.append(text)
+    return result
+
+
+def _derive_job_criteria(job: Job) -> tuple[List[str], List[str]]:
+    """Build engine criteria only from the saved JD/blueprint.
+
+    The previous defaults (coding, system design) silently converted every job
+    into a software role. Functional topic names and explicit rubric pins are
+    authored selection criteria, while résumé must/good-to-haves are the direct
+    source of truth when present.
+    """
+    resume = _parse_json_object(job.resume_parameters)
+    functional = _parse_json_object(job.functional_parameters)
+
+    must_have = resume.get("must_have") or resume.get("mustHave") or []
+    good_to_have = resume.get("good_to_have") or resume.get("goodToHave") or []
+    primary = list(must_have) if isinstance(must_have, list) else []
+    secondary = list(good_to_have) if isinstance(good_to_have, list) else []
+
+    topics = functional.get("topics") or []
+    if isinstance(topics, list):
+        for topic in topics:
+            if not isinstance(topic, dict):
+                continue
+            if topic.get("name"):
+                primary.append(topic["name"])
+            for question in topic.get("questionsDetailed") or []:
+                if not isinstance(question, dict):
+                    continue
+                guidance = _parse_json_object(question.get("aiEvaluationGuidance"))
+                criterion = guidance.get("targetRequirement") or guidance.get("competency")
+                if criterion:
+                    primary.append(criterion)
+
+    return _dedupe_text(primary), _dedupe_text(secondary)
+
+
+def _word_count(value: str) -> int:
+    return len(str(value or "").strip().split())
+
+
+def _concise_requirement(value: str, max_words: int = 12) -> str:
+    import re
+
+    source = re.sub(r"\ball aspects of\b", "", str(value or ""), flags=re.IGNORECASE)
+    source = re.sub(r"\s+", " ", source).strip().rstrip(".;:")
+    parts = [part.strip() for part in source.split(",") if part.strip()]
+    selected = []
+    for part in parts:
+        candidate = ", ".join([*selected, part])
+        if selected and _word_count(candidate) > max_words:
+            break
+        selected.append(part)
+    focus = " ".join((", ".join(selected) or source).split()[:max_words])
+    focus = re.sub(r"\b(?:and|or|with|while|to|for|of|in|the)\s*$", "", focus, flags=re.IGNORECASE)
+    return focus.rstrip("., ") or "this role requirement"
+
+
+def _voice_question(requirement: str) -> str:
+    import re
+
+    focus = _concise_requirement(requirement)
+    action = re.match(
+        r"^(?:manage|oversee|ensure|lead|coordinate|develop|design|maintain|prepare|conduct|perform|deliver|implement|support|assess|plan|create|build|review|monitor|supervise)\b",
+        focus,
+        flags=re.IGNORECASE,
+    )
+    subject = f"a time you had to {focus[0].lower()}{focus[1:]}" if action else f"your experience with {focus}"
+    return f"Tell me about {subject}. What was the outcome?"
+
+
+def _voice_safe_question(text: str, guidance, topic_name: str) -> str:
+    if _word_count(text) <= 26:
+        return text
+    parsed = _parse_json_object(guidance)
+    if parsed.get("edited") is True:
+        return text
+    if not parsed:
+        return text
+    source = parsed.get("targetRequirement") or parsed.get("competency") or topic_name
+    return _voice_question(str(source)) if source else text
+
+
 def sync_applicant_to_ai(db: Session, applicant: Applicant) -> Optional[InterviewSession]:
     # Captured up front, not re-read in the except block below: after a failed
     # flush the session needs a rollback before any ORM attribute access works
@@ -107,19 +211,7 @@ def sync_applicant_to_ai(db: Session, applicant: Applicant) -> Optional[Intervie
         role_id = str(job.id)
         job_role = db.query(JobRole).filter(JobRole.id == role_id).first()
         
-        # Parse screening/functional criteria or use defaults
-        primary_criteria = ["coding proficiency", "problem solving"]
-        secondary_criteria = ["communication", "system design"]
-        
-        if job.functional_parameters:
-            try:
-                params = json.loads(job.functional_parameters)
-                if isinstance(params, list):
-                    primary_criteria = [str(p) for p in params][:4]
-                elif isinstance(params, dict):
-                    primary_criteria = [str(k) for k in params.keys()][:4]
-            except Exception:
-                pass
+        primary_criteria, secondary_criteria = _derive_job_criteria(job)
                 
         if not job_role:
             job_role = JobRole(
@@ -154,6 +246,7 @@ def sync_applicant_to_ai(db: Session, applicant: Applicant) -> Optional[Intervie
             job_role.title = job.role_name or job.title
             job_role.description = job.description or "No description provided"
             job_role.primaryCriteria = primary_criteria
+            job_role.secondaryCriteria = secondary_criteria
             db.commit()
 
         # 3. Sync Candidate
@@ -397,7 +490,11 @@ def sync_applicant_to_ai(db: Session, applicant: Applicant) -> Optional[Intervie
                                 } for q in topic.get("questions", [])]
 
                             for q_item in q_items:
-                                q_text = q_item["text"]
+                                q_text = _voice_safe_question(
+                                    q_item["text"],
+                                    q_item.get("guidance"),
+                                    topic_name,
+                                )
                                 if not q_text:
                                     continue
                                 q_diff = q_item["difficulty"]

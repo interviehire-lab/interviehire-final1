@@ -16,6 +16,7 @@ import {
   type EvaluationPoint,
   type ExpectedRedFlag,
   type InterviewContext,
+  type InterviewType,
   type ModelAnswerRubric,
   type QuestionType,
   type RedFlagSeverity,
@@ -73,6 +74,39 @@ const VALID_QUESTION_TYPES = new Set<QuestionType>([
 
 const VALID_DIFFICULTIES = new Set(['easy', 'medium', 'hard', 'custom']);
 
+function deriveInterviewType(questions: QuestionWithGuidance[]): InterviewType {
+  const types = new Set(
+    questions
+      .map((question) => normalizeQuestionType(parseEvaluationGuidance(question.aiEvaluationGuidance).questionType))
+      .map((questionType): InterviewType | null => {
+        if (questionType === 'technical_theory' || questionType === 'coding') return 'technical';
+        if (questionType === 'system_design') return 'system_design';
+        if (questionType === 'behavioral') return 'behavioral';
+        if (questionType === 'case_study') return 'case_study';
+        if (questionType === 'sales_roleplay') return 'sales';
+        if (questionType === 'hr_screening') return 'hr_screening';
+        return null;
+      })
+      .filter((value): value is InterviewType => value !== null),
+  );
+
+  if (types.size === 1) return [...types][0];
+  if (types.size > 1) return 'mixed';
+  return 'custom';
+}
+
+function deriveRoleLevel(title: string): string | undefined {
+  const normalized = title.toLowerCase();
+  const levels: Array<{ level: string; markers: string[] }> = [
+    { level: 'principal', markers: ['principal', 'staff', 'distinguished'] },
+    { level: 'lead', markers: ['lead', 'head of', 'director', 'vp', 'chief'] },
+    { level: 'senior', markers: ['senior', 'sr.', 'sr ', 'expert'] },
+    { level: 'mid', markers: ['mid', 'intermediate'] },
+    { level: 'junior', markers: ['junior', 'jr.', 'jr ', 'entry', 'associate', 'graduate', 'intern'] },
+  ];
+  return levels.find(({ markers }) => markers.some((marker) => normalized.includes(marker)))?.level;
+}
+
 export async function evaluateInterviewWithAviral(sessionId: string): Promise<any> {
   const session = await prisma.interviewSession.findUnique({
     where: { id: sessionId },
@@ -100,8 +134,8 @@ export async function evaluateInterviewWithAviral(sessionId: string): Promise<an
     candidateId: session.candidateId,
     companyId: session.companyId,
     roleTitle: session.jobRole.title,
-    roleLevel: 'junior',
-    interviewType: 'technical',
+    roleLevel: deriveRoleLevel(session.jobRole.title),
+    interviewType: deriveInterviewType(questions),
     mustHaveSkills: session.jobRole.primaryCriteria,
     niceToHaveSkills: session.jobRole.secondaryCriteria,
   };
@@ -255,7 +289,7 @@ async function evaluateSingleInput(
     try {
       const raw = await judge<ResponseEvaluation>({
         systemInstruction:
-          'You are a rigorous, fair technical interview evaluator. Return strict JSON exactly matching the requested ResponseEvaluation schema.',
+          'You are a rigorous, fair job interview evaluator. Use the supplied role, question, rubric, and interview type without assuming a software or technical role. Return strict JSON exactly matching the requested ResponseEvaluation schema.',
         prompt,
         maxOutputTokens: Number(process.env.DEEPSEEK_EVALUATION_MAX_TOKENS || 12000),
         temperature,
@@ -479,7 +513,7 @@ function normalizeQuestionType(questionType: QuestionType | undefined): Question
     return questionType;
   }
 
-  return questionType === undefined ? 'technical_theory' : 'general';
+  return 'general';
 }
 
 function normalizeDifficulty(

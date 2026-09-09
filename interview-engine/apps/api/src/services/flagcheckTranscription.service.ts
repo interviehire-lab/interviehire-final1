@@ -112,7 +112,7 @@ export async function analyzeAiToneWithLlm(
   const clipped = text.length > LLM_TEXT_CHAR_LIMIT ? text.slice(-LLM_TEXT_CHAR_LIMIT) : text;
 
   const systemInstruction = [
-    'You analyze a transcript of a candidate speaking aloud during a live technical interview.',
+    'You analyze a transcript of a candidate speaking aloud during a live job interview.',
     'Judge whether the candidate appears to be READING OR RECITING AN AI-GENERATED ANSWER rather than speaking spontaneously.',
     'Spontaneous speech has disfluencies (um, uh, restarts, self-corrections), informal and uneven phrasing,',
     'tangents, and concrete answer-specific or personal detail.',

@@ -16,6 +16,7 @@ import {
   generateFunctionalOutline, enrichQuestionRubric, generateScreeningQuestions, generateGapQuestion, generateScenarioVariant, generateDifficultyVariant,
   computeGenerationPlan, analyzeRequirements, pinBlueprintToRequirements, mergeBlueprintPreservingEdits,
   localFunctionalBlueprint, localScreeningQuestions, localGapQuestion, localScenarioVariant, localDifficultyVariant,
+  tightenGeneratedVoicePrompts,
   computeCoverage, computeCalibration, computeBandFit, rubricStrength, critiqueRubric, critiqueBlueprint, leakageRisk,
   createTopicSuggestion, suggestTopics, localTopicSuggestions,
   autofillOutlineNotes, runSheetMarkdown, normalizeInterviewStructure, topicMinutes,
@@ -78,7 +79,7 @@ function functionalOf(job) {
   if (!job.functionalParameters || !Array.isArray(job.functionalParameters.topics)) {
     job.functionalParameters = migrateLegacyQuestions(job.questions);
   }
-  return job.functionalParameters;
+  return tightenGeneratedVoicePrompts(job.functionalParameters);
 }
 function screeningOf(job) {
   if (!job.screeningBlueprint || !Array.isArray(job.screeningBlueprint.questions)) {
@@ -1091,10 +1092,8 @@ async function handleDifficultyRegen(job, qid, reRender, target) {
   soundEngine.playChime([523.25, 659.25, 783.99], 0.18, 0.07);
 }
 
-const GAP_TOPIC_NAME = 'Coverage gaps';
-
-// Draft a single question that closes one uncovered/thin must-have, append it to
-// a dedicated "Coverage gaps" topic, and jump to it. AI-first, local fallback.
+// Draft a single question that closes one uncovered/thin must-have and place it
+// under that requirement's own role-specific topic. AI-first, local fallback.
 async function handleDraftGap(job, requirement, reRender) {
   if (!requirement || studioUi.generating) return;
   studioUi.generating = true;
@@ -1113,8 +1112,9 @@ async function handleDraftGap(job, requirement, reRender) {
   q.edited = true; // recruiter-initiated → preserve on regenerate
 
   const fb = functionalOf(job);
-  let topic = fb.topics.find((t) => t.name === GAP_TOPIC_NAME);
-  if (!topic) { topic = createTopic({ name: GAP_TOPIC_NAME, type: 'Experiential' }); fb.topics.push(topic); }
+  const normalizedRequirement = String(requirement).trim().toLowerCase();
+  let topic = fb.topics.find((t) => String(t.name || '').trim().toLowerCase() === normalizedRequirement);
+  if (!topic) { topic = createTopic({ name: requirement, type: 'Experiential' }); fb.topics.push(topic); }
   topic.questions.push(q);
 
   studioUi.expandedTopicId = topic.id;

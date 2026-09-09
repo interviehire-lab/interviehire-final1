@@ -11,6 +11,7 @@ import path from 'node:path';
 import { processRecordingForSession, transcribeUploadedFile } from '../services/transcription.service.js';
 import { uploadRecordingToStorage } from '../services/recording-upload.service.js';
 import { handleCandidateTranscript } from '../services/interview-conversation.service.js';
+import { getEffectiveQuestions } from '../services/effective-questions.js';
 import {
   deadlineFor,
   hasResumeForRequirement,
@@ -437,7 +438,7 @@ export async function interviewRoutes(app: FastifyInstance) {
     if (s.accessControl === 'invited' && !session.candidate) {
       return reply.code(403).send({ error: 'This interview is open to invited candidates only.', code: 'ACCESS_INVITED_ONLY' });
     }
-    const firstQuestion = session.jobRole.questions[0]?.text ?? 'Tell me about your software engineering background.';
+    const firstQuestion = getEffectiveQuestions(session)[0].text;
     // continueFromMiddle: default on (resume). An explicit false starts fresh,
     // ignoring any prior transcript so a refresh restarts the interview.
     const resume = s.continueFromMiddle !== false;

@@ -13,12 +13,12 @@ import { escapeHTML } from './escape';
 import { soundEngine } from './sound';
 import { showPremiumToast } from './sourcing';
 import { isApiMode, apiCreateTestSession, ENGINE_WEB_URL } from './api';
+import { ensureFunctionalBlueprint } from './blueprint-engine';
 
 const PREVIEW_LIMIT = 5;
 
 function functionalStats(job) {
-  const topics = (job.functionalParameters && Array.isArray(job.functionalParameters.topics))
-    ? job.functionalParameters.topics : [];
+  const topics = ensureFunctionalBlueprint(job).topics || [];
   const questions = topics.flatMap((t) => Array.isArray(t.questions) ? t.questions : []);
   const minutes = questions.reduce((sum, q) => sum + (Number(q.estimatedMinutes) || 4), 0);
   return { topicCount: topics.length, questions, minutes };

@@ -8,8 +8,9 @@
 // where the session is loaded with
 //   jobRole: { include: { questions: { where: { isActive: true }, orderBy: { createdAt: 'asc' } } } }
 // so the "effective" questions are the role's active, authored questions. When a
-// role has no authored questions yet (e.g. the keyless demo session) we fall
-// back to a small built-in bank so an interview can still run end-to-end.
+// role has no authored questions yet, build a small role-derived fallback so an
+// interview can still run without silently turning every role into a software
+// engineering interview.
 
 type EffectiveQuestion = {
   id: string;
@@ -20,8 +21,55 @@ type EffectiveQuestion = {
   estimatedMinutes?: number;
 };
 
-// A rubric-shaped guidance blob (parsed by parseGuidance / parseEvaluationGuidance
-// in the consuming services). Kept intentionally generic for the fallback bank.
+const VOICE_QUESTION_MAX_WORDS = 26;
+
+function wordCount(value: string): number {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function conciseFocus(value: string, maxWords = 12): string {
+  const source = value.replace(/\ball aspects of\b/gi, '').replace(/\s+/g, ' ').replace(/[.;:]+$/, '').trim();
+  const parts = source.split(/,\s*/).filter(Boolean);
+  const selected: string[] = [];
+  for (const part of parts) {
+    const candidate = [...selected, part].join(', ');
+    if (selected.length && wordCount(candidate) > maxWords) break;
+    selected.push(part);
+  }
+  return (selected.join(', ') || source).split(/\s+/).slice(0, maxWords).join(' ')
+    .replace(/\b(?:and|or|with|while|to|for|of|in|the)\s*$/i, '').replace(/[,.]+$/, '').trim() || 'this role requirement';
+}
+
+function voiceQuestion(requirement: string): string {
+  const focus = conciseFocus(requirement);
+  const action = /^(?:manage|oversee|ensure|lead|coordinate|develop|design|maintain|prepare|conduct|perform|deliver|implement|support|assess|plan|create|build|review|monitor|supervise)\b/i.test(focus);
+  const subject = action ? `a time you had to ${focus[0].toLowerCase()}${focus.slice(1)}` : `your experience with ${focus}`;
+  return `Tell me about ${subject}. What was the outcome?`;
+}
+
+function voiceSafeAuthoredQuestions(questions: EffectiveQuestion[]): EffectiveQuestion[] {
+  let changed = false;
+  const safe = questions.map((question) => {
+    if (wordCount(question.text) <= VOICE_QUESTION_MAX_WORDS) return question;
+    try {
+      const guidance = JSON.parse(question.aiEvaluationGuidance || '{}') as Record<string, unknown>;
+      if (guidance.edited === true) return question;
+      const source = typeof guidance.targetRequirement === 'string' && guidance.targetRequirement.trim()
+        ? guidance.targetRequirement
+        : typeof guidance.competency === 'string' && guidance.competency.trim()
+          ? guidance.competency
+          : '';
+      if (!source) return question;
+      changed = true;
+      return { ...question, text: voiceQuestion(source) };
+    } catch {
+      return question;
+    }
+  });
+  return changed ? safe : questions;
+}
+
+// A rubric-shaped guidance blob parsed by the consuming services.
 function guidance(modelAnswer: string, points: string[], redFlags: string[] = []): string {
   return JSON.stringify({
     modelAnswer,
@@ -32,54 +80,65 @@ function guidance(modelAnswer: string, points: string[], redFlags: string[] = []
   });
 }
 
-const DEFAULT_QUESTION_BANK: EffectiveQuestion[] = [
-  {
-    id: 'default-q1',
-    text: 'Tell me about a time you handled a difficult situation at work — what was the context, and how did you navigate it?',
-    difficulty: 'EASY',
-    topicCategories: ['behavioural'],
-    estimatedMinutes: 4,
-    aiEvaluationGuidance: guidance(
-      'A clear situation, the specific actions the candidate took, and a concrete outcome (ideally STAR-structured).',
-      ['Describes a concrete situation', 'Explains their own actions, not just the team', 'States a measurable or clear outcome'],
-      ['Vague or hypothetical answer with no real example'],
-    ),
-  },
-  {
-    id: 'default-q2',
-    text: 'Walk me through a project you are most proud of. What was your specific contribution and the measurable outcome?',
-    difficulty: 'MEDIUM',
-    topicCategories: ['experience'],
-    estimatedMinutes: 5,
-    aiEvaluationGuidance: guidance(
-      'Specific ownership of a piece of work with a quantified result and reflection on impact.',
-      ['Identifies their specific contribution', 'Quantifies the outcome', 'Reflects on what made it successful'],
-      ['Takes credit for purely team-level work with no personal contribution'],
-    ),
-  },
-  {
-    id: 'default-q3',
-    text: 'Describe a disagreement you had with a teammate. How did you reach a resolution?',
-    difficulty: 'MEDIUM',
-    topicCategories: ['teamwork'],
-    estimatedMinutes: 4,
-    aiEvaluationGuidance: guidance(
-      'Shows active listening, separates the problem from the person, and reaches a constructive resolution.',
-      ['Listens to the other perspective', 'Focuses on the issue, not the person', 'Reaches a concrete resolution'],
-      ['Frames the disagreement as the other person always being wrong'],
-    ),
-  },
-];
+function roleDerivedFallback(session: unknown): EffectiveQuestion[] {
+  const role = (session as {
+    jobRole?: { title?: string; description?: string; requirements?: string; primaryCriteria?: string[]; secondaryCriteria?: string[] };
+  } | null)?.jobRole;
+  const title = role?.title?.trim() || 'this role';
+  const criteria = [...(role?.primaryCriteria ?? []), ...(role?.secondaryCriteria ?? [])]
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+  const focus = criteria.slice(0, 4);
+  const topicCategories = focus.length ? focus : [title];
+  const roleEvidence = [role?.description, role?.requirements, ...focus].filter(Boolean).join('; ');
+
+  return [
+    {
+      id: 'role-derived-q1',
+      text: `What experience has prepared you to succeed as ${title}? Please connect your answer to the role's main responsibilities.`,
+      difficulty: 'EASY',
+      topicCategories,
+      estimatedMinutes: 4,
+      aiEvaluationGuidance: guidance(
+        `Relevant evidence of experience against the advertised ${title} responsibilities: ${roleEvidence || title}.`,
+        ['Gives specific relevant experience', 'Connects that experience to the advertised role', 'Explains their own contribution'],
+      ),
+    },
+    {
+      id: 'role-derived-q2',
+      text: `Describe a challenging piece of work relevant to ${title}. How did you approach it, and what was the outcome?`,
+      difficulty: 'MEDIUM',
+      topicCategories,
+      estimatedMinutes: 5,
+      aiEvaluationGuidance: guidance(
+        `A concrete example relevant to ${title}, with a sound approach, clear personal contribution, and an evidenced outcome.`,
+        ['Describes a relevant challenge', 'Explains the approach and personal contribution', 'States a clear outcome'],
+      ),
+    },
+    {
+      id: 'role-derived-q3',
+      text: `Using the requirements for ${title}, how would you handle a realistic high-priority task in this role? Explain your decisions and how you would judge success.`,
+      difficulty: 'MEDIUM',
+      topicCategories,
+      estimatedMinutes: 5,
+      aiEvaluationGuidance: guidance(
+        `A role-appropriate approach grounded in these advertised requirements: ${roleEvidence || title}.`,
+        ['Uses the advertised requirements', 'Explains decisions and priorities', 'Defines a relevant measure of success'],
+      ),
+    },
+  ];
+}
 
 /**
  * Returns the questions in effect for an interview session: the role's active
- * authored questions, falling back to a built-in bank when none are authored.
+ * authored questions, falling back to questions derived from that role when none
+ * are authored.
  * `session` is the Prisma InterviewSession loaded with `jobRole.questions`.
  */
 export function getEffectiveQuestions(session: unknown): EffectiveQuestion[] {
   const roleQuestions = (session as { jobRole?: { questions?: EffectiveQuestion[] } } | null)?.jobRole?.questions;
   if (Array.isArray(roleQuestions) && roleQuestions.length > 0) {
-    return roleQuestions;
+    return voiceSafeAuthoredQuestions(roleQuestions);
   }
-  return DEFAULT_QUESTION_BANK;
+  return roleDerivedFallback(session);
 }

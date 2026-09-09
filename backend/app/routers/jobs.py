@@ -264,6 +264,73 @@ def _build_structured_description(ai_data: dict, fallback_text: str) -> str:
     return "\n\n".join(parts) if parts else fallback_text
 
 
+def _extract_job_title(file_text: str, filename: str) -> str:
+    """Extract a role label without guessing a profession or industry."""
+    import re
+
+    lines = [line.strip() for line in file_text.splitlines() if line.strip()]
+    labelled_title = re.compile(r"(?i)\b(?:job\s+title|role|position|title)\s*:\s*(.+)")
+    for line in lines[:20]:
+        match = labelled_title.search(line)
+        if match:
+            value = re.sub(r"[^\w\s\-()/&+]", "", match.group(1)).strip()
+            if 1 <= len(value.split()) <= 12:
+                return value
+
+    for line in lines[:5]:
+        value = re.sub(r"[^\w\s\-()/&+]", "", line).strip()
+        if 1 <= len(value.split()) <= 10:
+            return value
+
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    stem = re.sub(
+        r"(?i)\b(?:jd|job description|job|hiring|description|req|specification|spec)\b",
+        " ",
+        stem.replace("_", " ").replace("-", " "),
+    )
+    stem = " ".join(stem.split())
+    return stem or "Untitled role"
+
+
+def _empty_jd_extraction(file_text: str, filename: str) -> dict:
+    """Safe fallback when no configured model can extract the JD.
+
+    Empty authored fields are intentional: inventing a software blueprint for an
+    unrelated role is worse than asking the recruiter to review and author it.
+    """
+    role_name = _extract_job_title(file_text, filename)
+    return {
+        "role_name": role_name,
+        "card_name": role_name,
+        "experience_band": "",
+        "description": file_text,
+        "skills": "",
+        "screening_questions": [],
+        "functional_questions": [],
+        "resume_parameters": {"must_have": [], "red_flags": [], "good_to_have": []},
+        "screening_parameters": {},
+        "functional_parameters": {"topics": []},
+    }
+
+
+def _merge_jd_extraction(ai_data: dict, fallback: dict, file_text: str, file_path: str) -> dict:
+    """Normalize model output while keeping every fallback role-neutral."""
+    role_name = str(ai_data.get("role_name") or fallback["role_name"]).strip()
+    return {
+        "role_name": role_name,
+        "card_name": str(ai_data.get("card_name") or role_name).strip(),
+        "experience_band": str(ai_data.get("experience_band") or "").strip(),
+        "description": _build_structured_description(ai_data, file_text),
+        "skills": ai_data.get("skills") or "",
+        "screening_questions": ai_data.get("screening_questions") or [],
+        "functional_questions": ai_data.get("functional_questions") or [],
+        "resume_parameters": ai_data.get("resume_parameters") or fallback["resume_parameters"],
+        "screening_parameters": ai_data.get("screening_parameters") or fallback["screening_parameters"],
+        "functional_parameters": ai_data.get("functional_parameters") or fallback["functional_parameters"],
+        "file_path": file_path,
+    }
+
+
 # ─── CREATE JOB (file upload path) ───────────────────────────────────────────
 
 @router.post("/upload-jd")
@@ -321,16 +388,18 @@ def extract_jd(
     gemini_key = os.getenv("GEMINI_API_KEY")
     deepseek_key = os.getenv("DEEPSEEK_API_KEY")
 
-    prompt_schema_instructions = f"""
+    fallback = _empty_jd_extraction(file_text, file.filename)
+
+    prompt_schema_instructions = """
 You MUST extract and output a JSON object matching this EXACT format (no other text, markdown formatting, or explanations):
 {{
-  "role_name": "The official role title (e.g. Senior Frontend Engineer). For placement/university documents, extract the specific project/role title (e.g., 'Automation of Model Monitoring Developer' or 'Phy Systems Engineer').",
-  "card_name": "A short, visual card title for the board (e.g. Next.js Core Lead Developer)",
+  "role_name": "The official role title stated in the job description",
+  "card_name": "A concise display title grounded in the job description",
   "experience_band": "Choose one of these: 'Upto 2 Years', '1-4 Years', '3-6 Years', '5+ Years'",
   "job_overview": "A concise 2-3 sentence overview of the role and goals. Plain text only, no bullet points.",
   "key_responsibilities": ["Responsibility 1", "Responsibility 2", "Responsibility 3", "Responsibility 4", "Responsibility 5"],
   "requirements": ["Requirement 1", "Requirement 2", "Requirement 3", "Requirement 4", "Requirement 5"],
-  "skills": "Comma-separated key technical skills (e.g. React, Next.js, TypeScript, Python, Tableau)",
+  "skills": "Comma-separated skills explicitly stated or clearly required by this job description",
   "screening_questions": [
     "Recruiter screening question 1",
     "Recruiter screening question 2",
@@ -342,55 +411,56 @@ You MUST extract and output a JSON object matching this EXACT format (no other t
     "Technical/functional assessment question 3"
   ],
   "resume_parameters": {{
-     "must_have": ["Must-have requirement 1 (e.g. 3+ years experience with React)", "Must-have requirement 2", "Must-have requirement 3"],
-     "red_flags": ["Red flag 1 (e.g. Lacks JavaScript core understanding)", "Red flag 2", "Red flag 3"],
-     "good_to_have": ["Good-to-have skill 1 (e.g. Familiar with Webpack)", "Good-to-have skill 2", "Good-to-have skill 3"],
+     "must_have": ["Must-have requirement 1", "Must-have requirement 2", "Must-have requirement 3"],
+     "red_flags": ["Evidence-based red flag 1", "Evidence-based red flag 2", "Evidence-based red flag 3"],
+     "good_to_have": ["Good-to-have qualification 1", "Good-to-have qualification 2", "Good-to-have qualification 3"],
      "mustHave": ["Must-have requirement 1", "Must-have requirement 2", "Must-have requirement 3"],
      "redFlags": ["Red flag 1", "Red flag 2", "Red flag 3"],
      "goodToHave": ["Good-to-have skill 1", "Good-to-have skill 2", "Good-to-have skill 3"]
   }},
   "screening_parameters": {{
      "experience": [
-        {{"parameter": "Total Experience", "preferred_response": "5+ years", "required": true}},
-        {{"parameter": "Relevant Experience", "preferred_response": "3+ years", "required": true}}
+        {{"parameter": "Experience requirement from the JD", "preferred_response": "Value stated in the JD", "required": true}}
      ],
      "academic": [
-        {{"parameter": "Minimum CGPA", "preferred_response": "7.0 and above", "required": true}},
-        {{"parameter": "Eligible Branches", "preferred_response": "A3, A8, AA, A7", "required": true}}
+        {{"parameter": "Academic requirement from the JD", "preferred_response": "Value stated in the JD", "required": true}}
      ],
      "location": [
-        {{"parameter": "Current Location", "preferred_response": "Mumbai/Pune/Remote", "required": false}},
-        {{"parameter": "Ready to relocate", "preferred_response": "Yes", "required": true}}
+        {{"parameter": "Location requirement from the JD", "preferred_response": "Value stated in the JD", "required": false}}
      ],
      "compensation": [
-        {{"parameter": "Current CTC", "preferred_response": "Market competitive", "required": false}},
-        {{"parameter": "Expected CTC", "preferred_response": "Within budget", "required": false}},
-        {{"parameter": "Stipend", "preferred_response": "INR 45,000 / month", "required": true}}
+        {{"parameter": "Compensation requirement from the JD", "preferred_response": "Value stated in the JD", "required": false}}
      ]
   }},
   "functional_parameters": {{
      "topics": [
         {{
-           "name": "React Lifecycle & Render Optimization",
+           "name": "A competency explicitly required by the job description",
            "type": "Theoretical",
            "difficulty": "Medium",
            "questions": [
-              "Explain the difference between Server Components and Client Components.",
-              "How does useMemo prevent child re-renders?"
+              "A role-specific question grounded in the stated responsibilities",
+              "A role-specific question grounded in the stated requirements"
            ]
         }},
         {{
-           "name": "Frontend Systems Design",
+           "name": "A second competency explicitly required by the job description",
            "type": "Experiential",
            "difficulty": "Hard",
            "questions": [
-              "How would you design a frontend cache for high-frequency stock price feeds?",
-              "Describe your strategy for managing complex global state without causing unnecessary re-renders."
+              "A realistic scenario from this role's day-to-day work",
+              "A question that tests application of this competency"
            ]
         }}
      ]
   }}
 }}
+
+Every generated criterion, topic, and question must be traceable to the supplied
+job description or explicit user instructions. Never assume the role is in
+software, technology, product, or any other industry. Do not introduce coding,
+system design, APIs, databases, or software quality unless the source requires it.
+Use empty arrays when the source does not contain enough evidence.
 """
 
     if deepseek_key:
@@ -455,29 +525,7 @@ USER EXTRA INSTRUCTIONS / PROMPT:
                 text_response = res_data["choices"][0]["message"]["content"].strip()
                 ai_data = clean_and_parse_json(text_response)
                 
-                return {
-                    "role_name": ai_data.get("role_name", "Senior Software Engineer"),
-                    "card_name": ai_data.get("card_name", "Full Stack Core Architect"),
-                    "experience_band": ai_data.get("experience_band", "3-6 Years"),
-                    "description": _build_structured_description(ai_data, file_text),
-                    "skills": ai_data.get("skills", "Python, React"),
-                    "screening_questions": ai_data.get("screening_questions", []),
-                    "functional_questions": ai_data.get("functional_questions", []),
-                    "resume_parameters": ai_data.get("resume_parameters", {
-                        "must_have": [],
-                        "red_flags": [],
-                        "good_to_have": []
-                    }),
-                    "screening_parameters": ai_data.get("screening_parameters", {
-                        "experience": [],
-                        "location": [],
-                        "compensation": []
-                    }),
-                    "functional_parameters": ai_data.get("functional_parameters", {
-                        "topics": []
-                    }),
-                    "file_path": file_path
-                }
+                return _merge_jd_extraction(ai_data, fallback, file_text, file_path)
         except Exception as err:
             print(f"DeepSeek API failure, falling back: {err}")
 
@@ -544,29 +592,7 @@ USER EXTRA INSTRUCTIONS / PROMPT:
                 text_response = res_data["choices"][0]["message"]["content"].strip()
                 ai_data = clean_and_parse_json(text_response)
                 
-                return {
-                    "role_name": ai_data.get("role_name", "Senior Software Engineer"),
-                    "card_name": ai_data.get("card_name", "Full Stack Core Architect"),
-                    "experience_band": ai_data.get("experience_band", "3-6 Years"),
-                    "description": _build_structured_description(ai_data, file_text),
-                    "skills": ai_data.get("skills", "Python, React"),
-                    "screening_questions": ai_data.get("screening_questions", []),
-                    "functional_questions": ai_data.get("functional_questions", []),
-                    "resume_parameters": ai_data.get("resume_parameters", {
-                        "must_have": [],
-                        "red_flags": [],
-                        "good_to_have": []
-                    }),
-                    "screening_parameters": ai_data.get("screening_parameters", {
-                        "experience": [],
-                        "location": [],
-                        "compensation": []
-                    }),
-                    "functional_parameters": ai_data.get("functional_parameters", {
-                        "topics": []
-                    }),
-                    "file_path": file_path
-                }
+                return _merge_jd_extraction(ai_data, fallback, file_text, file_path)
         except Exception as err:
             print(f"Groq API failure, falling back: {err}")
 
@@ -632,29 +658,7 @@ USER EXTRA INSTRUCTIONS / PROMPT:
                 text_response = res_data["choices"][0]["message"]["content"].strip()
                 ai_data = clean_and_parse_json(text_response)
                 
-                return {
-                    "role_name": ai_data.get("role_name", "Senior Software Engineer"),
-                    "card_name": ai_data.get("card_name", "Full Stack Core Architect"),
-                    "experience_band": ai_data.get("experience_band", "3-6 Years"),
-                    "description": _build_structured_description(ai_data, file_text),
-                    "skills": ai_data.get("skills", "Python, React"),
-                    "screening_questions": ai_data.get("screening_questions", []),
-                    "functional_questions": ai_data.get("functional_questions", []),
-                    "resume_parameters": ai_data.get("resume_parameters", {
-                        "must_have": [],
-                        "red_flags": [],
-                        "good_to_have": []
-                    }),
-                    "screening_parameters": ai_data.get("screening_parameters", {
-                        "experience": [],
-                        "location": [],
-                        "compensation": []
-                    }),
-                    "functional_parameters": ai_data.get("functional_parameters", {
-                        "topics": []
-                    }),
-                    "file_path": file_path
-                }
+                return _merge_jd_extraction(ai_data, fallback, file_text, file_path)
         except Exception as err:
             print(f"Grok API failure, falling back: {err}")
 
@@ -718,580 +722,14 @@ USER EXTRA INSTRUCTIONS / PROMPT:
                 text_response = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
                 ai_data = clean_and_parse_json(text_response)
                 
-                return {
-                    "role_name": ai_data.get("role_name", "Senior Software Engineer"),
-                    "card_name": ai_data.get("card_name", "Full Stack Core Architect"),
-                    "experience_band": ai_data.get("experience_band", "3-6 Years"),
-                    "description": _build_structured_description(ai_data, file_text),
-                    "skills": ai_data.get("skills", "Python, React"),
-                    "screening_questions": ai_data.get("screening_questions", []),
-                    "functional_questions": ai_data.get("functional_questions", []),
-                    "resume_parameters": ai_data.get("resume_parameters", {
-                        "must_have": [],
-                        "red_flags": [],
-                        "good_to_have": []
-                    }),
-                    "screening_parameters": ai_data.get("screening_parameters", {
-                        "experience": [],
-                        "location": [],
-                        "compensation": []
-                    }),
-                    "functional_parameters": ai_data.get("functional_parameters", {
-                        "topics": []
-                    }),
-                    "file_path": file_path
-                }
+                return _merge_jd_extraction(ai_data, fallback, file_text, file_path)
         except Exception as err:
             print(f"Gemini API failure, falling back to heuristics: {err}")
 
-    # Analyze filename/prompt to customize the output
-    content_key = file.filename.lower()
-    prompt_key = prompt.lower() if prompt else ""
-    
-    # Parse the header of the PDF or clean the filename to get the job title
-    import os, re
-    
-    def extract_job_title_from_pdf_or_filename(text, filename):
-        # Clean filename first
-        base = os.path.splitext(filename)[0]
-        base_clean = base.replace("_", " ").replace("-", " ").strip()
-        base_clean = re.sub(r"\b(jd|job description|job|hiring|description|req|specification|spec|pdf|docx|txt)\b", "", base_clean, flags=re.IGNORECASE)
-        base_clean = " ".join(base_clean.split())
-        fallback_title = " ".join([w.capitalize() for w in base_clean.split()]) if base_clean else "Software Engineer"
-
-        # Try to extract from first line of text
-        if text:
-            # Clean up double spaces, newlines, etc.
-            lines = [l.strip() for l in text.split("\n") if l.strip()]
-            if not lines:
-                # Split by other dividers if it's a single line
-                lines = [l.strip() for l in re.split(r"[\r\n\t]+", text) if l.strip()]
-            
-            for line in lines[:3]:
-                # If the line is short, doesn't contain PDF formatting junk, and looks like a title
-                line_clean = re.sub(r"[^\w\s\-\&\/\+\.]", "", line).strip()
-                words = line_clean.split()
-                if 2 <= len(words) <= 8 and not any(w.lower() in ["%pdf", "obj", "endobj", "stream", "xref"] for w in words):
-                    return " ".join([w.capitalize() for w in words])
-        
-        return fallback_title
-
-    extracted_title = extract_job_title_from_pdf_or_filename(file_text, file.filename)
-    role_name = extracted_title
-    card_name = extracted_title
-    experience_band = "3-6 Years"
-    description = f"We are seeking a talented {role_name} to help build and maintain our high-performance applications, design robust APIs, and support our growing team."
-    skills = "Python, PostgreSQL, React, TypeScript, Docker, AWS"
-    
-    screening_questions = [
-        "Explain the difference between microservices and a monolithic architecture.",
-        "How do you handle race conditions and concurrency in a database-driven system?",
-        "Describe a challenging bug you debugged and how you resolved it."
-    ]
-    
-    functional_questions = [
-        "Design a rate-limiting middleware for an API that handles 10,000 requests per minute.",
-        "How would you optimize a slow database query with millions of records?",
-        "Implement a thread-safe singleton pattern in your language of choice."
-    ]
-    
-    # Determine domain match by prioritizing prompt_key, then content_key
-    domain = None
-    if "hr" in prompt_key or "people" in prompt_key or "recruiter" in prompt_key or "talent" in prompt_key or "recruitment" in prompt_key:
-        domain = "hr"
-    elif "data" in prompt_key or "ml" in prompt_key or "machine" in prompt_key:
-        domain = "ml"
-    elif "product" in prompt_key or "pm" in prompt_key or "manager" in prompt_key:
-        domain = "pm"
-    elif "frontend" in prompt_key or "next" in prompt_key or "react" in prompt_key or "ui" in prompt_key or "front" in prompt_key:
-        domain = "frontend"
-    elif "hr" in content_key or "people" in content_key or "recruiter" in content_key or "talent" in content_key or "recruitment" in content_key:
-        domain = "hr"
-    elif "data" in content_key or "ml" in content_key or "machine" in content_key:
-        domain = "ml"
-    elif "product" in content_key or "pm" in content_key or "manager" in content_key:
-        domain = "pm"
-    elif "frontend" in content_key or "next" in content_key or "react" in content_key or "ui" in content_key:
-        domain = "frontend"
-
-    # Heuristic matching: Data Scientist / ML
-    if domain == "ml":
-        role_name = "Senior Machine Learning Engineer"
-        card_name = "ML & Data Intelligence Lead"
-        experience_band = "5+ Years"
-        description = "We are looking for a Senior Machine Learning Engineer to lead the design and deployment of large-scale predictive models, fine-tune neural nets, and implement advanced analytics."
-        skills = "Python, PyTorch, TensorFlow, Pandas, Kubernetes, SQL"
-        screening_questions = [
-            "Explain the difference between bagging and boosting algorithms.",
-            "How do you handle class imbalance in classification datasets?",
-            "What strategies do you use to deploy model updates with zero downtime?"
-        ]
-        functional_questions = [
-            "How would you optimize the memory footprint of a custom DataLoader for massive image files?",
-            "Write a script to compute precision-recall curves for a multi-class model output.",
-            "Describe how you would design an automated feature engineering pipeline in Spark."
-        ]
-        
-    # Heuristic matching: Product Manager
-    elif domain == "pm":
-        role_name = "Lead Product Manager"
-        card_name = "Requisition & Growth Architect"
-        experience_band = "5+ Years"
-        description = "We are looking for a Lead Product Manager to own our core onboarding and requisition pipelines, define strategic feature roadmaps, and align cross-functional teams."
-        skills = "Product Strategy, Roadmap Design, Agile/Scrum, Mixpanel, SQL"
-        screening_questions = [
-            "How do you prioritize features when multiple stakeholders have conflicting demands?",
-            "Describe a product feature you launched that failed, and what you learned from it.",
-            "What metrics would you track to measure the success of an AI resume-screening assistant?"
-        ]
-        functional_questions = [
-            "Write a detailed PRD section for a new collaborative hiring dashboard feature.",
-            "How would you design a feedback loop to improve user retention by 15% within a quarter?",
-            "Sketch a wireframe flow for candidates completing a self-paced video interview."
-        ]
-        
-    # Heuristic matching: Frontend / React / Next.js
-    elif domain == "frontend":
-        role_name = "Senior Frontend Architect"
-        card_name = "Next.js Core Lead Developer"
-        experience_band = "5+ Years"
-        description = "We are seeking a Senior Frontend Architect to lead the implementation of our Next.js App Router applications, structure design systems, and maximize PageSpeed scores."
-        skills = "React, Next.js, TypeScript, HSL CSS, Tailwind, Webpack"
-        screening_questions = [
-            "Explain the rendering lifecycle difference between Next.js Server Components and Client Components.",
-            "How do you approach core web vitals optimization in a high-traffic Next.js site?",
-            "Describe your strategy for managing complex global state without causing unnecessary re-renders."
-        ]
-        functional_questions = [
-            "Implement a custom React hook that throttles inputs for search query API calls.",
-            "Explain the difference between JSI and bridge architecture, or how to resolve a rendering bottleneck.",
-            "Write a webpack/next.config override to split large utility libraries into separate chunks."
-        ]
-        
-    # Heuristic matching: HR / Recruiter / People Operations
-    elif domain == "hr":
-        role_name = "HR Operations Coordinator"
-        card_name = "Talent & Culture Coordinator"
-        experience_band = "1-4 Years"
-        description = "We are seeking an HR Operations Coordinator to manage candidate onboarding, handle organizational policy updates, and coordinate cross-functional hiring initiatives."
-        skills = "HR Operations, Onboarding, Recruiting, ATS Management, Communication"
-        screening_questions = [
-            "How do you handle confidential employee or candidate information?",
-            "Describe your experience coordinating interviews across multiple timezones.",
-            "How do you resolve conflicts between team members or hiring managers?"
-        ]
-        functional_questions = [
-            "Write a standard welcome email and onboarding checklist for a new engineering hire.",
-            "How would you structure a monthly metrics report on hiring time-to-fill for leadership?",
-            "Detail the steps you would take to resolve an incomplete candidate application."
-        ]
-        
-    # Prompt refinement overrides
-    if "senior" in prompt_key or "architect" in prompt_key or "lead" in prompt_key:
-        experience_band = "5+ Years"
-        role_name = "Lead " + role_name.replace("Senior ", "")
-        description = description.replace("seeking a", "seeking a Lead").replace("seeking", "seeking a Lead")
-        # Make questions more senior
-        screening_questions[0] = "What architectural patterns do you implement to ensure high scalability and disaster recovery?"
-        functional_questions[0] = "Design a system architecture to handle real-time sync across 100k connected websockets."
-        
-    if "junior" in prompt_key or "associate" in prompt_key:
-        experience_band = "Upto 2 Years"
-        role_name = "Junior " + role_name.replace("Senior ", "").replace("Lead ", "")
-        description = description.replace("seeking a", "seeking a Junior").replace("seeking", "seeking a Junior")
-        
-    if "mobile" in prompt_key or "react native" in prompt_key:
-        role_name = role_name.replace("Frontend", "Mobile").replace("Software", "Mobile")
-        card_name = "React Native Mobile Architect"
-        skills = "React Native, Swift, Kotlin, React, Redux, Fastlane"
-        description = "We are looking for a Mobile Architect to build native iOS/Android experiences using React Native, bridge native modules, and manage app store deployments."
-        screening_questions[1] = "How do you manage platform-specific styling and layout issues in React Native?"
-        functional_questions[1] = "Explain the rendering improvements of the new React Native Architecture (Fabric & TurboModules)."
-        
-    if "kubernetes" in prompt_key or "cloud" in prompt_key or "devops" in prompt_key:
-        skills += ", Kubernetes, Terraform, CI/CD, AWS EKS"
-        description += " Focus will include building Kubernetes deployments and designing infrastructure as code using Terraform."
-        screening_questions[2] = "Describe your experience setting up multi-stage CI/CD pipelines in Gitlab or Github Actions."
-        functional_questions[2] = "Write a Kubernetes deployment yaml with resource limits, liveness/readiness probes, and horizontal scaling."
-        
-    # Construct fallback parameters based on domain
-    if domain == "ml":
-        resume_parameters = {
-            "must_have": [
-                "Expertise in PyTorch, TensorFlow, or Pandas",
-                "Strong SQL and data modeling fundamentals",
-                "5+ years of ML engineering experience"
-            ],
-            "red_flags": [
-                "No experience with Python or ML libraries",
-                "Lacks statistics or linear algebra fundamentals",
-                "Only general software background without ML/Data focus"
-            ],
-            "good_to_have": [
-                "Experience with Kubernetes and Docker",
-                "Familiarity with NLP, Transformers, or GenAI",
-                "Contributions to open-source ML repositories"
-            ]
-        }
-        screening_parameters = {
-            "experience": [
-                {"parameter": "Total Experience", "preferred_response": "5+ Years", "required": True},
-                {"parameter": "Relevant Experience", "preferred_response": "3+ Years ML", "required": True}
-            ],
-            "location": [
-                {"parameter": "Current Location", "preferred_response": "Mumbai/Pune/Remote", "required": False},
-                {"parameter": "Ready to relocate", "preferred_response": "Yes", "required": True}
-            ],
-            "compensation": [
-                {"parameter": "Current CTC", "preferred_response": "Market competitive", "required": False},
-                {"parameter": "Expected CTC", "preferred_response": "Within budget", "required": False}
-            ]
-        }
-        functional_parameters = {
-            "topics": [
-                {
-                    "name": "Machine Learning Core Theory",
-                    "type": "Theoretical",
-                    "difficulty": "Medium",
-                    "questions": [
-                        screening_questions[0] if len(screening_questions) > 0 else "Explain bagging vs boosting.",
-                        screening_questions[1] if len(screening_questions) > 1 else "How do you handle class imbalance?"
-                    ]
-                },
-                {
-                    "name": "DataLoader & Feature Pipelines",
-                    "type": "Experiential",
-                    "difficulty": "Hard",
-                    "questions": [
-                        functional_questions[0] if len(functional_questions) > 0 else "Optimize memory of custom DataLoader.",
-                        functional_questions[1] if len(functional_questions) > 1 else "Compute precision-recall curves."
-                    ]
-                }
-            ]
-        }
-    elif domain == "pm":
-        resume_parameters = {
-            "must_have": [
-                "Product strategy and roadmap design",
-                "Experience running Agile/Scrum processes",
-                "5+ years product management experience"
-            ],
-            "red_flags": [
-                "No experience with analytics tools like Mixpanel or Amplitude",
-                "Lacks leadership or stakeholder management skills",
-                "Only engineering experience without product ownership"
-            ],
-            "good_to_have": [
-                "Experience scaling B2B SaaS applications",
-                "Background in UI/UX wireframing",
-                "Technical background or engineering degree"
-            ]
-        }
-        screening_parameters = {
-            "experience": [
-                {"parameter": "Total Experience", "preferred_response": "5+ Years", "required": True},
-                {"parameter": "Relevant Experience", "preferred_response": "3+ Years PM", "required": True}
-            ],
-            "location": [
-                {"parameter": "Current Location", "preferred_response": "Mumbai/Pune/Remote", "required": False},
-                {"parameter": "Ready to relocate", "preferred_response": "Yes", "required": True}
-            ],
-            "compensation": [
-                {"parameter": "Current CTC", "preferred_response": "Market competitive", "required": False},
-                {"parameter": "Expected CTC", "preferred_response": "Within budget", "required": False}
-            ]
-        }
-        functional_parameters = {
-            "topics": [
-                {
-                    "name": "Product Strategy & Metrics",
-                    "type": "Theoretical",
-                    "difficulty": "Medium",
-                    "questions": [
-                        screening_questions[0] if len(screening_questions) > 0 else "How do you prioritize features?",
-                        screening_questions[1] if len(screening_questions) > 1 else "Describe a feature that failed."
-                    ]
-                },
-                {
-                    "name": "PRD & Wireframe Scenarios",
-                    "type": "Experiential",
-                    "difficulty": "Hard",
-                    "questions": [
-                        functional_questions[0] if len(functional_questions) > 0 else "Write a detailed PRD section.",
-                        functional_questions[1] if len(functional_questions) > 1 else "How would you design a feedback loop?"
-                    ]
-                }
-            ]
-        }
-    elif domain == "hr":
-        resume_parameters = {
-            "must_have": [
-                "HR Operations and Policy Management",
-                "Recruiting and ATS tracking expertise",
-                "Excellent interpersonal communication"
-            ],
-            "red_flags": [
-                "No experience with confidentiality guidelines",
-                "Lacks structured organization skills",
-                "Unable to manage multi-timezone scheduling"
-            ],
-            "good_to_have": [
-                "Familiarity with labor laws and compliance regulations",
-                "Experience with HRIS software tools",
-                "Background in talent acquisition and onboarding"
-            ]
-        }
-        screening_parameters = {
-            "experience": [
-                {"parameter": "Total Experience", "preferred_response": "2+ Years", "required": True},
-                {"parameter": "Relevant Experience", "preferred_response": "1+ Years HR", "required": True}
-            ],
-            "location": [
-                {"parameter": "Current Location", "preferred_response": "Mumbai/Pune/Remote", "required": False},
-                {"parameter": "Ready to relocate", "preferred_response": "Yes", "required": True}
-            ],
-            "compensation": [
-                {"parameter": "Current CTC", "preferred_response": "Market competitive", "required": False},
-                {"parameter": "Expected CTC", "preferred_response": "Within budget", "required": False}
-            ]
-        }
-        functional_parameters = {
-            "topics": [
-                {
-                    "name": "Employee Relations & Scheduling",
-                    "type": "Theoretical",
-                    "difficulty": "Medium",
-                    "questions": [
-                        screening_questions[0] if len(screening_questions) > 0 else "How do you handle confidential info?",
-                        screening_questions[1] if len(screening_questions) > 1 else "How do you resolve conflicts?"
-                    ]
-                },
-                {
-                    "name": "Onboarding & HR metrics reports",
-                    "type": "Experiential",
-                    "difficulty": "Medium",
-                    "questions": [
-                        functional_questions[0] if len(functional_questions) > 0 else "Write standard welcome email.",
-                        functional_questions[1] if len(functional_questions) > 1 else "Structure monthly metrics report."
-                    ]
-                }
-            ]
-        }
-    elif domain == "frontend":
-        resume_parameters = {
-            "must_have": [
-                "Expertise in React and Next.js App Router",
-                "Proficiency in TypeScript and HSL/Tailwind CSS",
-                "5+ years frontend architect experience"
-            ],
-            "red_flags": [
-                "Lacks rendering lifecycle understanding",
-                "No core web vitals optimization experience",
-                "Only general HTML/CSS experience without JS frameworks"
-            ],
-            "good_to_have": [
-                "Familiar with Webpack and next.config overrides",
-                "Experience setting up global state machines",
-                "Contributions to design system implementations"
-            ]
-        }
-        screening_parameters = {
-            "experience": [
-                {"parameter": "Total Experience", "preferred_response": "5+ Years", "required": True},
-                {"parameter": "Relevant Experience", "preferred_response": "3+ Years Frontend", "required": True}
-            ],
-            "location": [
-                {"parameter": "Current Location", "preferred_response": "Mumbai/Pune/Remote", "required": False},
-                {"parameter": "Ready to relocate", "preferred_response": "Yes", "required": True}
-            ],
-            "compensation": [
-                {"parameter": "Current CTC", "preferred_response": "Market competitive", "required": False},
-                {"parameter": "Expected CTC", "preferred_response": "Within budget", "required": False}
-            ]
-        }
-        functional_parameters = {
-            "topics": [
-                {
-                    "name": "React Hooks & Lifecycle Optimizations",
-                    "type": "Theoretical",
-                    "difficulty": "Medium",
-                    "questions": [
-                        screening_questions[0] if len(screening_questions) > 0 else "Explain Server Components vs Client Components.",
-                        screening_questions[1] if len(screening_questions) > 1 else "How do you approach Core Web Vitals optimization?"
-                    ]
-                },
-                {
-                    "name": "Performance & Custom Webpack Overrides",
-                    "type": "Experiential",
-                    "difficulty": "Hard",
-                    "questions": [
-                        functional_questions[0] if len(functional_questions) > 0 else "Implement custom search query React hook.",
-                        functional_questions[1] if len(functional_questions) > 1 else "Explain JSI vs bridge architecture."
-                    ]
-                }
-            ]
-        }
-    else:  # General
-        import re
-        guessed = ""
-        
-        # Check if BITS Pilani or similar university placement sheet
-        if "birla institute of technology" in file_text.lower() or "practice school" in file_text.lower():
-            # Search for Project X Title: ...
-            project_match = re.search(r'(?i)Project\s+\d+\s+Title\s*:\s*([^.\n\r]+)', file_text)
-            if project_match:
-                guessed = project_match.group(1).strip()
-            else:
-                # Look for role after Job Description for Software Roles or similar
-                role_match = re.search(r'(?i)Job\s+Description\s+for\s+Software\s+Roles\s*[\r\n]+\s*([^.\r\n]+)', file_text)
-                if role_match:
-                    guessed = role_match.group(1).strip()
-                else:
-                    company_match = re.search(r'(?i)at\s+([^,\r\n]+)', file_text)
-                    if company_match:
-                        guessed = "Software Intern at " + company_match.group(1).strip()
-        
-        if not guessed:
-            # Try to parse from description text first
-            lines = [line.strip() for line in file_text.split("\n") if line.strip()]
-            for line in lines[:15]:
-                match = re.search(r'(?i)\b(job\s+title|role|position|title)\s*:\s*(.+)', line)
-                if match:
-                    val = match.group(2).strip()
-                    val = re.sub(r'[^\w\s\-\(\)\&]', '', val).strip()
-                    if val and len(val) < 60:
-                        guessed = val
-                        break
-        
-        if not guessed:
-            # Look for We are looking/seeking a ... pattern
-            match = re.search(r'(?i)\b(looking\s+for\s+a|seeking\s+a|hiring\s+a|hiring\s+for\s+a)\s+([^.\n,]+)', file_text)
-            if match:
-                val = match.group(2).strip()
-                val = re.split(r'(?i)\b(to|who|with|at|for)\b', val)[0].strip()
-                val = re.sub(r'[^\w\s\-\(\)\&]', '', val).strip()
-                if val and len(val) < 60:
-                    guessed = val
-                    
-        if not guessed:
-            # Look for fallback to filename
-            guessed = file.filename
-            guessed = re.sub(r"\.[^.]+$", "", guessed)
-            guessed = re.sub(r"[_\-.]", " ", guessed)
-            guessed = re.sub(r"(?i)\b(resume|cv|jd|job description|recruitment|profile|hiring)\b", "", guessed)
-            guessed = guessed.strip()
-            
-        if guessed:
-            role_name = " ".join([w.capitalize() for w in guessed.split()])
-            card_name = role_name
-        else:
-            role_name = "Senior Software Engineer"
-            card_name = "Full Stack Core Architect"
-
-        resume_parameters = {
-            "must_have": [
-                "Proficiency in Python and PostgreSQL",
-                "Strong API and server-side architecture background",
-                "3+ years software engineering experience"
-            ],
-            "red_flags": [
-                "No experience with docker or containers",
-                "Lacks database optimization skills",
-                "Unable to write asynchronous code"
-            ],
-            "good_to_have": [
-                "Familiarity with AWS cloud solutions",
-                "Experience with testing frameworks (pytest)",
-                "Contributions to microservice infrastructures"
-            ],
-            "mustHave": [
-                "Proficiency in Python and PostgreSQL",
-                "Strong API and server-side architecture background",
-                "3+ years software engineering experience"
-            ],
-            "redFlags": [
-                "No experience with docker or containers",
-                "Lacks database optimization skills",
-                "Unable to write asynchronous code"
-            ],
-            "goodToHave": [
-                "Familiarity with AWS cloud solutions",
-                "Experience with testing frameworks (pytest)",
-                "Contributions to microservice infrastructures"
-            ]
-        }
-
-        # Extract CGPA Cutoff from text if present
-        cgpa_cutoff = "7.0 and above"
-        cgpa_match = re.search(r'(?i)CGPA\s+cutoff\s*:\s*([^.\r\n]+)', file_text)
-        if cgpa_match:
-            cgpa_cutoff = cgpa_match.group(1).strip()
-            
-        # Extract Stipend from text if present
-        stipend_val = "INR 45,000 / month"
-        stipend_match = re.search(r'(?i)Stipend\s+(?:per\s+month\s+)?\(INR\)\s*:\s*([^.\r\n]+)', file_text)
-        if stipend_match:
-            stipend_val = "INR " + stipend_match.group(1).strip() + " / month"
-
-        screening_parameters = {
-            "experience": [
-                {"parameter": "Total Experience", "preferred_response": "3+ Years", "required": True},
-                {"parameter": "Relevant Experience", "preferred_response": "2+ Years API", "required": True}
-            ],
-            "academic": [
-                {"parameter": "Minimum CGPA", "preferred_response": cgpa_cutoff, "required": True},
-                {"parameter": "Eligible Branches", "preferred_response": "A3, A8, AA, A7", "required": True}
-            ],
-            "location": [
-                {"parameter": "Current Location", "preferred_response": "Mumbai/Pune/Remote", "required": False},
-                {"parameter": "Ready to relocate", "preferred_response": "Yes", "required": True}
-            ],
-            "compensation": [
-                {"parameter": "Current CTC", "preferred_response": "Market competitive", "required": False},
-                {"parameter": "Expected CTC", "preferred_response": "Within budget", "required": False},
-                {"parameter": "Stipend", "preferred_response": stipend_val, "required": True}
-            ]
-        }
-        functional_parameters = {
-            "topics": [
-                {
-                    "name": "API Middleware & Optimization",
-                    "type": "Theoretical",
-                    "difficulty": "Medium",
-                    "questions": [
-                        screening_questions[0] if len(screening_questions) > 0 else "Explain microservices vs monolith.",
-                        screening_questions[1] if len(screening_questions) > 1 else "How do you handle race conditions?"
-                    ]
-                },
-                {
-                    "name": "Database Queries & Threads",
-                    "type": "Experiential",
-                    "difficulty": "Hard",
-                    "questions": [
-                        functional_questions[0] if len(functional_questions) > 0 else "Design a rate-limiting middleware.",
-                        functional_questions[1] if len(functional_questions) > 1 else "Optimize a slow database query."
-                    ]
-                }
-            ]
-        }
-
-    # Add simulated processing delay (1.2 seconds) for UX feel
-    time.sleep(1.2)
-    
-    return {
-        "role_name": role_name,
-        "card_name": card_name,
-        "experience_band": experience_band,
-        "description": file_text,
-        "skills": skills,
-        "screening_questions": screening_questions,
-        "functional_questions": functional_questions,
-        "resume_parameters": resume_parameters,
-        "screening_parameters": screening_parameters,
-        "functional_parameters": functional_parameters,
-        "file_path": file_path
-    }
-
+    # If every configured provider failed (or none is configured), return only
+    # source-derived metadata. Do not fabricate a role-specific blueprint.
+    fallback["file_path"] = file_path
+    return fallback
 
 # ─── JOB DETAIL ──────────────────────────────────────────────────────────────
 

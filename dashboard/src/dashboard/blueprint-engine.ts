@@ -54,6 +54,67 @@ const dedupeReqs = (list) => {
   return out;
 };
 
+const VOICE_QUESTION_MAX_WORDS = 26;
+const wordCount = (value) => clean(value).split(/\s+/).filter(Boolean).length;
+
+// Turn a long JD responsibility into one speakable focus without inventing a
+// different competency. Comma-delimited lists are kept only while the spoken
+// focus stays short; the full source remains in targetRequirement and rubrics.
+function conciseRequirement(requirement, maxWords = 12) {
+  const source = clean(requirement)
+    .replace(/^(?:responsibilities|requirements|qualifications|skills)\s*:?\s*/i, '')
+    .replace(/\ball aspects of\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[.;:]+$/, '')
+    .trim();
+  if (!source) return 'this requirement';
+
+  const parts = source.split(/,\s*/).filter(Boolean);
+  const selected = [];
+  for (const part of parts) {
+    const candidate = [...selected, part].join(', ');
+    if (selected.length && wordCount(candidate) > maxWords) break;
+    selected.push(part);
+  }
+  let focus = (selected.join(', ') || source).split(/\s+/).slice(0, maxWords).join(' ');
+  focus = focus.replace(/\b(?:and|or|with|while|to|for|of|in|the)\s*$/i, '').replace(/[,.]+$/, '').trim();
+  return focus || 'this requirement';
+}
+
+function voiceQuestionForRequirement(requirement) {
+  const focus = conciseRequirement(requirement);
+  const startsWithAction = /^(?:manage|oversee|ensure|lead|coordinate|develop|design|maintain|prepare|conduct|perform|deliver|implement|support|assess|plan|create|build|review|monitor|supervise)\b/i.test(focus);
+  const subject = startsWithAction
+    ? `a time you had to ${focus[0].toLowerCase()}${focus.slice(1)}`
+    : `your experience with ${focus}`;
+  return `Tell me about ${subject}. What was the outcome?`;
+}
+
+function voiceSafeGeneratedQuestion(question, source) {
+  if (!question.edited && wordCount(question.prompt) > VOICE_QUESTION_MAX_WORDS) {
+    question.prompt = voiceQuestionForRequirement(source || question.competency || question.targetRequirement);
+  }
+  return question;
+}
+
+export function tightenGeneratedVoicePrompts(functionalBlueprint) {
+  arr(functionalBlueprint?.topics).forEach((topic) => {
+    arr(topic.questions).forEach((question) => {
+      if (question.edited || wordCount(question.prompt) <= VOICE_QUESTION_MAX_WORDS) return;
+      const source = clean(question.targetRequirement) || clean(question.competency);
+      if (!source) return;
+      // Only rewrite the known generated-template failure mode: a long source
+      // requirement was pasted directly into an otherwise unedited question.
+      const normalizedPrompt = normReq(question.prompt);
+      const normalizedSource = normReq(source);
+      if (normalizedSource && normalizedPrompt.includes(normalizedSource)) {
+        question.prompt = voiceQuestionForRequirement(source);
+      }
+    });
+  });
+  return functionalBlueprint;
+}
+
 // ── Factories ──────────────────────────────────────────────────────────────
 export function createRubricPoint(description = '', weight = 2, keywords = [], opts: any = {}) {
   const point: any = { id: snakeId(description, uid('pt')), description: clean(description), keywords: arr(keywords).map((k) => clean(k)).filter(Boolean), weight: clampWeight(weight) };
@@ -321,7 +382,9 @@ export function migrateLegacyQuestions(legacyQuestions) {
 // Returns the functional blueprint for a job, migrating legacy data on first
 // read. Does not persist — the caller owns saveStateToLocalStorage.
 export function ensureFunctionalBlueprint(job) {
-  if (job.functionalParameters && Array.isArray(job.functionalParameters.topics)) return job.functionalParameters;
+  if (job.functionalParameters && Array.isArray(job.functionalParameters.topics)) {
+    return tightenGeneratedVoicePrompts(job.functionalParameters);
+  }
   return migrateLegacyQuestions(job.questions);
 }
 
@@ -370,15 +433,16 @@ function buildOutlineMessages(job: any, opts: any = {}) {
   const seedBlock = seed.length
     ? `\n\nUSE THESE TOPIC AREAS (the recruiter selected them) — one topic each, keep these names:\n${seed.map((n, i) => `${i + 1}. ${n}`).join('\n')}`
     : '';
-  const system = `You are a senior interviewer and assessment designer. Author the OUTLINE of a FUNCTIONAL (deep, role-specific) interview an AI avatar will conduct by VOICE.
+  const system = `You are a domain-neutral senior interviewer and assessment designer. Author the OUTLINE of a FUNCTIONAL (deep, role-specific) interview an AI avatar will conduct by VOICE.
 
 Return ONLY JSON (no markdown), shape:
 {"topics":[{"name":"...","type":"Theoretical|Experiential","difficulty":"Easy|Medium|Hard","questions":[{"prompt":"...","questionType":"${QUESTION_TYPES.join('|')}","difficulty":"Easy|Medium|Hard","estimatedMinutes":3-6,"competency":"which capability this tests","targetRequirement":"the exact required competency this maps to, or empty"}]}]}
 
 Rules:
+- Ground every topic, competency, scenario, and question in the supplied JD or recruiter-selected requirements. Never infer software engineering from the word "engineer"; introduce coding, system design, APIs, or software quality only when explicitly supported by the source.
 - Size the whole interview to ~${targetMinutes} minutes: choose how many topics${seed.length ? ' (one per area below)' : ` (around ${topicCount})`} and how many questions each so the SUM of every question's estimatedMinutes is close to but does NOT exceed ${targetMinutes}. Every required competency listed below MUST be tested within that budget; add depth questions only if minutes remain.
 - targetRequirement: copy the matching competency VERBATIM from the numbered list; use "" only for an extra depth question that maps to none.
-- prompt: ONE idea, conversational, speakable aloud — no compound multi-part questions; prefer an applied scenario over a definition.
+- prompt: ONE idea, conversational, speakable aloud, and at most ${VOICE_QUESTION_MAX_WORDS} words. Never paste a full responsibility or requirement into the question. Ask one main question; the voice agent can probe details as follow-ups.
 - OUTLINE ONLY — do NOT include model answers or rubrics here.
 - No preamble, no trailing commentary.${seedBlock}${reqBlock}`;
   return [{ role: 'system', content: system }, { role: 'user', content: `Outline the functional interview for:\n\n${jdContext(job)}` }];
@@ -386,7 +450,7 @@ Rules:
 
 function buildEnrichMessages(job, q, topicName) {
   const tier = ENRICH_BY_DIFFICULTY[q.difficulty] || ENRICH_BY_DIFFICULTY.Medium;
-  const system = `You write the grading rubric an AI evaluator uses to score ONE spoken interview answer. Be concrete and discriminating — the keywords and partialCredit must let an evaluator tell a real answer from a bluffed one.
+  const system = `You write the grading rubric an AI evaluator uses to score ONE spoken interview answer. Be concrete and discriminating — the keywords and partialCredit must let an evaluator tell a real answer from a bluffed one. Use only the supplied role, topic, question, and JD context; do not import expectations from another profession.
 
 Return ONLY JSON (no markdown), shape:
 {"modelAnswer":"what a strong answer covers",${RUBRIC_SHAPE},"followUpIntent":"when/how the avatar should probe deeper"}
@@ -412,7 +476,7 @@ Return ONLY JSON (no markdown), shape:
 {"questions":[{"prompt":"...","questionType":"hr_screening","difficulty":"Easy","competency":"what this confirms","modelAnswer":"what an acceptable answer sounds like","rubric":{"requiredPoints":[{"description":"what an acceptable answer must convey","keywords":["..."],"weight":2}],"redFlags":[{"description":"a disqualifying answer","severity":"medium"}]},"followUpIntent":"what to clarify if the answer is vague"}]}
 
 Rules:
-- Exactly ${count} questions, short and warm, speakable aloud.
+- Exactly ${count} questions, short and warm, speakable aloud, and at most ${VOICE_QUESTION_MAX_WORDS} words each.
 - Cover background/motivation and the logistics the role cares about${categories.length ? `: ${categories.join(', ')}` : ''}.
 - Each question carries a LIGHT rubric: 1-2 requiredPoints (what an acceptable answer conveys, with lowercase keywords) + 0-1 redFlag, so screening answers are scored, not pass/fail.
 - No technical depth — that is the functional round's job.`;
@@ -457,13 +521,14 @@ function buildTopicSuggestionMessages(job, requirements = []) {
   const reqBlock = reqs.length
     ? `\n\nWeave these required competencies across the topics:\n${reqs.map((r, i) => `${i + 1}. ${r}`).join('\n')}`
     : '';
-  const system = `You are a senior interviewer planning a FUNCTIONAL interview. Propose the TOPIC AREAS worth probing for this role, each with one short interviewer-facing rationale.
+  const system = `You are a domain-neutral senior interviewer planning a FUNCTIONAL interview. Propose the TOPIC AREAS worth probing for this role, each with one short interviewer-facing rationale.
 
 Return ONLY JSON (no markdown), shape:
 {"suggestedTopics":[{"name":"short topic name","type":"Theoretical|Experiential","difficulty":"Easy|Medium|Hard","rationale":"1 sentence: what a strong vs weak answer in this area reveals about the candidate"}]}
 
 Rules:
-- 4-6 distinct, non-overlapping topics, ordered foundational → advanced.
+- Every topic must be traceable to the supplied JD or required competencies. Never infer software engineering from the word "engineer" or add coding/system-design topics unless explicitly required.
+- 4-6 distinct, non-overlapping topics, ordered foundational → advanced; each name is a concise capability label, not a pasted responsibility sentence.
 - rationale is for the RECRUITER, not the candidate — why this area separates real ability from someone who only memorised theory.
 - No preamble, no trailing commentary.${reqBlock}`;
   return [{ role: 'system', content: system }, { role: 'user', content: `Suggest interview topics for:\n\n${jdContext(job)}` }];
@@ -483,7 +548,7 @@ export async function suggestTopics(job, requirements = []) {
 export function localTopicSuggestions(job, requirements = []) {
   const reqs = dedupeReqs(requirements.length ? requirements : localRequirements(job));
   return reqs.slice(0, 6).map((r, i, all) => createTopicSuggestion({
-    name: r,
+    name: conciseRequirement(r, 8),
     type: i % 2 === 0 ? 'Experiential' : 'Theoretical',
     difficulty: i === 0 ? 'Easy' : i >= all.length - 1 ? 'Hard' : 'Medium',
     rationale: `Probes ${r.toLowerCase()} through applied scenarios — a prepared candidate can recite theory, but only real experience holds up when they have to reason about a concrete situation.`,
@@ -499,19 +564,31 @@ function buildRequirementMessages(job) {
 
 Return ONLY JSON (no markdown): {"requirements":["short competency phrase", ...]}
 Rules:
-- 5-7 items, each a short noun phrase (e.g. "Distributed systems design", "Stakeholder management") — NOT a sentence.
+- 5-7 items, each a short noun phrase copied or faithfully condensed from the source — NOT a sentence.
 - Specific and testable; skip soft fluff unless the role genuinely hinges on it.
+- Use only the supplied role/JD. The word "engineer" alone does not mean software; never add coding or system design unless the JD says so.
 - No preamble.`;
   return [{ role: 'system', content: system }, { role: 'user', content: jdContext(job) }];
 }
 
 function localRequirements(job) {
+  const must = dedupeReqs(arr(job.resumeCriteria?.mustHave));
   const good = dedupeReqs(arr(job.resumeCriteria?.goodToHave));
-  if (good.length) return good;
-  const a = roleArchetype(job);
-  if (a === 'engineering') return ['System design', 'Code quality', 'Debugging', 'Collaboration'];
-  if (a === 'product') return ['Product sense', 'Metrics & analytics', 'Prioritization', 'Stakeholder leadership'];
-  return ['Core competency', 'Problem solving', 'Communication'];
+  const configured = dedupeReqs([...must, ...good]);
+  if (configured.length) return configured;
+
+  // The offline path must remain role-specific without guessing an archetype
+  // from words such as "engineer" (which previously made a Civil Engineer get
+  // software-system-design questions). Use assessable clauses from the actual JD.
+  const description = clean(job.description);
+  const fromDescription = dedupeReqs(description
+    .split(/\n+|[.;]\s+/)
+    .map((line) => line.replace(/^\s*[-*\d.)]+\s*/, '').replace(/^(responsibilities|requirements|qualifications|skills)\s*:?\s*/i, '').trim())
+    .filter((line) => line.length >= 12 && line.length <= 180));
+  if (fromDescription.length) return fromDescription.slice(0, 7);
+
+  const role = clean(job.roleName) || clean(job.cardName) || 'this role';
+  return [`Practical experience performing the responsibilities of ${role}`];
 }
 
 export async function analyzeRequirements(job) {
@@ -534,7 +611,7 @@ Return ONLY JSON (no markdown), shape:
 
 Rules:
 - The question must concretely probe this requirement: "${requirement}".
-- prompt: ONE idea, conversational, speakable aloud — no compound multi-part questions.
+- prompt: ONE idea, conversational, speakable aloud, and at most ${VOICE_QUESTION_MAX_WORDS} words — no compound multi-part questions.
 - requiredPoints: 2-4, each with 2-5 lowercase keywords the evaluator matches on, weight 1-3.
 - redFlags: 1-2 realistic failure signals.
 - No preamble.`;
@@ -547,7 +624,10 @@ ${jdContext(job)}`;
 
 export async function generateGapQuestion(job, requirement) {
   const parsed = await callJson(buildGapMessages(job, requirement));
-  const qb = createQuestionBlueprint({ ...parsed, competency: clean(parsed?.competency) || requirement });
+  const qb = voiceSafeGeneratedQuestion(
+    createQuestionBlueprint({ ...parsed, competency: clean(parsed?.competency) || requirement }),
+    requirement,
+  );
   if (!qb.prompt) throw new Error('empty gap question');
   return qb;
 }
@@ -562,7 +642,7 @@ Return ONLY JSON (no markdown), shape:
 
 Rules:
 - Keep the SAME underlying competency: "${competency}".
-- prompt: a specific, realistic scenario, conversational, speakable aloud — applied, not definitional.
+- prompt: a specific, realistic scenario, conversational, speakable aloud, and at most ${VOICE_QUESTION_MAX_WORDS} words — applied, not definitional.
 - requiredPoints reward reasoning and judgment, not recall of a definition.
 - No preamble.`;
   const user = `Role: ${clean(job.roleName) || clean(job.cardName) || 'the role'}${job.experienceBand ? ` (${job.experienceBand})` : ''}
@@ -573,12 +653,13 @@ Rewrite it as an applied scenario.`;
 }
 
 export async function generateScenarioVariant(job, qb) {
+  const competency = clean(qb.competency) || clean(qb.prompt);
   const parsed = await callJson(buildScenarioMessages(job, qb));
-  const nb = createQuestionBlueprint({
+  const nb = voiceSafeGeneratedQuestion(createQuestionBlueprint({
     ...parsed,
     difficulty: oneOf(parsed?.difficulty, CONTRACT_DIFFICULTY, qb.difficulty),
     competency: clean(parsed?.competency) || qb.competency,
-  });
+  }), competency);
   if (!nb.prompt) throw new Error('empty scenario variant');
   return nb;
 }
@@ -597,7 +678,7 @@ Rules:
 - Keep the SAME underlying competency: "${competency}".
 - Calibrate the question, model answer, and rubric to "${target}" difficulty.
 - difficulty MUST be "${target}".
-- prompt: ONE idea, conversational, speakable aloud — no compound multi-part questions.
+- prompt: ONE idea, conversational, speakable aloud, and at most ${VOICE_QUESTION_MAX_WORDS} words — no compound multi-part questions.
 - No preamble.`;
   const user = `Role: ${clean(job.roleName) || clean(job.cardName) || 'the role'}${job.experienceBand ? ` (${job.experienceBand})` : ''}
 Current question: ${clean(qb.prompt)}
@@ -607,13 +688,14 @@ Rewrite it to be ${target} difficulty.`;
 }
 
 export async function generateDifficultyVariant(job, qb, target) {
+  const competency = clean(qb.competency) || clean(qb.prompt);
   const difficulty = oneOf(target, CONTRACT_DIFFICULTY, qb.difficulty);
   const parsed = await callJson(buildDifficultyMessages(job, qb, difficulty));
-  const nb = createQuestionBlueprint({
+  const nb = voiceSafeGeneratedQuestion(createQuestionBlueprint({
     ...parsed,
     difficulty,
     competency: clean(parsed?.competency) || qb.competency,
-  });
+  }), competency);
   if (!nb.prompt) throw new Error('empty difficulty variant');
   return nb;
 }
@@ -635,7 +717,14 @@ export function normalizeFunctionalBlueprint(parsed) {
     difficulty: t.difficulty,
     whyItMatters: t.whyItMatters,
     segue: t.segue,
-    questions: arr(t.questions).map((q) => createQuestionBlueprint(q)),
+    questions: arr(t.questions).map((q) => {
+      const question = createQuestionBlueprint(q);
+      const source = clean(question.targetRequirement) || clean(question.competency);
+      if (source && wordCount(question.prompt) > VOICE_QUESTION_MAX_WORDS) {
+        question.prompt = voiceQuestionForRequirement(source);
+      }
+      return question;
+    }),
   })).filter((t) => t.questions.length) };
   if (parsed?.interviewStructure) out.interviewStructure = normalizeInterviewStructure(parsed.interviewStructure);
   if (arr(parsed?.suggestedTopics).length) out.suggestedTopics = parsed.suggestedTopics.map((s) => createTopicSuggestion(s));
@@ -716,12 +805,18 @@ export function pinBlueprintToRequirements(job, functionalBlueprint, requirement
   functionalBlueprint.topics.forEach((t) => t.questions.forEach((q) => { if (q.targetRequirement) pinned.add(normReq(q.targetRequirement)); }));
   const uncovered = reqs.filter((r) => !pinned.has(normReq(r)));
   if (uncovered.length) {
-    let gapTopic = functionalBlueprint.topics.find((t) => t.name === 'Coverage gaps');
-    if (!gapTopic) { gapTopic = createTopic({ name: 'Coverage gaps', type: 'Experiential', difficulty: 'Medium', questions: [] }); functionalBlueprint.topics.push(gapTopic); }
     uncovered.forEach((req) => {
+      // A missing requirement is a real role topic, not a generic "Coverage
+      // gaps" interview section. Reuse a matching topic or create one named
+      // after the requirement itself.
+      let topic = functionalBlueprint.topics.find((t) => normReq(t.name) === normReq(req));
+      if (!topic) {
+        topic = createTopic({ name: conciseRequirement(req), type: 'Experiential', difficulty: 'Medium', questions: [] });
+        functionalBlueprint.topics.push(topic);
+      }
       const q = localGapQuestion(job, req);
       q.targetRequirement = req;
-      gapTopic.questions.push(q);
+      topic.questions.push(q);
     });
   }
   return functionalBlueprint;
@@ -867,9 +962,9 @@ export function runSheetMarkdown(job, functionalBlueprint) {
 // We bucket the free-text band into a tier, define a target profile per tier,
 // and report how the authored blueprint deviates from it.
 const TIER_PROFILE = {
-  junior: { label: 'Junior', difficulty: { Easy: 0.45, Medium: 0.45, Hard: 0.10 }, emphasize: ['technical_theory', 'behavioral'], note: 'fundamentals over depth' },
-  mid: { label: 'Mid-level', difficulty: { Easy: 0.20, Medium: 0.50, Hard: 0.30 }, emphasize: ['coding', 'case_study', 'technical_theory'], note: 'applied, hands-on depth' },
-  senior: { label: 'Senior', difficulty: { Easy: 0.10, Medium: 0.40, Hard: 0.50 }, emphasize: ['system_design', 'case_study'], note: 'architecture and trade-offs' },
+  junior: { label: 'Junior', difficulty: { Easy: 0.45, Medium: 0.45, Hard: 0.10 }, note: 'foundational knowledge and guided application' },
+  mid: { label: 'Mid-level', difficulty: { Easy: 0.20, Medium: 0.50, Hard: 0.30 }, note: 'independent, practical judgment' },
+  senior: { label: 'Senior', difficulty: { Easy: 0.10, Medium: 0.40, Hard: 0.50 }, note: 'complex decisions, constraints, and trade-offs' },
 };
 
 export function bandTier(experienceBand) {
@@ -887,7 +982,6 @@ export function computeBandFit(job, functionalBlueprint) {
   const n = questions.length;
   const actualCount: any = CONTRACT_DIFFICULTY.reduce((m: any, d) => { m[d] = questions.filter((q) => q.difficulty === d).length; return m; }, {});
   const targetCount: any = CONTRACT_DIFFICULTY.reduce((m: any, d) => { m[d] = Math.round((profile.difficulty[d] || 0) * n); return m; }, {});
-  const typeCounts: any = questions.reduce((m: any, q) => { m[q.questionType] = (m[q.questionType] || 0) + 1; return m; }, {});
 
   const recommendations = [];
   if (!clean(job.experienceBand)) {
@@ -900,11 +994,6 @@ export function computeBandFit(job, functionalBlueprint) {
     } else if (hardShare > targetHard + 0.2) {
       recommendations.push({ level: 'warn', message: `This may be too hard for a ${profile.label.toLowerCase()} band — ease some questions toward fundamentals.` });
     }
-    profile.emphasize.forEach((type) => {
-      if (!typeCounts[type]) {
-        recommendations.push({ level: tier === 'senior' && type === 'system_design' ? 'warn' : 'info', message: `No ${type.replace(/_/g, ' ')} questions — a ${profile.label.toLowerCase()} round should test ${profile.note}.` });
-      }
-    });
   }
 
   return { band: clean(job.experienceBand), tier, tierLabel: profile.label, note: profile.note, count: n, actualCount, targetCount, recommendations };
@@ -996,7 +1085,8 @@ export function toScreeningQuestions(screeningBlueprint) {
 
 // ── Keyless local fallback generators ───────────────────────────────────────
 // Used when the AI proxy is unavailable so Generate always yields a real,
-// rubric-bearing blueprint. Role-aware archetypes; rubrics are basic but valid.
+// rubric-bearing blueprint. Content comes only from the job's configured
+// requirements/JD; it never guesses a role family from the title.
 function lq(prompt, questionType, difficulty, competency, modelAnswer, required, redFlags) {
   return createQuestionBlueprint({
     prompt, questionType, difficulty, competency, modelAnswer,
@@ -1007,118 +1097,57 @@ function lq(prompt, questionType, difficulty, competency, modelAnswer, required,
   });
 }
 
-function roleArchetype(job) {
-  const s = `${job.roleName || ''} ${job.cardName || ''} ${job.description || ''}`.toLowerCase();
-  if (/develop|engineer|programmer|software|full.?stack|backend|front.?end|sde/.test(s)) return 'engineering';
-  if (/product manager|product owner|\bpm\b|product/.test(s)) return 'product';
-  return 'general';
-}
-
 export function localFunctionalBlueprint(job) {
-  const a = roleArchetype(job);
-  const T = (name, type, difficulty, questions) => createTopic({ name, type, difficulty, questions });
-  if (a === 'engineering') {
-    return { topics: [
-      T('System design', 'Theoretical', 'Hard', [
-        lq('Walk me through how you would design a service that needs to stay fast as traffic grows tenfold.', 'system_design', 'Hard', 'Scalability',
-          'Identifies bottlenecks, introduces caching and horizontal scaling, and reasons about data access patterns and trade-offs.',
-          [['Names a concrete bottleneck and fix', ['bottleneck', 'cache', 'scale'], 3], ['Reasons about trade-offs, not just tools', ['trade-off', 'consistency', 'latency'], 2]],
-          [['Lists technologies with no reasoning', 'medium']]),
-        lq('How do you keep data consistent across services when something fails mid-write?', 'system_design', 'Hard', 'Reliability',
-          'Discusses idempotency, retries, transactions or sagas, and how partial failures are recovered.',
-          [['Addresses partial-failure recovery', ['idempotent', 'retry', 'transaction'], 3], ['Names a concrete pattern (saga/outbox)', ['saga', 'outbox'], 2]],
-          [['Assumes failures never happen', 'high']]),
-      ]),
-      T('Coding & quality', 'Experiential', 'Medium', [
-        lq('Tell me about a tricky bug you tracked down. How did you isolate the root cause?', 'behavioral', 'Medium', 'Debugging',
-          'Describes a systematic approach — reproduction, narrowing, instrumentation — and the actual root cause, not just the symptom.',
-          [['Systematic isolation, not guessing', ['reproduce', 'isolate', 'logs'], 3], ['Found and fixed the root cause', ['root cause'], 2]],
-          [['Only describes the symptom', 'medium']]),
-        lq('How do you make sure your code is reliable before it ships?', 'technical_theory', 'Medium', 'Quality',
-          'Covers automated tests, review, and CI, and reasons about what is worth testing rather than chasing coverage numbers.',
-          [['Tests, review, and CI', ['test', 'review', 'ci'], 3], ['Judgment on what is worth testing', ['edge case', 'risk'], 2]],
-          [['Relies only on manual testing', 'medium']]),
-      ]),
-      T('Collaboration', 'Experiential', 'Medium', [
-        lq('Describe a time you disagreed with a teammate on a technical decision. What happened?', 'behavioral', 'Medium', 'Teamwork',
-          'Shows the disagreement was resolved with data and listening, and that the relationship stayed intact.',
-          [['Used evidence, not authority', ['data', 'evidence'], 3], ['Reached alignment professionally', ['align', 'listen'], 2]],
-          [['Frames it as winning an argument', 'medium']]),
-      ]),
-    ] };
-  }
-  if (a === 'product') {
-    return { topics: [
-      T('Product sense', 'Experiential', 'Medium', [
-        lq('Walk me through a product you shipped from zero to one. What was the riskiest assumption and how did you test it?', 'case_study', 'Medium', '0→1 ownership',
-          'Names a concrete product, isolates one riskiest assumption, and tests it cheaply before building, with a metric-based decision.',
-          [['Isolates a single riskiest assumption', ['assumption', 'risk'], 3], ['Tests cheaply before building', ['mvp', 'validate'], 3], ['Ties go/no-go to a metric', ['metric', 'threshold'], 2]],
-          [['Jumps to building with no validation', 'high'], ['Cannot name a specific assumption', 'medium']]),
-        lq('A feature has high engagement but low retention impact. How do you decide to invest or sunset it?', 'case_study', 'Medium', 'Prioritization',
-          'Separates vanity from impact metrics, ties the call to strategy, and proposes a test rather than a gut decision.',
-          [['Distinguishes engagement from impact', ['retention', 'impact'], 3], ['Decision tied to strategy or a metric', ['strategy', 'metric'], 2]],
-          [['Decides on gut feel alone', 'medium']]),
-      ]),
-      T('Metrics & analytics', 'Theoretical', 'Hard', [
-        lq('Daily active users are flat but revenue is up twenty percent. How would you diagnose what is happening?', 'technical_theory', 'Hard', 'Analytics',
-          'Segments the funnel, forms hypotheses, and identifies which metric mix could produce that pattern.',
-          [['Segments rather than guesses', ['segment', 'funnel'], 3], ['Forms testable hypotheses', ['hypothesis'], 2]],
-          [['Jumps to one explanation', 'medium']]),
-      ]),
-      T('Stakeholder leadership', 'Experiential', 'Medium', [
-        lq('Tell me about a time you had to align engineering and business stakeholders who wanted different things.', 'behavioral', 'Medium', 'Leadership',
-          'Shows listening, reframing around shared goals, and a concrete outcome.',
-          [['Reframed around shared goals', ['align', 'trade-off'], 3], ['Concrete outcome', ['outcome', 'shipped'], 2]],
-          [['Just escalated to a manager', 'medium']]),
-      ]),
-    ] };
-  }
-  return { topics: [
-    T('Core competency', 'Experiential', 'Medium', [
-      lq('Walk me through a project you are proud of. What was your specific contribution and the impact?', 'behavioral', 'Medium', 'Impact',
-        'Gives a concrete contribution, the reasoning behind decisions, and a measurable or clear impact.',
-        [['Specific personal contribution', ['my role', 'i built'], 3], ['Clear impact', ['impact', 'result'], 2]],
-        [['Only describes the team, not themselves', 'medium']]),
-      lq('Tell me about a time you had to learn something new quickly to get a job done.', 'behavioral', 'Easy', 'Adaptability',
-        'Shows proactive learning, a sensible approach, and a successful application under time pressure.',
-        [['Proactive, structured learning', ['learn', 'research'], 3], ['Applied it successfully', ['applied', 'delivered'], 2]],
-        [['Waited to be trained', 'low']]),
-    ]),
-    T('Problem solving', 'Theoretical', 'Medium', [
-      lq('Describe a hard problem in your domain and how you approached it.', 'case_study', 'Medium', 'Reasoning',
-        'Breaks the problem down, weighs options, and explains the chosen approach and its trade-offs.',
-        [['Breaks the problem into parts', ['decompose', 'approach'], 3], ['Weighs trade-offs', ['trade-off', 'option'], 2]],
-        [['No structured approach', 'medium']]),
-    ]),
-    T('Communication', 'Experiential', 'Easy', [
-      lq('How would you explain your work to someone outside your field?', 'behavioral', 'Easy', 'Communication',
-        'Translates jargon into plain language and structures the explanation for the audience.',
-        [['Plain language, no jargon', ['plain', 'simple'], 3], ['Structured for the listener', ['audience', 'structure'], 2]],
-        [['Stays heavy on jargon', 'low']]),
-    ]),
-  ] };
+  const role = clean(job.roleName) || clean(job.cardName) || 'this role';
+  const requirements = localRequirements(job).slice(0, 6);
+  const tier = bandTier(job.experienceBand);
+  const difficulty = tier === 'junior' ? 'Easy' : tier === 'senior' ? 'Hard' : 'Medium';
+  const topics = requirements.map((requirement) => {
+    const keywords = requirementKeywords(requirement);
+    const q = lq(
+      voiceQuestionForRequirement(requirement),
+      'case_study', difficulty, requirement,
+      `Provides a concrete first-hand example of ${requirement}, explains the candidate's own decisions and responsibilities, and gives a verifiable outcome relevant to the ${role} role.`,
+      [[`Demonstrates ${requirement} in a concrete example`, keywords.length ? keywords : ['example'], 3], ['Explains personal responsibility and outcome', ['responsibility', 'outcome', 'result'], 2]],
+      [['Gives only a generic or hypothetical answer with no relevant experience', 'medium']],
+    );
+    q.targetRequirement = requirement;
+    return createTopic({ name: conciseRequirement(requirement, 8), type: 'Experiential', difficulty, questions: [q] });
+  });
+  return { topics };
 }
 
 export function localScreeningQuestions(job) {
-  const cats = (job.screeningParams || []).map((c) => (c.category || '').toLowerCase());
-  const has = (k) => cats.some((c) => c.includes(k));
-  const qs = [
-    lq('To start, tell me a bit about your background and what you are working on right now.', 'hr_screening', 'Easy', 'Background',
-      'Gives a concise, relevant summary of experience tied to this kind of role.', [['Relevant, concise background', ['experience'], 2]], []),
-    lq('What interests you about this role and our company specifically?', 'hr_screening', 'Easy', 'Motivation',
-      'Shows genuine, specific interest rather than a generic answer.', [['Specific, genuine motivation', ['interested', 'because'], 2]], [['Generic answer that fits any job', 'low']]),
-  ];
-  if (has('compensation') || has('availability')) {
-    qs.push(lq('Could you share your notice period and your compensation expectations?', 'hr_screening', 'Easy', 'Logistics',
-      'Gives clear figures and timeline that fit the role band.', [['Clear notice and expectations', ['notice', 'ctc', 'salary'], 2]], []));
+  const role = clean(job.roleName) || clean(job.cardName) || 'this role';
+  const configured = arr(job.screeningParams).flatMap((category) =>
+    arr(category.params).map((param) => ({
+      category: clean(category.category) || clean(param.name) || 'Screening',
+      name: clean(param.name),
+      preferred: clean(param.preferredResponse),
+    })),
+  ).filter((item) => item.name);
+
+  const questions = configured.slice(0, 5).map((item) => lq(
+    `For the ${role} role, could you tell me about ${conciseRequirement(item.name, 8).toLowerCase()}?`,
+    'hr_screening', 'Easy', item.category,
+    item.preferred
+      ? `The candidate gives a clear answer that can be compared with the job's stated preference: ${item.preferred}.`
+      : `The candidate gives a clear, specific answer about ${item.name} for the ${role} role.`,
+    [[`Clearly addresses ${item.name}`, requirementKeywords(item.name), 2]],
+    [],
+  ));
+
+  if (!questions.length) {
+    const requirement = localRequirements(job)[0];
+    questions.push(lq(
+      `Please summarize the experience you have that is most relevant to ${requirement} for this ${role} role.`,
+      'hr_screening', 'Easy', requirement,
+      `The candidate gives specific evidence of experience relevant to ${requirement} and connects it to the ${role} role.`,
+      [[`Relevant evidence of ${requirement}`, requirementKeywords(requirement), 2]],
+      [],
+    ));
   }
-  if (has('location')) {
-    qs.push(lq('Where are you currently based, and are you open to the role’s location or work arrangement?', 'hr_screening', 'Easy', 'Location',
-      'States location and flexibility clearly.', [['Clear location and flexibility', ['based', 'relocate', 'remote'], 2]], []));
-  }
-  qs.push(lq('Tell me about a challenging situation in a previous role and how you handled it.', 'hr_screening', 'Easy', 'Fit',
-    'Gives a concrete situation and a constructive resolution.', [['Concrete situation and resolution', ['situation', 'resolved'], 2]], []));
-  return { questions: qs };
+  return { questions };
 }
 
 // Keyless fallback for gap → question: a valid, requirement-targeted question
@@ -1133,7 +1162,7 @@ export function localGapQuestion(job, requirement) {
   const req = clean(requirement) || 'this skill';
   const kw = requirementKeywords(req);
   return lq(
-    `Tell me about your hands-on experience with ${req}. Walk me through a concrete example and your specific role in it.`,
+    voiceQuestionForRequirement(req),
     'behavioral', 'Medium', req,
     `Gives a specific, first-hand example demonstrating ${req}, including the candidate's actual role, the decisions they made, and the outcome.`,
     [[`Concrete first-hand example of ${req}`, kw.length ? kw : ['example'], 3], ['Specific role and a measurable outcome', ['my role', 'result'], 2]],
@@ -1145,9 +1174,10 @@ export function localGapQuestion(job, requirement) {
 // applied case study while preserving its competency and difficulty.
 export function localScenarioVariant(qb) {
   const topic = clean(qb.competency) || 'the concept';
+  const spokenTopic = conciseRequirement(topic, 10);
   const kw = requirementKeywords(topic);
   return createQuestionBlueprint({
-    prompt: `Walk me through a real situation where you had to apply ${topic}. What was the context, what did you decide, and why?`,
+    prompt: `Describe a real situation where you applied ${spokenTopic}. What decision did you make?`,
     questionType: 'case_study',
     difficulty: oneOf(qb.difficulty, CONTRACT_DIFFICULTY, 'Medium'),
     competency: clean(qb.competency),
